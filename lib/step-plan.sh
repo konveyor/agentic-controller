@@ -37,10 +37,12 @@ step_plan() {
   ok "  2c. recipe ready (${recipe_kb}KB — skill + context + references baked in)"
 
   # ── 2d. Run goose (the LLM call) ──
-  info "  2d. running goose planner (reads complex files, writes PLAN.md)..."
+  local plan_turns
+  plan_turns=$(_calc_plan_turns "$RUN_DIR/detect.json" "$skill_dir")
+  info "  2d. running goose planner (max $plan_turns turns, based on project size)..."
   info "       this is the LLM step — may take 30-90s depending on model"
 
-  goose_run "$rendered_recipe" --max-turns 30 \
+  goose_run "$rendered_recipe" --max-turns "$plan_turns" \
     > "$out" || true
 
   # ── 2e. Validate PLAN.md ──
@@ -178,6 +180,88 @@ response:
       complex_count: { type: integer }
       summary:      { type: string }
 RECIPE_EOF
+}
+
+# ── Calculate plan turns from detect.json ──
+#
+# The plan step needs turns for:
+#   - reading build manifest          (~1 turn)
+#   - reading a reference             (~1 turn)
+#   - reading complex source files    (~1 turn each, max 5-8)
+#   - reading config files            (~1-2 turns)
+#   - thinking + writing PLAN.md      (~2-3 turns)
+#   - final_output                    (~1 turn)
+#
+# Formula:
+#   base        = 10 (covers manifest + reference + write + thinking + final)
+#   +1 per complex pattern (each needs a source file read)
+#   +2 if no matching reference (goose explores more)
+#   +1 per 50 source files (larger projects need more config reads)
+#   +3 if multi-language (>2 languages with files)
+#   clamped to [12, 50]
+#
+_calc_plan_turns() {
+  local detect="$1"
+  local skill_dir="$2"
+  local turns=10
+
+  # Complex patterns — each one likely needs goose to read a source file
+  local mdb ejb react_class py2_xrange
+  mdb=$(jq '.patterns.mdb_files // 0' "$detect")
+  ejb=$(jq '.patterns.ejb_files // 0' "$detect")
+  react_class=$(jq '.patterns.react_class_components // 0' "$detect")
+  py2_xrange=$(jq '.patterns.py2_xrange_files // 0' "$detect")
+
+  # Count distinct complex pattern types (not individual files)
+  local complex=0
+  (( mdb > 0 )) && complex=$((complex + mdb))           # each MDB is unique
+  (( ejb > 0 )) && complex=$((complex + 1))              # EJBs are similar, 1 read enough
+  (( react_class > 0 )) && complex=$((complex + 1))
+  (( py2_xrange > 0 )) && complex=$((complex + 1))
+  # Cap complex reads at 5 — draft-first handles the rest
+  (( complex > 5 )) && complex=5
+  turns=$((turns + complex))
+
+  # Check if a matching reference exists
+  local has_ref=false
+  if [[ -d "$skill_dir/references" ]]; then
+    local manifests
+    manifests=$(jq -c '.manifests' "$detect")
+    local files
+    files=$(jq -c '.files' "$detect")
+    # Java project + javaee reference?
+    if [[ "$(echo "$manifests" | jq '.pom_xml')" == "true" ]] && \
+       [[ -f "$skill_dir/references/javaee-quarkus.md" ]]; then
+      has_ref=true
+    fi
+    # Python project + python reference?
+    if (( $(echo "$files" | jq '.python // 0') > 0 )) && \
+       ls "$skill_dir/references/"*python* >/dev/null 2>&1; then
+      has_ref=true
+    fi
+  fi
+  if [[ "$has_ref" == "false" ]]; then
+    turns=$((turns + 2))
+  fi
+
+  # Project size — larger projects have more config files to read
+  # Use the primary language count, not total (avoids bower_components noise)
+  local primary_files
+  primary_files=$(jq '[.files | to_entries[] | .value] | sort | reverse | .[0] // 0' "$detect")
+  turns=$((turns + primary_files / 50))
+
+  # Multi-language project
+  local lang_count
+  lang_count=$(jq '[.files | to_entries[] | select(.value > 0)] | length' "$detect")
+  if (( lang_count > 2 )); then
+    turns=$((turns + 3))
+  fi
+
+  # Clamp
+  (( turns < 12 )) && turns=12
+  (( turns > 50 )) && turns=50
+
+  echo "$turns"
 }
 
 # ── Pre-gather context that goose would otherwise fetch via tool calls ──
