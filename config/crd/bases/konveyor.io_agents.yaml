@@ -102,7 +102,7 @@ spec:
                   x-kubernetes-validations:
                   - message: a parameter with a default value cannot be required
                     rule: '!(has(self.required) && self.required && has(self.default)
-                      && self.default != '''')'
+                      && size(self.default) > 0)'
                 type: array
                 x-kubernetes-list-map-keys:
                 - name
