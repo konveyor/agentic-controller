@@ -33,7 +33,7 @@ const (
 // AgentParam declares a typed parameter that an Agent accepts.
 // AgentRun supplies values for these parameters, which are injected as
 // KONVEYOR_PARAM_{NAME} env vars into the Sandbox.
-// +kubebuilder:validation:XValidation:rule="!(self.required && has(self.default) && self.default != ”)",message="a parameter with a default value cannot be required"
+// +kubebuilder:validation:XValidation:rule="!(has(self.required) && self.required && has(self.default) && self.default != '')",message="a parameter with a default value cannot be required"
 type AgentParam struct {
 	// Name is the parameter name. Will be uppercased and prefixed with
 	// KONVEYOR_PARAM_ when injected as an env var.
