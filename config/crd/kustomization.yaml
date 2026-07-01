@@ -1,0 +1,12 @@
+# This kustomization.yaml is not intended to be run by itself,
+# since it depends on service name and target namespace.
+# It should be run by config/default
+resources:
+- bases/konveyor.io_skillcards.yaml
+- bases/konveyor.io_skillcollections.yaml
+- bases/konveyor.io_llmproviders.yaml
+- bases/konveyor.io_agents.yaml
+- bases/konveyor.io_agentruns.yaml
+- bases/konveyor.io_agentplaybooks.yaml
+- bases/konveyor.io_agentplaybookruns.yaml
+#+kubebuilder:scaffold:crdkustomizeresource

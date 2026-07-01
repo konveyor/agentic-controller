@@ -76,11 +76,12 @@ to populate Hub-specific params (APP_ID, HUB_BASE_URL, etc.) for
 migration use cases.
 
 **AgentPlaybookRun** — A request to execute an AgentPlaybook. References an
-AgentPlaybook (or inlines the spec) and carries generic parameters. The
-controller orchestrates the execution: creates an AgentRun per phase,
-manages session and workspace PVCs, passes session IDs between
-phases, writes the plan guide, and handles cross-stage handoff.
-Tracks per-phase status (pending, running, completed, failed).
+AgentPlaybook (or inlines the spec) and carries generic parameters,
+model selections, and env/envFrom. The controller orchestrates the
+execution: creates an AgentRun per stage sequentially, all sharing the
+same target branch. Cross-stage continuity comes from committed handoff
+files (e.g. `.konveyor/handoff.md`). Tracks per-stage status (Pending,
+Running, Succeeded, Failed).
 
 ## Personas
 
