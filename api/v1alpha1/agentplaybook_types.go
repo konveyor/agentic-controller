@@ -95,7 +95,3 @@ type AgentPlaybookList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []AgentPlaybook `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&AgentPlaybook{}, &AgentPlaybookList{})
-}
