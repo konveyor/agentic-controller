@@ -4,5 +4,6 @@
 resources:
   - skillcard_maven_migration.yaml
   - skillcard_no_javax_imports.yaml
+  - skillcard_ejb_to_cdi.yaml
   - skillcollection_java_migration.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples

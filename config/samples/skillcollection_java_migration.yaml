@@ -9,3 +9,5 @@ spec:
       skillCardRef: maven-migration
     - name: no-javax-imports
       skillCardRef: no-javax-imports
+    - name: ejb-to-cdi
+      skillCardRef: ejb-to-cdi

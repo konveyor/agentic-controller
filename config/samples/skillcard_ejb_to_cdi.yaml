@@ -1,0 +1,16 @@
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: ejb-to-cdi
+spec:
+  image: quay.io/konveyor/skills/ejb-to-cdi:latest
+  displayName: EJB to CDI
+  version: "1.0.0"
+  description: Migrates EJB components to CDI managed beans.
+  type: skill
+  tags:
+    - java
+    - ejb
+    - cdi
+    - migration
+    - jakarta

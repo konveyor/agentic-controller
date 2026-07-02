@@ -1,0 +1,14 @@
+apiVersion: skillimage.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: ejb-to-cdi
+  version: "1.0.0"
+  description: Migrates EJB components to CDI managed beans.
+  tags:
+    - java
+    - ejb
+    - cdi
+    - migration
+    - jakarta
+spec:
+  prompt: SKILL.md
