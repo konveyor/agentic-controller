@@ -200,7 +200,8 @@ skill-build: skillctl ## Build all example skills into the local OCI store.
 skill-push: skill-build ## Build and push all example skills to the registry.
 	@for dir in $(SKILL_DIRS); do \
 		name=$$(basename "$${dir}") ;\
-		local_ref=$$($(SKILLCTL) list 2>/dev/null | grep "$${name}" | head -1 | awk '{print $$1 ":" $$2}') ;\
+		local_ref=$$($(SKILLCTL) list | grep -w "$${name}" | head -1 | awk '{print $$1 ":" $$2}') ;\
+		if [ -z "$${local_ref}" ]; then echo "ERROR: skill '$${name}' not found in local store" >&2; exit 1; fi ;\
 		echo "Tagging $${local_ref} -> $(SKILL_IMAGE):$${name}" ;\
 		"$(SKILLCTL)" tag "$${local_ref}" "$(SKILL_IMAGE):$${name}" ;\
 		echo "Pushing $(SKILL_IMAGE):$${name}" ;\

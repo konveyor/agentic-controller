@@ -46,21 +46,15 @@ Subagent delegation is a runtime concern — the agent runtime may
 spawn subagents internally but this is not modeled in the CRD.
 
 **AgentPlaybook** — A reusable playbook combining a high-level guide with
-an ordered sequence of stages. Each stage groups one or more phases
-that share session continuity. Each phase references its own Agent
-and is an independently-executed unit of work that runs in its own
-Sandbox, resuming the agent session from the previous phase via
-shared persistent storage (PVC). Phases within a stage can use
-different Agents (different skills, prompts) as long as they share
-the same underlying runtime for session resumption. Phase boundaries
-provide checkpoints — results can be inspected, a failed phase
-retried, or execution stopped early. Stages start with fresh agent
-context. Cross-stage continuity comes from the shared workspace PVC:
-each stage updates handoff files (e.g. PLAN.md tracking what's done
-and what remains) that the next stage's agent reads. The plan's guide
-provides ambient context (written as a context file in the workspace)
-so each agent understands where its work fits in the bigger picture.
-An AgentPlaybook is a template — creating one does not execute anything.
+an ordered sequence of stages. Each stage references an Agent and
+carries instructions. Stages execute sequentially, each getting a
+fresh agent session in its own Sandbox. Cross-stage continuity comes
+from committed handoff files on the shared target branch (e.g.
+`.konveyor/handoff.md`). The playbook's guide provides ambient context
+written as a file in the workspace so each agent understands where its
+work fits in the bigger picture. An AgentPlaybook is a template —
+creating one does not execute anything. A future enhancement may
+introduce phases within stages for session continuity via shared PVCs.
 
 **AgentRun** — A request to execute a single Agent with specific
 selections. References an Agent (or inlines the spec), selects which
@@ -145,11 +139,10 @@ service instance.
   set of providers and models available for execution.
 - An **AgentRun** references one **Agent** (or inlines it) and selects
   specific providers, models, and roles from the Agent's available set.
-- An **AgentPlaybook** organizes work into stages; each stage contains
-  one or more phases. Each phase references an **Agent** and carries
-  instructions.
+- An **AgentPlaybook** organizes work into stages. Each stage
+  references an **Agent** and carries instructions.
 - An **AgentPlaybookRun** references one **AgentPlaybook** (or inlines it)
-  and creates **AgentRun** CRs sequentially per phase.
+  and creates **AgentRun** CRs sequentially per stage.
 - At execution time, the plan's guide is written to the workspace as a
-  context file. Each phase's instructions are joined with the Agent's
+  context file. Each stage's instructions are joined with the Agent's
   prompt to form the full task for the agent runtime.

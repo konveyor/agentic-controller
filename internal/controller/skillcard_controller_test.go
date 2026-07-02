@@ -131,4 +131,46 @@ var _ = Describe("SkillCard Controller", func() {
 			Expect(k8sClient.Delete(ctx, sc)).To(Succeed())
 		})
 	})
+
+	Context("when a SkillCard image is updated", func() {
+		const (
+			name    = "sc-ctrl-image-update"
+			imageV1 = "quay.io/konveyor/skills:maven-v1"
+			imageV2 = "quay.io/konveyor/skills:maven-v2"
+		)
+
+		It("should update resolvedImage to the new image", func() {
+			sc := &konveyoriov1alpha1.SkillCard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: testNamespace,
+				},
+				Spec: konveyoriov1alpha1.SkillCardSpec{
+					Image: imageV1,
+				},
+			}
+			Expect(k8sClient.Create(ctx, sc)).To(Succeed())
+
+			key := types.NamespacedName{Name: name, Namespace: testNamespace}
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.SkillCard
+				g.Expect(k8sClient.Get(ctx, key, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.ResolvedImage).To(Equal(imageV1))
+			}, timeout, interval).Should(Succeed())
+
+			By("updating the image to v2")
+			var current konveyoriov1alpha1.SkillCard
+			Expect(k8sClient.Get(ctx, key, &current)).To(Succeed())
+			current.Spec.Image = imageV2
+			Expect(k8sClient.Update(ctx, &current)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.SkillCard
+				g.Expect(k8sClient.Get(ctx, key, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.ResolvedImage).To(Equal(imageV2))
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, sc)).To(Succeed())
+		})
+	})
 })

@@ -395,6 +395,67 @@ var _ = Describe("CRD Validation", func() {
 			Expect(k8sClient.Create(ctx, ap)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, ap)).To(Succeed())
 		})
+
+		It("should reject an AgentPlaybook with empty stages", func() {
+			ap := &konveyoriov1alpha1.AgentPlaybook{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ap-empty-stages-test",
+					Namespace: testNamespace,
+				},
+				Spec: konveyoriov1alpha1.AgentPlaybookSpec{
+					Guide:  "No stages here.",
+					Stages: []konveyoriov1alpha1.AgentPlaybookStage{},
+				},
+			}
+			err := k8sClient.Create(ctx, ap)
+			Expect(err).To(HaveOccurred())
+			Expect(errors.IsInvalid(err)).To(BeTrue(), fmt.Sprintf("expected Invalid error, got: %v", err))
+		})
+	})
+
+	// ── LLMProvider negative tests ─────────────────────────────────────
+	Context("LLMProvider negative", func() {
+		It("should reject an LLMProvider with empty endpoint", func() {
+			llm := &konveyoriov1alpha1.LLMProvider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "llm-empty-endpoint-test",
+					Namespace: testNamespace,
+				},
+				Spec: konveyoriov1alpha1.LLMProviderSpec{
+					Endpoint: "",
+					CredentialRef: konveyoriov1alpha1.LLMProviderCredentialRef{
+						SecretName: "creds",
+						Key:        "key",
+					},
+					Models: []konveyoriov1alpha1.LLMProviderModel{
+						{Name: "model", ContextWindow: 100000},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, llm)
+			Expect(err).To(HaveOccurred())
+			Expect(errors.IsInvalid(err)).To(BeTrue(), fmt.Sprintf("expected Invalid error, got: %v", err))
+		})
+
+		It("should reject an LLMProvider with empty models", func() {
+			llm := &konveyoriov1alpha1.LLMProvider{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "llm-empty-models-test",
+					Namespace: testNamespace,
+				},
+				Spec: konveyoriov1alpha1.LLMProviderSpec{
+					Endpoint: "https://api.example.com",
+					CredentialRef: konveyoriov1alpha1.LLMProviderCredentialRef{
+						SecretName: "creds",
+						Key:        "key",
+					},
+					Models: []konveyoriov1alpha1.LLMProviderModel{},
+				},
+			}
+			err := k8sClient.Create(ctx, llm)
+			Expect(err).To(HaveOccurred())
+			Expect(errors.IsInvalid(err)).To(BeTrue(), fmt.Sprintf("expected Invalid error, got: %v", err))
+		})
 	})
 
 	// ── AgentPlaybookRun ───────────────────────────────────────────────

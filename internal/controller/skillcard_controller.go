@@ -30,11 +30,6 @@ import (
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 )
 
-const (
-	// ConditionTypeReady indicates whether the resource is ready.
-	ConditionTypeReady = "Ready"
-)
-
 // SkillCardReconciler reconciles a SkillCard object.
 type SkillCardReconciler struct {
 	client.Client
@@ -58,7 +53,7 @@ func (r *SkillCardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	logger.Info("Reconciling SkillCard", "name", skillCard.Name)
+	logger.V(1).Info("Reconciling SkillCard", "name", skillCard.Name)
 
 	// Track the original status for comparison.
 	original := skillCard.DeepCopy()
@@ -73,6 +68,15 @@ func (r *SkillCardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		r.reconcileSource(&skillCard)
 	case skillCard.Spec.Inline != "":
 		r.reconcileInline(&skillCard)
+	default:
+		skillCard.Status.ResolvedImage = ""
+		meta.SetStatusCondition(&skillCard.Status.Conditions, metav1.Condition{
+			Type:               ConditionTypeReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: skillCard.Generation,
+			Reason:             "NoSourceConfigured",
+			Message:            "No image, source, or inline content is set",
+		})
 	}
 
 	// Patch status if changed.

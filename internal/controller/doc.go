@@ -16,3 +16,8 @@ limitations under the License.
 
 // Package controller implements the reconciliation logic for konveyor.io CRDs.
 package controller
+
+const (
+	// ConditionTypeReady indicates whether the resource is ready.
+	ConditionTypeReady = "Ready"
+)

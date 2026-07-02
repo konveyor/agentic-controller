@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -60,7 +61,7 @@ func (r *SkillCollectionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	logger.Info("Reconciling SkillCollection", "name", collection.Name)
+	logger.V(1).Info("Reconciling SkillCollection", "name", collection.Name)
 
 	original := collection.DeepCopy()
 	collection.Status.ObservedGeneration = collection.Generation
@@ -100,7 +101,7 @@ func (r *SkillCollectionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	} else {
 		message := fmt.Sprintf("%d of %d skills resolved", readyCount, totalSkills)
 		if len(notReadyReasons) > 0 {
-			message = fmt.Sprintf("%s: %s", message, notReadyReasons[0])
+			message = fmt.Sprintf("%s: %s", message, strings.Join(notReadyReasons, "; "))
 		}
 		meta.SetStatusCondition(&collection.Status.Conditions, metav1.Condition{
 			Type:               ConditionTypeReady,
