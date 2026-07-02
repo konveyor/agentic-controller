@@ -3,7 +3,7 @@ kind: SkillCard
 metadata:
   name: no-javax-imports
 spec:
-  image: quay.io/konveyor/skills/no-javax-imports:latest
+  image: quay.io/konveyor/skills:no-javax-imports
   displayName: No javax Imports
   version: "1.0.0"
   description: Enforces that no javax.* imports remain after migration.

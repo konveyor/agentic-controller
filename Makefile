@@ -177,8 +177,7 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 ##@ Skills
 
-SKILL_REGISTRY ?= quay.io
-SKILL_REGISTRY_ORG ?= konveyor
+SKILL_IMAGE ?= quay.io/konveyor/skills
 SKILL_DIRS := $(wildcard skills/examples/*/skill.yaml)
 SKILL_DIRS := $(dir $(SKILL_DIRS))
 SKILLCTL_VERSION ?= v0.7.2
@@ -202,11 +201,10 @@ skill-push: skill-build ## Build and push all example skills to the registry.
 	@for dir in $(SKILL_DIRS); do \
 		name=$$(basename "$${dir}") ;\
 		local_ref=$$($(SKILLCTL) list 2>/dev/null | grep "$${name}" | head -1 | awk '{print $$1 ":" $$2}') ;\
-		remote=$(SKILL_REGISTRY)/$(SKILL_REGISTRY_ORG)/skills/$${name} ;\
-		echo "Tagging $${local_ref} -> $${remote}:latest" ;\
-		"$(SKILLCTL)" tag "$${local_ref}" "$${remote}:latest" ;\
-		echo "Pushing $${remote}:latest" ;\
-		"$(SKILLCTL)" push "$${remote}:latest" ;\
+		echo "Tagging $${local_ref} -> $(SKILL_IMAGE):$${name}" ;\
+		"$(SKILLCTL)" tag "$${local_ref}" "$(SKILL_IMAGE):$${name}" ;\
+		echo "Pushing $(SKILL_IMAGE):$${name}" ;\
+		"$(SKILLCTL)" push "$(SKILL_IMAGE):$${name}" ;\
 	done
 
 ##@ Dependencies

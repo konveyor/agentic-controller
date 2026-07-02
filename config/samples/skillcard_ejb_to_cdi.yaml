@@ -3,7 +3,7 @@ kind: SkillCard
 metadata:
   name: ejb-to-cdi
 spec:
-  image: quay.io/konveyor/skills/ejb-to-cdi:latest
+  image: quay.io/konveyor/skills:ejb-to-cdi
   displayName: EJB to CDI
   version: "1.0.0"
   description: Migrates EJB components to CDI managed beans.
