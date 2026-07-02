@@ -3,16 +3,9 @@ name: Build and Push Skills
 on:
   push:
     branches: [main]
-    paths:
-      - 'skills/examples/**'
   workflow_dispatch: {}
 
 permissions: {}
-
-env:
-  REGISTRY: quay.io
-  REGISTRY_ORG: konveyor
-  SKILLCTL_VERSION: v0.7.2
 
 jobs:
   build-and-push:
@@ -20,15 +13,6 @@ jobs:
       contents: read
     name: Build and push skill images
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        skill:
-          - name: maven-migration
-            path: skills/examples/maven-migration
-          - name: no-javax-imports
-            path: skills/examples/no-javax-imports
-          - name: ejb-to-cdi
-            path: skills/examples/ejb-to-cdi
     steps:
       - name: Clone the code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -40,31 +24,12 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install skillctl
-        run: go install github.com/redhat-et/skillimage/cmd/skillctl@${{ env.SKILLCTL_VERSION }}
-
       - name: Log in to Quay.io
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: quay.io
           username: ${{ vars.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
-      - name: Build and tag skill
-        run: |
-          skillctl build ${{ matrix.skill.path }}
-          IMAGE=${{ env.REGISTRY }}/${{ env.REGISTRY_ORG }}/skills/${{ matrix.skill.name }}
-          LOCAL_REF=$(skillctl list --no-trunc 2>/dev/null | grep '${{ matrix.skill.name }}' | awk '{print $1}') || true
-          if [ -z "${LOCAL_REF}" ]; then
-            LOCAL_REF=$(skillctl list 2>/dev/null | tail -1 | awk '{print $1}')
-          fi
-          echo "LOCAL_REF=${LOCAL_REF}"
-          echo "IMAGE=${IMAGE}"
-          skillctl tag "${LOCAL_REF}" "${IMAGE}:latest"
-          skillctl tag "${LOCAL_REF}" "${IMAGE}:${{ github.sha }}"
-
-      - name: Push skill
-        run: |
-          IMAGE=${{ env.REGISTRY }}/${{ env.REGISTRY_ORG }}/skills/${{ matrix.skill.name }}
-          skillctl push ${IMAGE}:latest
-          skillctl push ${IMAGE}:${{ github.sha }}
+      - name: Build and push skills
+        run: make skill-push
