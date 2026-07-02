@@ -2,6 +2,7 @@ apiVersion: skillimage.io/v1alpha1
 kind: SkillCard
 metadata:
   name: ejb-to-cdi
+  namespace: konveyor
   version: "1.0.0"
   description: Migrates EJB components to CDI managed beans.
   tags:

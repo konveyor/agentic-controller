@@ -2,6 +2,7 @@ apiVersion: skillimage.io/v1alpha1
 kind: SkillCard
 metadata:
   name: no-javax-imports
+  namespace: konveyor
   version: "1.0.0"
   description: Enforces that no javax.* imports remain after migration.
   tags:
