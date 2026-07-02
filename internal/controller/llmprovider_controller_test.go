@@ -194,7 +194,7 @@ var _ = Describe("LLMProvider Controller", func() {
 			job.Status.StartTime = &now
 			job.Status.CompletionTime = &now
 			job.Status.Conditions = append(job.Status.Conditions,
-				batchv1.JobCondition{Type: "SuccessCriteriaMet", Status: corev1.ConditionTrue},
+				batchv1.JobCondition{Type: jobConditionSuccessCriteriaMet, Status: corev1.ConditionTrue},
 				batchv1.JobCondition{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
 			)
 			Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())

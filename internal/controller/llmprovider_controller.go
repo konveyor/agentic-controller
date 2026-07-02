@@ -215,9 +215,9 @@ func (r *LLMProviderReconciler) createVerificationJob(
 			Name:      jobName,
 			Namespace: provider.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "agentic-controller",
-				"app.kubernetes.io/component":  "llm-verification",
-				"konveyor.io/llmprovider":      provider.Name,
+				labelManagedBy:                managedByLabel,
+				"app.kubernetes.io/component": "llm-verification",
+				"konveyor.io/llmprovider":     provider.Name,
 			},
 		},
 		Spec: batchv1.JobSpec{

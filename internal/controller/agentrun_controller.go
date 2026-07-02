@@ -32,7 +32,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
@@ -48,6 +50,9 @@ const (
 
 	// sandboxFinishedReasonSucceeded is the Sandbox condition reason for success.
 	sandboxFinishedReasonSucceeded = "Succeeded"
+
+	// agentRunRefIndexField is the field index for looking up AgentRuns by agentRef.
+	agentRunRefIndexField = ".spec.agentRef"
 )
 
 // AgentRunReconciler reconciles an AgentRun object.
@@ -65,10 +70,11 @@ type AgentRunReconciler struct {
 // Reconcile handles AgentRun reconciliation.
 //
 // The controller:
-// 1. Validates params against Agent declarations
-// 2. Resolves skills to OCI image refs
-// 3. Creates a Sandbox CR with the agent image, skills, env, and workspace
-// 4. Watches the Sandbox to completion and updates AgentRun status
+// 1. Checks that the referenced Agent exists and is Ready
+// 2. Validates params and model selections against Agent declarations
+// 3. Resolves skills to OCI image refs (fails if any are unresolvable)
+// 4. Creates a Sandbox CR with the agent image, skills, env, and workspace
+// 5. Watches the Sandbox to completion and updates AgentRun status
 func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -106,6 +112,19 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
+	// Check that the Agent is Ready before proceeding.
+	agentReady := meta.FindStatusCondition(agent.Status.Conditions, ConditionTypeReady)
+	if agentReady == nil || agentReady.Status != metav1.ConditionTrue {
+		meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
+			Type:               ConditionTypeReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: run.Generation,
+			Reason:             "AgentNotReady",
+			Message:            fmt.Sprintf("Agent %q is not Ready", run.Spec.AgentRef),
+		})
+		return r.patchRunStatus(ctx, &run, original)
+	}
+
 	// Validate params against Agent declarations.
 	if err := r.validateParams(&run, &agent); err != nil {
 		run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
@@ -119,17 +138,30 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.patchRunStatus(ctx, &run, original)
 	}
 
+	// Validate model selections against Agent's available providers.
+	if err := r.validateModels(&run, &agent); err != nil {
+		run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
+		meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
+			Type:               ConditionTypeReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: run.Generation,
+			Reason:             "InvalidModels",
+			Message:            err.Error(),
+		})
+		return r.patchRunStatus(ctx, &run, original)
+	}
+
 	// If no Sandbox exists yet, create one.
 	if run.Status.SandboxName == "" {
 		sandboxName, err := r.createSandbox(ctx, &run, &agent)
 		if err != nil {
-			logger.Error(err, "Failed to create Sandbox")
+			logger.Error(err, "Failed to create Sandbox", "agentRun", run.Name, "agent", agent.Name)
 			meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
 				Type:               ConditionTypeReady,
 				Status:             metav1.ConditionFalse,
 				ObservedGeneration: run.Generation,
 				Reason:             "SandboxCreationFailed",
-				Message:            err.Error(),
+				Message:            fmt.Sprintf("Failed to create Sandbox for Agent %q: %v", agent.Name, err),
 			})
 			return r.patchRunStatus(ctx, &run, original)
 		}
@@ -201,6 +233,25 @@ func (r *AgentRunReconciler) validateParams(
 	return nil
 }
 
+// validateModels checks that model selections reference providers in the
+// Agent's available set.
+func (r *AgentRunReconciler) validateModels(
+	run *konveyoriov1alpha1.AgentRun,
+	agent *konveyoriov1alpha1.Agent,
+) error {
+	providerSet := make(map[string]bool)
+	for _, p := range agent.Spec.Providers {
+		providerSet[p.Ref] = true
+	}
+	for _, m := range run.Spec.Models {
+		if !providerSet[m.Provider] {
+			return fmt.Errorf("model selection references provider %q which is not in Agent %q providers",
+				m.Provider, agent.Name)
+		}
+	}
+	return nil
+}
+
 // createSandbox creates the Sandbox CR, the ACP secret key Secret,
 // and returns the Sandbox name.
 func (r *AgentRunReconciler) createSandbox(
@@ -222,6 +273,10 @@ func (r *AgentRunReconciler) createSandbox(
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      secretName,
 			Namespace: run.Namespace,
+			Labels: map[string]string{
+				labelManagedBy:         managedByLabel,
+				"konveyor.io/agentrun": run.Name,
+			},
 		},
 		StringData: map[string]string{
 			"secret-key": secretKey,
@@ -237,11 +292,17 @@ func (r *AgentRunReconciler) createSandbox(
 	// Update the run status with the secret ref.
 	run.Status.SecretKeyRef = &corev1.LocalObjectReference{Name: secretName}
 
-	// Build env vars: KONVEYOR_PARAM_* from params + ACP secret key.
-	env := r.buildEnvVars(run, agent, secretName)
+	// Build env vars: KONVEYOR_PARAM_* from params + ACP secret key + LLM credentials.
+	env, err := r.buildEnvVars(ctx, run, agent, secretName)
+	if err != nil {
+		return "", fmt.Errorf("building env vars: %w", err)
+	}
 
 	// Resolve skill images for ImageVolumes.
-	volumes, volumeMounts := r.resolveSkillVolumes(ctx, agent, run.Namespace)
+	volumes, volumeMounts, err := r.resolveSkillVolumes(ctx, agent, run.Namespace)
+	if err != nil {
+		return "", fmt.Errorf("resolving skill volumes: %w", err)
+	}
 
 	// Add workspace EmptyDir.
 	volumes = append(volumes, corev1.Volume{
@@ -264,10 +325,10 @@ func (r *AgentRunReconciler) createSandbox(
 			Name:      sandboxName,
 			Namespace: run.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "agentic-controller",
-				"app.kubernetes.io/component":  "agent-sandbox",
-				"konveyor.io/agentrun":         run.Name,
-				"konveyor.io/agent":            agent.Name,
+				labelManagedBy:                managedByLabel,
+				"app.kubernetes.io/component": "agent-sandbox",
+				"konveyor.io/agentrun":        run.Name,
+				"konveyor.io/agent":           agent.Name,
 			},
 		},
 		Spec: sandboxv1beta1.SandboxSpec{
@@ -302,10 +363,11 @@ func (r *AgentRunReconciler) createSandbox(
 
 // buildEnvVars constructs the full env var list for the Sandbox container.
 func (r *AgentRunReconciler) buildEnvVars(
+	ctx context.Context,
 	run *konveyoriov1alpha1.AgentRun,
 	agent *konveyoriov1alpha1.Agent,
-	secretName string,
-) []corev1.EnvVar {
+	acpSecretName string,
+) ([]corev1.EnvVar, error) {
 	var env []corev1.EnvVar
 
 	// Build KONVEYOR_PARAM_* env vars from params (supplied values
@@ -332,7 +394,7 @@ func (r *AgentRunReconciler) buildEnvVars(
 		Name: "GOOSE_SERVER__SECRET_KEY",
 		ValueFrom: &corev1.EnvVarSource{
 			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+				LocalObjectReference: corev1.LocalObjectReference{Name: acpSecretName},
 				Key:                  "secret-key",
 			},
 		},
@@ -354,36 +416,59 @@ func (r *AgentRunReconciler) buildEnvVars(
 		})
 	}
 
-	// Model selections.
+	// Model selections and LLM credential mounting.
 	for _, m := range run.Spec.Models {
 		prefix := "KONVEYOR_MODEL_" + strings.ToUpper(m.Role) + "_"
 		env = append(env,
 			corev1.EnvVar{Name: prefix + "PROVIDER", Value: m.Provider},
 			corev1.EnvVar{Name: prefix + "MODEL", Value: m.Model},
 		)
+
+		// Mount the LLM provider's credential Secret.
+		var provider konveyoriov1alpha1.LLMProvider
+		providerKey := types.NamespacedName{Namespace: run.Namespace, Name: m.Provider}
+		if err := r.Get(ctx, providerKey, &provider); err != nil {
+			return nil, fmt.Errorf("looking up LLMProvider %q for model role %q: %w",
+				m.Provider, m.Role, err)
+		}
+		env = append(env, corev1.EnvVar{
+			Name: prefix + "API_KEY",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: provider.Spec.CredentialRef.SecretName,
+					},
+					Key: provider.Spec.CredentialRef.Key,
+				},
+			},
+		})
 	}
 
 	// Pass through user-specified env vars.
 	env = append(env, run.Spec.Env...)
 
-	return env
+	return env, nil
 }
 
 // resolveSkillVolumes resolves SkillCard and SkillCollection refs to
 // ImageVolume specs. Each resolved skill is mounted at
-// /opt/skills/{name}/.
+// /opt/skills/{name}/. Returns an error if any skill cannot be resolved.
 func (r *AgentRunReconciler) resolveSkillVolumes(
 	ctx context.Context,
 	agent *konveyoriov1alpha1.Agent,
 	namespace string,
-) ([]corev1.Volume, []corev1.VolumeMount) {
-	logger := log.FromContext(ctx)
+) ([]corev1.Volume, []corev1.VolumeMount, error) {
 	var volumes []corev1.Volume
 	var mounts []corev1.VolumeMount
+	var errs []string
 	seen := make(map[string]bool) // deduplicate by skill name
 
 	addSkill := func(name, image string) {
-		if seen[name] || image == "" {
+		if seen[name] {
+			return
+		}
+		if image == "" {
+			errs = append(errs, fmt.Sprintf("skill %q has no resolved image", name))
 			return
 		}
 		seen[name] = true
@@ -407,7 +492,7 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 	for _, ref := range agent.Spec.SkillCards {
 		var sc konveyoriov1alpha1.SkillCard
 		if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Ref}, &sc); err != nil {
-			logger.Error(err, "Failed to get SkillCard for volume mount", "skillCard", ref.Ref)
+			errs = append(errs, fmt.Sprintf("SkillCard %q: %v", ref.Ref, err))
 			continue
 		}
 		addSkill(sc.Name, sc.Status.ResolvedImage)
@@ -417,7 +502,7 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 	for _, ref := range agent.Spec.SkillCollections {
 		var scol konveyoriov1alpha1.SkillCollection
 		if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: ref.Ref}, &scol); err != nil {
-			logger.Error(err, "Failed to get SkillCollection for volume mount", "skillCollection", ref.Ref)
+			errs = append(errs, fmt.Sprintf("SkillCollection %q: %v", ref.Ref, err))
 			continue
 		}
 		for _, skillRef := range scol.Spec.Skills {
@@ -425,7 +510,8 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 			case skillRef.SkillCardRef != "":
 				var sc konveyoriov1alpha1.SkillCard
 				if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: skillRef.SkillCardRef}, &sc); err != nil {
-					logger.Error(err, "Failed to get SkillCard from collection", "skillCard", skillRef.SkillCardRef)
+					errs = append(errs, fmt.Sprintf("SkillCard %q (from collection %q): %v",
+						skillRef.SkillCardRef, ref.Ref, err))
 					continue
 				}
 				addSkill(skillRef.Name, sc.Status.ResolvedImage)
@@ -435,7 +521,11 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 		}
 	}
 
-	return volumes, mounts
+	if len(errs) > 0 {
+		return nil, nil, fmt.Errorf("skill resolution failed: %s", strings.Join(errs, "; "))
+	}
+
+	return volumes, mounts, nil
 }
 
 // updatePhaseFromSandbox updates the AgentRun phase based on the Sandbox status.
@@ -498,7 +588,8 @@ func (r *AgentRunReconciler) patchRunStatus(
 	original *konveyoriov1alpha1.AgentRun,
 ) (ctrl.Result, error) {
 	if err := r.Status().Patch(ctx, run, client.MergeFrom(original)); err != nil {
-		log.FromContext(ctx).Error(err, "Failed to patch AgentRun status")
+		log.FromContext(ctx).Error(err, "Failed to patch AgentRun status",
+			"agentRun", run.Name)
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
@@ -515,10 +606,66 @@ func generateSecretKey() (string, error) {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AgentRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Index AgentRuns by agentRef for efficient reverse lookup when
+	// an Agent changes.
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&konveyoriov1alpha1.AgentRun{},
+		agentRunRefIndexField,
+		func(obj client.Object) []string {
+			run := obj.(*konveyoriov1alpha1.AgentRun)
+			return []string{run.Spec.AgentRef}
+		},
+	); err != nil {
+		return fmt.Errorf("indexing %s: %w", agentRunRefIndexField, err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&konveyoriov1alpha1.AgentRun{}).
 		Owns(&sandboxv1beta1.Sandbox{}).
 		Owns(&corev1.Secret{}).
+		Watches(
+			&konveyoriov1alpha1.Agent{},
+			handler.EnqueueRequestsFromMapFunc(r.findRunsForAgent),
+		).
 		Named("agentrun").
 		Complete(r)
+}
+
+// findRunsForAgent returns reconcile requests for all non-terminal AgentRuns
+// that reference the given Agent.
+func (r *AgentRunReconciler) findRunsForAgent(
+	ctx context.Context,
+	obj client.Object,
+) []reconcile.Request {
+	agent, ok := obj.(*konveyoriov1alpha1.Agent)
+	if !ok {
+		return nil
+	}
+
+	var runList konveyoriov1alpha1.AgentRunList
+	if err := r.List(ctx, &runList,
+		client.InNamespace(agent.Namespace),
+		client.MatchingFields{agentRunRefIndexField: agent.Name},
+	); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list AgentRuns for Agent", "agent", agent.Name)
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, run := range runList.Items {
+		// Only re-reconcile non-terminal runs.
+		if run.Status.Phase == konveyoriov1alpha1.AgentRunPhaseSucceeded ||
+			run.Status.Phase == konveyoriov1alpha1.AgentRunPhaseFailed {
+			continue
+		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: run.Namespace,
+				Name:      run.Name,
+			},
+		})
+	}
+
+	return requests
 }

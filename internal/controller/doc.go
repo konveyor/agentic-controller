@@ -20,4 +20,14 @@ package controller
 const (
 	// ConditionTypeReady indicates whether the resource is ready.
 	ConditionTypeReady = "Ready"
+
+	// labelManagedBy is the standard Kubernetes label key for managed-by.
+	labelManagedBy = "app.kubernetes.io/managed-by"
+
+	// managedByLabel is the value used for app.kubernetes.io/managed-by labels.
+	managedByLabel = "agentic-controller"
+
+	// jobConditionSuccessCriteriaMet is the K8s 1.36+ condition required
+	// alongside JobComplete for valid Job status updates.
+	jobConditionSuccessCriteriaMet = "SuccessCriteriaMet"
 )
