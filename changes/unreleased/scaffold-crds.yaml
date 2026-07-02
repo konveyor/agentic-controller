@@ -1,0 +1,5 @@
+kind: feature
+description: >
+  Defined Agent, AgentRun, AgentPlaybook, AgentPlaybookRun, SkillCard,
+  SkillCollection, and LLMProvider CRDs with CEL validation, immutability
+  rules, and printer columns.

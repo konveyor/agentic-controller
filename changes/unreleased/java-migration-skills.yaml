@@ -1,0 +1,4 @@
+kind: feature
+description: >
+  Shipped maven-migration, no-javax-imports, and ejb-to-cdi example
+  SkillCards with a java-migration-skills SkillCollection.

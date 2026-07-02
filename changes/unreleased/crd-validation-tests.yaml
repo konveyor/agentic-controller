@@ -1,0 +1,4 @@
+kind: feature
+description: >
+  Added envtest integration tests validating admission rules for all
+  seven CRD types.

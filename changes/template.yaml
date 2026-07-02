@@ -1,0 +1,21 @@
+# Changelog Fragment Template
+#
+# Copy this file to changes/unreleased/<pr-number>-<short-description>.yaml
+# and fill in the fields below.
+#
+# Example: changes/unreleased/42-add-agent-status.yaml
+
+# kind is one of:
+#   - feature      (new functionality)
+#   - bugfix       (bug fix)
+#   - enhancement  (improvement to existing functionality)
+#   - deprecation  (deprecated functionality)
+#   - breaking     (breaking change)
+kind: ""
+
+# A concise description of the change, written as a single sentence.
+# This will appear as a bullet point in the CHANGELOG.
+# Use the YAML '>' operator to write across multiple lines
+# while keeping it as a single paragraph.
+description: >
+  Describe your change here.

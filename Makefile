@@ -208,6 +208,24 @@ skill-push: skill-build ## Build and push all example skills to the registry.
 		"$(SKILLCTL)" push "$(SKILL_IMAGE):$${name}" ;\
 	done
 
+##@ Changelog
+
+.PHONY: changelog-validate
+changelog-validate: yq ## Validate changelog fragments are well-formed.
+	YQ="$(YQ)" hack/changelog.sh validate
+
+.PHONY: changelog-create
+changelog-create: yq ## Create a changelog fragment. Usage: make changelog-create NAME=42-fix-auth KIND=bugfix
+	YQ="$(YQ)" hack/changelog.sh create "$(NAME)" "$(KIND)"
+
+.PHONY: changelog-assemble
+changelog-assemble: yq ## Assemble changelog fragments into CHANGELOG.md. Usage: make changelog-assemble VERSION=v0.1.0
+	YQ="$(YQ)" hack/changelog.sh assemble "$(VERSION)"
+
+.PHONY: changelog-draft
+changelog-draft: yq ## Assemble changelog fragments as "Unreleased" without deleting fragments.
+	YQ="$(YQ)" hack/changelog.sh assemble --draft
+
 ##@ Dependencies
 
 ## Location to install dependencies to
@@ -222,8 +240,10 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+YQ ?= $(LOCALBIN)/yq
 
 ## Tool Versions
+YQ_VERSION ?= v4.45.4
 KUSTOMIZE_VERSION ?= v5.8.1
 CONTROLLER_TOOLS_VERSION ?= v0.21.0
 
@@ -260,6 +280,11 @@ setup-envtest: envtest ## Download the binaries required for ENVTEST in the loca
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+.PHONY: yq
+yq: $(YQ) ## Download yq locally if necessary.
+$(YQ): $(LOCALBIN)
+	$(call go-install-tool,$(YQ),github.com/mikefarah/yq/v4,$(YQ_VERSION))
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.

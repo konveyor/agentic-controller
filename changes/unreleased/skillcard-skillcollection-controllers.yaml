@@ -1,0 +1,4 @@
+kind: feature
+description: >
+  Added SkillCard and SkillCollection controllers that reconcile image
+  resolution and aggregate readiness with field-indexed lookups.
