@@ -1,0 +1,58 @@
+name: Build and Push Skills
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'skills/examples/**'
+  workflow_dispatch: {}
+
+permissions: {}
+
+env:
+  REGISTRY: quay.io
+  REGISTRY_ORG: konveyor
+  SKILLCTL_VERSION: v0.7.2
+
+jobs:
+  build-and-push:
+    permissions:
+      contents: read
+    name: Build and push skill images
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        skill:
+          - name: maven-migration
+            path: skills/examples/maven-migration
+          - name: no-javax-imports
+            path: skills/examples/no-javax-imports
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install skillctl
+        run: go install github.com/redhat-et/skillimage/cmd/skillctl@${{ env.SKILLCTL_VERSION }}
+
+      - name: Log in to Quay.io
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Build skill
+        run: skillctl build ${{ matrix.skill.path }}
+
+      - name: Push skill
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ env.REGISTRY_ORG }}/skills/${{ matrix.skill.name }}
+          skillctl push ${IMAGE}:latest
+          skillctl push ${IMAGE}:${{ github.sha }}
