@@ -143,8 +143,23 @@ func (r *SkillCollectionReconciler) checkSkillCardRef(
 	return true, ""
 }
 
+const (
+	// skillCardRefIndexField is the field index key for looking up
+	// SkillCollections by their skillCardRef values.
+	skillCardRefIndexField = ".spec.skills.skillCardRef"
+)
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *SkillCollectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&konveyoriov1alpha1.SkillCollection{},
+		skillCardRefIndexField,
+		extractSkillCardRefs,
+	); err != nil {
+		return fmt.Errorf("setting up field index for %s: %w", skillCardRefIndexField, err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&konveyoriov1alpha1.SkillCollection{}).
 		Watches(
@@ -155,8 +170,24 @@ func (r *SkillCollectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+// extractSkillCardRefs returns the skillCardRef values from a
+// SkillCollection for field indexing.
+func extractSkillCardRefs(obj client.Object) []string {
+	collection, ok := obj.(*konveyoriov1alpha1.SkillCollection)
+	if !ok {
+		return nil
+	}
+	var refs []string
+	for _, skill := range collection.Spec.Skills {
+		if skill.SkillCardRef != "" {
+			refs = append(refs, skill.SkillCardRef)
+		}
+	}
+	return refs
+}
+
 // findCollectionsForSkillCard returns reconcile requests for all SkillCollections
-// that reference the given SkillCard.
+// that reference the given SkillCard, using the field index for O(1) lookup.
 func (r *SkillCollectionReconciler) findCollectionsForSkillCard(
 	ctx context.Context,
 	obj client.Object,
@@ -168,24 +199,21 @@ func (r *SkillCollectionReconciler) findCollectionsForSkillCard(
 	}
 
 	var collectionList konveyoriov1alpha1.SkillCollectionList
-	if err := r.List(ctx, &collectionList, client.InNamespace(skillCard.Namespace)); err != nil {
-		logger.Error(err, "Failed to list SkillCollections")
+	if err := r.List(ctx, &collectionList,
+		client.InNamespace(skillCard.Namespace),
+		client.MatchingFields{skillCardRefIndexField: skillCard.Name},
+	); err != nil {
+		logger.Error(err, "Failed to list SkillCollections for SkillCard", "skillCard", skillCard.Name)
 		return nil
 	}
 
-	var requests []reconcile.Request
-	for i := range collectionList.Items {
-		collection := &collectionList.Items[i]
-		for _, ref := range collection.Spec.Skills {
-			if ref.SkillCardRef == skillCard.Name {
-				requests = append(requests, reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Namespace: collection.Namespace,
-						Name:      collection.Name,
-					},
-				})
-				break
-			}
+	requests := make([]reconcile.Request, len(collectionList.Items))
+	for i, collection := range collectionList.Items {
+		requests[i] = reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: collection.Namespace,
+				Name:      collection.Name,
+			},
 		}
 	}
 

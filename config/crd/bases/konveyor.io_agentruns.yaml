@@ -58,7 +58,9 @@ spec:
           metadata:
             type: object
           spec:
-            description: AgentRunSpec defines the desired state of an AgentRun.
+            description: |-
+              AgentRunSpec defines the desired state of an AgentRun.
+              The spec is immutable once created — delete and recreate to change values.
             properties:
               agentRef:
                 description: AgentRef is the name of the Agent CR to execute.
@@ -341,8 +343,8 @@ spec:
             - agentRef
             type: object
             x-kubernetes-validations:
-            - message: agentRef is immutable
-              rule: self.agentRef == oldSelf.agentRef
+            - message: spec is immutable
+              rule: self == oldSelf
           status:
             description: AgentRunStatus defines the observed state of an AgentRun.
             properties:

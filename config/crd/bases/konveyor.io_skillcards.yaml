@@ -12,7 +12,7 @@ spec:
     listKind: SkillCardList
     plural: skillcards
     shortNames:
-    - sc
+    - skc
     singular: skillcard
   scope: Namespaced
   versions:

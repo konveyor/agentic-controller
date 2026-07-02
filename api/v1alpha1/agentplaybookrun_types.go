@@ -36,7 +36,8 @@ type AgentPlaybookRunStageStatus struct {
 }
 
 // AgentPlaybookRunSpec defines the desired state of an AgentPlaybookRun.
-// +kubebuilder:validation:XValidation:rule="self.playbookRef == oldSelf.playbookRef",message="playbookRef is immutable"
+// The spec is immutable once created — delete and recreate to change values.
+// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable"
 type AgentPlaybookRunSpec struct {
 	// PlaybookRef is the name of the AgentPlaybook CR to execute.
 	// +kubebuilder:validation:MinLength=1

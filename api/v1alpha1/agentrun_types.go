@@ -61,7 +61,8 @@ type AgentRunParam struct {
 }
 
 // AgentRunSpec defines the desired state of an AgentRun.
-// +kubebuilder:validation:XValidation:rule="self.agentRef == oldSelf.agentRef",message="agentRef is immutable"
+// The spec is immutable once created — delete and recreate to change values.
+// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable"
 type AgentRunSpec struct {
 	// AgentRef is the name of the Agent CR to execute.
 	// +kubebuilder:validation:MinLength=1
