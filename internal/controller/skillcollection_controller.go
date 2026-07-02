@@ -87,10 +87,21 @@ func (r *SkillCollectionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		case skillRef.Source != "":
 			notReadyReasons = append(notReadyReasons,
 				fmt.Sprintf("skill %q: git source resolution not yet implemented (Phase 3)", skillRef.Name))
+		default:
+			notReadyReasons = append(notReadyReasons,
+				fmt.Sprintf("skill %q: no source configured", skillRef.Name))
 		}
 	}
 
-	if readyCount == totalSkills {
+	if totalSkills == 0 {
+		meta.SetStatusCondition(&collection.Status.Conditions, metav1.Condition{
+			Type:               ConditionTypeReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: collection.Generation,
+			Reason:             "NoSkills",
+			Message:            "Collection has no skills",
+		})
+	} else if readyCount == totalSkills {
 		meta.SetStatusCondition(&collection.Status.Conditions, metav1.Condition{
 			Type:               ConditionTypeReady,
 			Status:             metav1.ConditionTrue,

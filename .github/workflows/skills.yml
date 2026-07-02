@@ -3,6 +3,7 @@ name: Build and Push Skills
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch: {}
 
 permissions: {}
@@ -24,12 +25,17 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Build skills
+        run: make skill-build
+
       - name: Log in to Quay.io
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
           registry: quay.io
           username: ${{ vars.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
-      - name: Build and push skills
+      - name: Push skills
+        if: github.event_name != 'pull_request'
         run: make skill-push
