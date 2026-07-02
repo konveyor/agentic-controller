@@ -214,7 +214,7 @@ var _ = Describe("CRD Validation", func() {
 						{
 							Name:    "source_branch",
 							Type:    konveyoriov1alpha1.AgentParamTypeString,
-							Default: "main",
+							Default: testDefaultBranch,
 						},
 					},
 				},
@@ -232,12 +232,12 @@ var _ = Describe("CRD Validation", func() {
 				Spec: konveyoriov1alpha1.AgentSpec{
 					Image: testImageGoose,
 					Providers: []konveyoriov1alpha1.AgentProviderRef{
-						{Ref: "some-provider"},
+						{Ref: testProviderName},
 					},
 					Params: []konveyoriov1alpha1.AgentParam{
 						{
 							Name:    "target_branch",
-							Default: "main",
+							Default: testDefaultBranch,
 							// required is omitted — this must not fail
 						},
 					},
@@ -256,7 +256,7 @@ var _ = Describe("CRD Validation", func() {
 				Spec: konveyoriov1alpha1.AgentSpec{
 					Image: testImageGoose,
 					Providers: []konveyoriov1alpha1.AgentProviderRef{
-						{Ref: "some-provider"},
+						{Ref: testProviderName},
 					},
 					Params: []konveyoriov1alpha1.AgentParam{
 						{
@@ -301,7 +301,7 @@ var _ = Describe("CRD Validation", func() {
 					AgentRef: "java-migration-agent",
 					Models: []konveyoriov1alpha1.AgentRunModelSelection{
 						{
-							Role:     "primary",
+							Role:     testRolePrimary,
 							Provider: testProvider,
 							Model:    testModel,
 						},
@@ -469,7 +469,7 @@ var _ = Describe("CRD Validation", func() {
 				Spec: konveyoriov1alpha1.AgentPlaybookRunSpec{
 					PlaybookRef: "java-migration",
 					Models: []konveyoriov1alpha1.AgentRunModelSelection{
-						{Role: "primary", Provider: "anthropic", Model: testModel},
+						{Role: testRolePrimary, Provider: "anthropic", Model: testModel},
 					},
 					Params: []konveyoriov1alpha1.AgentRunParam{
 						{Name: testParamName, Value: "https://github.com/acme/app.git"},

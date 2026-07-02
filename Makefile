@@ -108,9 +108,19 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 ##@ Build
 
+AGENT_BASE_IMG ?= quay.io/konveyor/agent-base:latest
+
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
+
+.PHONY: agent-base-build
+agent-base-build: ## Build the agent-base container image.
+	$(CONTAINER_TOOL) build -t $(AGENT_BASE_IMG) -f images/agent-base/Containerfile images/agent-base/
+
+.PHONY: agent-base-push
+agent-base-push: agent-base-build ## Build and push the agent-base container image.
+	$(CONTAINER_TOOL) push $(AGENT_BASE_IMG)
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.

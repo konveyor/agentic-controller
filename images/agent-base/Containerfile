@@ -1,27 +1,19 @@
 # agent-base: Base image for all agent workloads.
 #
-# Contains the harness entrypoint, skillctl, and system tools.
-# The harness manages git lifecycle and launches the agent runtime.
-# See: https://github.com/konveyor/enhancements/pull/296
+# This is a minimal buildable image for testing the controller plumbing.
+# It includes basic tools (curl, git) needed by the LLMProvider
+# verification Job and the harness entrypoint stub.
 #
-# TODO: This is a placeholder. The actual harness binary and tooling
-# will be added as part of Stream 4 (Base Image).
+# The full harness binary, skillctl, and runtime tooling will be added
+# as the harness implementation matures.
+# See: https://github.com/konveyor/enhancements/pull/296
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
 
-# Create the skills directory where ImageVolumes are mounted.
-RUN mkdir -p /opt/skills /workspace
+RUN microdnf install -y curl git tar && microdnf clean all
 
-# TODO: Install harness binary
-# COPY konveyor-harness /usr/local/bin/konveyor-harness
-
-# TODO: Install skillctl
-# COPY skillctl /usr/local/bin/skillctl
-
-# TODO: Install system tools (git, etc.)
-# RUN microdnf install -y git && microdnf clean all
+# Create directories used by the controller and harness.
+RUN mkdir -p /opt/skills /workspace /.konveyor
 
 USER 65532:65532
 WORKDIR /workspace
-
-# TODO: ENTRYPOINT ["/usr/local/bin/konveyor-harness"]
