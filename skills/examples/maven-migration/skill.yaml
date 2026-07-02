@@ -1,0 +1,13 @@
+apiVersion: skillimage.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: maven-migration
+  version: "1.0.0"
+  description: Migrates Maven POM files from Java EE to Jakarta EE.
+  tags:
+    - java
+    - maven
+    - migration
+    - jakarta
+spec:
+  prompt: SKILL.md

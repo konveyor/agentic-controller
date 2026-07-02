@@ -1,0 +1,12 @@
+# agent-base-goose: Goose runtime image.
+#
+# Extends agent-base with the Goose agent runtime.
+# Goose exposes ACP over HTTP/WebSocket via `goose serve --port 4000`.
+#
+# TODO: This is a placeholder. Goose binary installation will be added
+# as part of Stream 4 (Base Image).
+
+FROM quay.io/konveyor/agent-base:latest
+
+# TODO: Install goose binary
+# COPY goose /usr/local/bin/goose

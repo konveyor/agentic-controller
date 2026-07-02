@@ -30,7 +30,6 @@ import (
 )
 
 const (
-	testNamespace  = "default"
 	testImageGoose = "quay.io/konveyor/agent-java-goose:latest"
 	testParamName  = "source_url"
 	testProvider   = "anthropic-provider"
@@ -132,7 +131,7 @@ var _ = Describe("CRD Validation", func() {
 				Spec: konveyoriov1alpha1.SkillCollectionSpec{
 					Version: "1.0.0",
 					Skills: []konveyoriov1alpha1.SkillCollectionSkillRef{
-						{Name: "maven-migration", SkillCardRef: "maven-migration"},
+						{Name: "maven-skill", SkillCardRef: "maven-skill-ref"},
 						{Name: "javax-imports", Image: "quay.io/konveyor/skills/javax:1.0.0"},
 					},
 				},

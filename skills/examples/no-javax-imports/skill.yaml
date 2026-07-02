@@ -1,0 +1,12 @@
+apiVersion: skillimage.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: no-javax-imports
+  version: "1.0.0"
+  description: Enforces that no javax.* imports remain after migration.
+  tags:
+    - java
+    - jakarta
+    - rule
+spec:
+  prompt: SKILL.md
