@@ -50,8 +50,18 @@ jobs:
           username: ${{ vars.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
-      - name: Build skill
-        run: skillctl build ${{ matrix.skill.path }}
+      - name: Build and tag skill
+        run: |
+          skillctl build ${{ matrix.skill.path }}
+          IMAGE=${{ env.REGISTRY }}/${{ env.REGISTRY_ORG }}/skills/${{ matrix.skill.name }}
+          LOCAL_REF=$(skillctl list --no-trunc 2>/dev/null | grep '${{ matrix.skill.name }}' | awk '{print $1}') || true
+          if [ -z "${LOCAL_REF}" ]; then
+            LOCAL_REF=$(skillctl list 2>/dev/null | tail -1 | awk '{print $1}')
+          fi
+          echo "LOCAL_REF=${LOCAL_REF}"
+          echo "IMAGE=${IMAGE}"
+          skillctl tag "${LOCAL_REF}" "${IMAGE}:latest"
+          skillctl tag "${LOCAL_REF}" "${IMAGE}:${{ github.sha }}"
 
       - name: Push skill
         run: |
