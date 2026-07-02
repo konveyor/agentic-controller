@@ -1,0 +1,14 @@
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: no-javax-imports
+spec:
+  image: quay.io/konveyor/skills/no-javax-imports:latest
+  displayName: No javax Imports
+  version: "1.0.0"
+  description: Enforces that no javax.* imports remain after migration.
+  type: rule
+  tags:
+    - java
+    - jakarta
+    - rule

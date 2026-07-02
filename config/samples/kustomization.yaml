@@ -1,0 +1,8 @@
+# Default skill resources installed with the controller.
+# These provide out-of-the-box migration skills backed by
+# OCI images pushed to quay.io/konveyor/skills/.
+resources:
+  - skillcard_maven_migration.yaml
+  - skillcard_no_javax_imports.yaml
+  - skillcollection_java_migration.yaml
+#+kubebuilder:scaffold:manifestskustomizesamples

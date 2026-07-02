@@ -1,0 +1,15 @@
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: maven-migration
+spec:
+  image: quay.io/konveyor/skills/maven-migration:latest
+  displayName: Maven Migration
+  version: "1.0.0"
+  description: Migrates Maven POM files from Java EE to Jakarta EE.
+  type: skill
+  tags:
+    - java
+    - maven
+    - migration
+    - jakarta

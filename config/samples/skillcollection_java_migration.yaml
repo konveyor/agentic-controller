@@ -1,0 +1,11 @@
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCollection
+metadata:
+  name: java-migration-skills
+spec:
+  version: "1.0.0"
+  skills:
+    - name: maven-migration
+      skillCardRef: maven-migration
+    - name: no-javax-imports
+      skillCardRef: no-javax-imports
