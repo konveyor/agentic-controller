@@ -19,8 +19,10 @@ package controller
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -139,7 +141,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Validate model selections against Agent's available providers.
-	if err := r.validateModels(&run, &agent); err != nil {
+	if err := r.validateModels(ctx, &run, &agent); err != nil {
 		run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
 		meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
 			Type:               ConditionTypeReady,
@@ -239,8 +241,9 @@ func (r *AgentRunReconciler) validateParams(
 }
 
 // validateModels checks that model selections reference providers in the
-// Agent's available set.
+// Agent's available set and that the model exists on the provider.
 func (r *AgentRunReconciler) validateModels(
+	ctx context.Context,
 	run *konveyoriov1alpha1.AgentRun,
 	agent *konveyoriov1alpha1.Agent,
 ) error {
@@ -252,6 +255,22 @@ func (r *AgentRunReconciler) validateModels(
 		if !providerSet[m.Provider] {
 			return fmt.Errorf("model selection references provider %q which is not in Agent %q providers",
 				m.Provider, agent.Name)
+		}
+		// Verify the model exists on the LLMProvider.
+		var provider konveyoriov1alpha1.LLMProvider
+		providerKey := types.NamespacedName{Namespace: run.Namespace, Name: m.Provider}
+		if err := r.Get(ctx, providerKey, &provider); err != nil {
+			return fmt.Errorf("looking up LLMProvider %q: %w", m.Provider, err)
+		}
+		modelFound := false
+		for _, pm := range provider.Spec.Models {
+			if pm.Name == m.Model {
+				modelFound = true
+				break
+			}
+		}
+		if !modelFound {
+			return fmt.Errorf("model %q not found on LLMProvider %q", m.Model, m.Provider)
 		}
 	}
 	return nil
@@ -394,9 +413,10 @@ func (r *AgentRunReconciler) buildEnvVars(
 		}
 	}
 
-	// ACP secret key.
+	// ACP secret key. The harness maps this to the runtime-specific
+	// env var (e.g. GOOSE_SERVER__SECRET_KEY for Goose).
 	env = append(env, corev1.EnvVar{
-		Name: "GOOSE_SERVER__SECRET_KEY",
+		Name: "KONVEYOR_ACP_SECRET_KEY",
 		ValueFrom: &corev1.EnvVarSource{
 			SecretKeyRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: acpSecretName},
@@ -477,7 +497,7 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 			return
 		}
 		seen[name] = true
-		volName := "skill-" + name
+		volName := sanitizeVolumeName("skill-" + name)
 		volumes = append(volumes, corev1.Volume{
 			Name: volName,
 			VolumeSource: corev1.VolumeSource{
@@ -673,4 +693,22 @@ func (r *AgentRunReconciler) findRunsForAgent(
 	}
 
 	return requests
+}
+
+// volumeNameRegex matches characters invalid in RFC 1123 volume names.
+var volumeNameRegex = regexp.MustCompile(`[^a-z0-9-]`)
+
+// sanitizeVolumeName converts a name to a valid Kubernetes volume name
+// (RFC 1123: lowercase alphanumeric + hyphens, max 63 chars).
+func sanitizeVolumeName(name string) string {
+	name = strings.ToLower(name)
+	name = volumeNameRegex.ReplaceAllString(name, "-")
+	// Trim leading/trailing hyphens.
+	name = strings.Trim(name, "-")
+	if len(name) > 63 {
+		// Truncate and append a short hash to avoid collisions.
+		hash := sha256.Sum256([]byte(name))
+		name = name[:54] + "-" + hex.EncodeToString(hash[:4])
+	}
+	return name
 }

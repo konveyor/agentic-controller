@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -51,7 +52,7 @@ func makeReadyProvider(provName, secretName string) func() {
 	ExpectWithOffset(1, k8sClient.Create(ctx, provider)).To(Succeed())
 
 	// Wait for verification Job, simulate success.
-	jobKey := types.NamespacedName{Name: verificationJobPrefix + provName, Namespace: testNamespace}
+	jobKey := types.NamespacedName{Name: fmt.Sprintf("%s%s-gen1", verificationJobPrefix, provName), Namespace: testNamespace}
 	EventuallyWithOffset(1, func(g Gomega) {
 		var job batchv1.Job
 		g.Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())

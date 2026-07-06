@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -166,7 +167,7 @@ var _ = Describe("LLMProvider Controller", func() {
 
 			By("verifying the controller creates a verification Job")
 			jobKey := types.NamespacedName{
-				Name:      verificationJobPrefix + name,
+				Name:      fmt.Sprintf("%s%s-gen1", verificationJobPrefix, name),
 				Namespace: testNamespace,
 			}
 			Eventually(func(g Gomega) {
@@ -263,7 +264,7 @@ var _ = Describe("LLMProvider Controller", func() {
 
 			By("waiting for the verification Job to be created")
 			jobKey := types.NamespacedName{
-				Name:      verificationJobPrefix + name,
+				Name:      fmt.Sprintf("%s%s-gen1", verificationJobPrefix, name),
 				Namespace: testNamespace,
 			}
 			Eventually(func(g Gomega) {

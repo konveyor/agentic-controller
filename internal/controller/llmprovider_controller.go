@@ -128,7 +128,8 @@ func (r *LLMProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Step 3: Check for an existing verification Job.
-	jobName := verificationJobPrefix + provider.Name
+	// Include generation in name to avoid collisions when re-verifying.
+	jobName := fmt.Sprintf("%s%s-gen%d", verificationJobPrefix, provider.Name, provider.Generation)
 	jobKey := types.NamespacedName{Namespace: provider.Namespace, Name: jobName}
 	var job batchv1.Job
 	if err := r.Get(ctx, jobKey, &job); err != nil {
@@ -236,8 +237,9 @@ func (r *LLMProviderReconciler) createVerificationJob(
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command: []string{
 								"sh", "-c",
-								// Use $LLM_ENDPOINT env var to avoid shell injection.
-								"curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \"$LLM_ENDPOINT\" | grep -qE '^[2-5]'",
+								// Use env vars to avoid shell injection.
+								// Pass API key via Authorization header to validate credentials.
+								"curl -sk --max-time 10 -o /dev/null -w '%{http_code}' -H \"Authorization: Bearer $LLM_API_KEY\" \"$LLM_ENDPOINT/v1/models\" | grep -qE '^[2-4]'",
 							},
 							Env: []corev1.EnvVar{
 								{

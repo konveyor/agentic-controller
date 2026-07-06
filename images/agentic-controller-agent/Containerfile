@@ -10,7 +10,7 @@
 
 FROM registry.access.redhat.com/ubi10/ubi-minimal:latest
 
-RUN microdnf install -y git tar && microdnf clean all
+RUN microdnf install -y git tar curl-minimal && microdnf clean all
 
 # Create directories used by the controller and harness.
 RUN mkdir -p /opt/skills /workspace /.konveyor

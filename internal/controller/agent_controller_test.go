@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -77,7 +78,7 @@ var _ = Describe("Agent Controller", func() {
 
 			// Wait for verification Job, then simulate success.
 			jobKey := types.NamespacedName{
-				Name:      verificationJobPrefix + providerName,
+				Name:      fmt.Sprintf("%s%s-gen1", verificationJobPrefix, providerName),
 				Namespace: testNamespace,
 			}
 			Eventually(func(g Gomega) {

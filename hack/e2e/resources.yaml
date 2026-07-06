@@ -73,6 +73,10 @@ metadata:
   name: e2e-run
 spec:
   agentRef: e2e-agent
+  models:
+    - role: primary
+      provider: e2e-provider
+      model: test-model
   params:
     - name: source_url
       value: "https://github.com/konveyor/example-app.git"

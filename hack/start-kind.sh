@@ -61,7 +61,6 @@ helm install agent-sandbox "${SANDBOX_DIR}/helm/" \
     --namespace agent-sandbox-system \
     --create-namespace \
     --set image.tag="${AGENT_SANDBOX_TAG}" \
-    --kubeconfig "$(kind get kubeconfig-path --name "${KIND_CLUSTER}" 2>/dev/null || echo "${HOME}/.kube/config")" \
     2>&1 || {
         # If already installed, upgrade instead.
         echo "Helm install failed, attempting upgrade..."
@@ -84,15 +83,15 @@ LLEMULATOR_DIR=$(mktemp -d)
 git clone --depth 1 https://github.com/fabianvf/llemulator.git "${LLEMULATOR_DIR}" 2>&1
 
 # Build the llemulator image and load into Kind.
+LLEM_IMG="openai-emulator:e2e"
+${CONTAINER_TOOL} build -t "${LLEM_IMG}" "${LLEMULATOR_DIR}"
 if [ "${CONTAINER_TOOL}" = "podman" ]; then
-    ${CONTAINER_TOOL} build -t openai-emulator:e2e "${LLEMULATOR_DIR}"
     LLEM_TMP=$(mktemp -d)
-    ${CONTAINER_TOOL} save openai-emulator:e2e -o "${LLEM_TMP}/llemulator.tar"
+    ${CONTAINER_TOOL} save "${LLEM_IMG}" -o "${LLEM_TMP}/llemulator.tar"
     kind load image-archive "${LLEM_TMP}/llemulator.tar" --name "${KIND_CLUSTER}"
     rm -rf "${LLEM_TMP}"
 else
-    ${CONTAINER_TOOL} build -t openai-emulator:e2e "${LLEMULATOR_DIR}"
-    kind load docker-image openai-emulator:e2e --name "${KIND_CLUSTER}"
+    kind load docker-image "${LLEM_IMG}" --name "${KIND_CLUSTER}"
 fi
 
 # Deploy llemulator using our own manifest (imagePullPolicy: Never).
