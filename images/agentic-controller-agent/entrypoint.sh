@@ -22,3 +22,8 @@ fi
 
 echo ""
 echo "Agent run completed successfully."
+
+# Keep the container running. Agent Sandbox expects a long-running
+# process. The real harness will run goose serve here.
+echo "Waiting for shutdown signal..."
+exec sleep infinity

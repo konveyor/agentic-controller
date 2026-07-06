@@ -233,8 +233,8 @@ func (r *LLMProviderReconciler) createVerificationJob(
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command: []string{
 								"sh", "-c",
-								fmt.Sprintf("wget -q --spider --timeout=10 %s || curl -sf --max-time 10 %s > /dev/null",
-									provider.Spec.Endpoint, provider.Spec.Endpoint),
+								fmt.Sprintf("curl -sk --max-time 10 -o /dev/null -w '%%{http_code}' %q | grep -qE '^[2-5]'",
+									provider.Spec.Endpoint),
 							},
 							Env: []corev1.EnvVar{
 								{

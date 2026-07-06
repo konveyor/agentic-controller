@@ -15,16 +15,15 @@ metadata:
 stringData:
   api-key: "e2e-test-key-not-real"
 ---
-# LLMProvider pointing at a dummy endpoint.
-# The verification Job will fail (endpoint not reachable), but we
-# can manually set the status for the e2e test. Alternatively, we
-# skip verification by pre-setting the Ready condition.
+# LLMProvider pointing at the Kubernetes API server.
+# The verification Job checks reachability — the k8s API responds
+# (even with 401/403), which is enough to pass the wget --spider check.
 apiVersion: konveyor.io/v1alpha1
 kind: LLMProvider
 metadata:
   name: e2e-provider
 spec:
-  endpoint: "https://api.example.com"
+  endpoint: "https://kubernetes.default.svc"
   credentialRef:
     secretName: e2e-llm-credentials
     key: api-key

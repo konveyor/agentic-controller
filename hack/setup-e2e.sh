@@ -64,6 +64,45 @@ else
 fi
 
 echo ""
+echo "=== Building and loading skill images ==="
+make skill-build
+# Build a FROM-scratch OCI image for each skill and load into Kind.
+# skillctl builds to its own OCI store; we need container images for Kind.
+# Use the skill content directly in a simple container image.
+for dir in skills/examples/*/; do
+    name=$(basename "${dir}")
+    skill_img="quay.io/konveyor/skills:${name}"
+    echo "Building skill image: ${skill_img}"
+    # Create a temporary Containerfile that copies the skill content.
+    tmp_ctx=$(mktemp -d)
+    cp -r "${dir}"* "${tmp_ctx}/"
+    cat > "${tmp_ctx}/Containerfile" <<'SKILLEOF'
+FROM scratch
+COPY . /
+SKILLEOF
+    ${CONTAINER_TOOL} build -t "${skill_img}" -f "${tmp_ctx}/Containerfile" "${tmp_ctx}"
+    rm -rf "${tmp_ctx}"
+done
+
+# Load skill images into Kind.
+if [ "${CONTAINER_TOOL}" = "podman" ]; then
+    SKILL_TMP=$(mktemp -d)
+    for dir in skills/examples/*/; do
+        name=$(basename "${dir}")
+        skill_img="quay.io/konveyor/skills:${name}"
+        echo "Saving ${skill_img} to tarball..."
+        ${CONTAINER_TOOL} save "${skill_img}" -o "${SKILL_TMP}/${name}.tar"
+        kind load image-archive "${SKILL_TMP}/${name}.tar" --name "${KIND_CLUSTER}"
+    done
+    rm -rf "${SKILL_TMP}"
+else
+    for dir in skills/examples/*/; do
+        name=$(basename "${dir}")
+        kind load docker-image "quay.io/konveyor/skills:${name}" --name "${KIND_CLUSTER}"
+    done
+fi
+
+echo ""
 echo "=== Deploying controller ==="
 make install
 make deploy IMG="${IMG}"

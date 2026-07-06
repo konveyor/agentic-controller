@@ -1,18 +1,29 @@
 #!/usr/bin/env bash
-# Run the e2e test: create resources, wait for AgentRun to complete,
-# verify the outcome.
+# Run the e2e test: create resources, verify the full pipeline works.
+#
+# The test verifies:
+# 1. SkillCard becomes Ready (image resolved)
+# 2. LLMProvider becomes Ready (verification Job succeeds)
+# 3. Agent becomes Ready (all dependencies resolved)
+# 4. AgentRun creates a Sandbox
+# 5. Sandbox pod runs and produces expected output
 #
 # Prerequisites:
 #   - Kind cluster with Agent Sandbox (hack/start-kind.sh)
 #   - Controller deployed (hack/setup-e2e.sh)
 #
 # Environment variables:
-#   E2E_TIMEOUT   Timeout for waiting (default: 120s)
+#   E2E_TIMEOUT   Timeout for waiting (default: 180s)
 
 set -euo pipefail
 
-E2E_TIMEOUT="${E2E_TIMEOUT:-120s}"
+E2E_TIMEOUT="${E2E_TIMEOUT:-180s}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PASS=0
+FAIL=0
+
+pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
+fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 
 echo "=== E2E Test: Full AgentRun Pipeline ==="
 echo ""
@@ -21,94 +32,118 @@ echo ""
 kubectl delete -f "${SCRIPT_DIR}/e2e/resources.yaml" --ignore-not-found 2>/dev/null || true
 sleep 2
 
-echo "--- Step 1: Apply test resources ---"
+echo "--- Applying test resources ---"
 kubectl apply -f "${SCRIPT_DIR}/e2e/resources.yaml"
 echo ""
 
-echo "--- Step 2: Wait for SkillCard to become Ready ---"
-kubectl wait skillcard/e2e-skill --for=jsonpath='{.status.conditions[0].status}'=True --timeout="${E2E_TIMEOUT}"
-echo "SkillCard is Ready."
+echo "--- Checking SkillCard ---"
+if kubectl wait skillcard/e2e-skill --for=jsonpath='{.status.conditions[0].status}'=True --timeout="${E2E_TIMEOUT}" 2>/dev/null; then
+    pass "SkillCard e2e-skill is Ready"
+else
+    fail "SkillCard e2e-skill did not become Ready"
+fi
+
+echo "--- Checking LLMProvider ---"
+if kubectl wait llmprovider/e2e-provider --for=jsonpath='{.status.conditions[0].status}'=True --timeout="${E2E_TIMEOUT}" 2>/dev/null; then
+    pass "LLMProvider e2e-provider is Ready (connectivity verified)"
+else
+    fail "LLMProvider e2e-provider did not become Ready"
+    kubectl get llmprovider e2e-provider -o yaml | grep -A10 "status:" || true
+fi
+
+echo "--- Checking Agent ---"
+if kubectl wait agent/e2e-agent --for=jsonpath='{.status.conditions[0].status}'=True --timeout="${E2E_TIMEOUT}" 2>/dev/null; then
+    pass "Agent e2e-agent is Ready (all dependencies resolved)"
+else
+    fail "Agent e2e-agent did not become Ready"
+    kubectl get agent e2e-agent -o yaml | grep -A10 "status:" || true
+fi
+
+echo "--- Checking AgentRun creates Sandbox ---"
+SANDBOX=""
+for i in $(seq 1 60); do
+    SANDBOX=$(kubectl get agentrun e2e-run -o jsonpath='{.status.sandboxName}' 2>/dev/null)
+    if [ -n "${SANDBOX}" ]; then
+        break
+    fi
+    sleep 1
+done
+if [ -n "${SANDBOX}" ]; then
+    pass "AgentRun created Sandbox: ${SANDBOX}"
+else
+    fail "AgentRun did not create a Sandbox"
+    kubectl get agentrun e2e-run -o yaml | grep -A15 "status:" || true
+fi
+
+echo "--- Checking Sandbox pod ran entrypoint ---"
+if [ -n "${SANDBOX}" ]; then
+    # Wait for pod to have run at least once (it exits immediately).
+    for i in $(seq 1 30); do
+        LOGS=$(kubectl logs "${SANDBOX}" 2>/dev/null || true)
+        if echo "${LOGS}" | grep -q "Agent run completed successfully"; then
+            break
+        fi
+        sleep 1
+    done
+
+    if echo "${LOGS}" | grep -q "Agent run completed successfully"; then
+        pass "Entrypoint ran successfully"
+    else
+        fail "Entrypoint did not produce expected output"
+        echo "  Pod logs: ${LOGS}"
+    fi
+
+    # Verify expected content in the logs.
+    if echo "${LOGS}" | grep -q "KONVEYOR_PARAM_SOURCE_URL"; then
+        pass "Params injected as env vars"
+    else
+        fail "Params not found in pod logs"
+    fi
+
+    if echo "${LOGS}" | grep -q "Skills:"; then
+        pass "Skills directory mounted"
+    else
+        fail "Skills not visible in pod logs"
+    fi
+
+    if echo "${LOGS}" | grep -q "This is an e2e test"; then
+        pass "Instructions passed through"
+    else
+        fail "Instructions not found in pod logs"
+    fi
+
+    if echo "${LOGS}" | grep -q "You are an e2e test agent"; then
+        pass "Agent prompt passed through"
+    else
+        fail "Agent prompt not found in pod logs"
+    fi
+fi
+
+echo "--- Checking ACP Secret ---"
+if kubectl get secret e2e-run-acp-key -o jsonpath='{.data.secret-key}' &>/dev/null; then
+    pass "ACP Secret created with secret-key"
+else
+    fail "ACP Secret not found"
+fi
+
+echo ""
+echo "=== Results ==="
+echo "  Passed: ${PASS}"
+echo "  Failed: ${FAIL}"
 echo ""
 
-echo "--- Step 3: Check LLMProvider status ---"
-# The LLMProvider verification Job needs a reachable endpoint.
-# For e2e, wait for it to reach some status (Verifying or Ready).
-echo "Waiting for LLMProvider verification..."
-sleep 10
-kubectl get llmprovider e2e-provider -o yaml | grep -A5 "conditions:" || true
-echo ""
+if [ "${FAIL}" -gt 0 ]; then
+    echo "E2E FAILED"
+    echo ""
+    echo "--- Debug info ---"
+    kubectl get skillcard,llmprovider,agent,agentrun -o wide 2>/dev/null || true
+    echo ""
+    kubectl get sandbox,pods -o wide 2>/dev/null || true
+    exit 1
+fi
 
-# The LLMProvider verification Job will fail because the endpoint
-# is fake. The AgentRun will be blocked at AgentNotReady because
-# the Agent depends on the LLMProvider being Ready.
-#
-# For a real e2e, we'd need a real LLM endpoint. For now, check
-# that the pipeline gets as far as it can.
-
-echo "--- Step 4: Check Agent status ---"
-kubectl get agent e2e-agent -o yaml | grep -A5 "conditions:" || true
+echo "E2E PASSED: Full pipeline verified."
 echo ""
-
-echo "--- Step 5: Check AgentRun status ---"
-kubectl get agentrun e2e-run -o yaml | grep -A10 "status:" || true
-echo ""
-
-echo "--- Step 6: Check created resources ---"
-echo "Pods:"
-kubectl get pods -A | grep -E "e2e|agent-sandbox|agentic-controller" || true
-echo ""
-echo "Jobs:"
-kubectl get jobs | grep -E "e2e|llm-verify" || true
-echo ""
-echo "Secrets:"
-kubectl get secrets | grep -E "e2e" || true
-echo ""
-echo "Sandboxes:"
-kubectl get sandboxes 2>/dev/null || echo "No Sandboxes found (Agent may not be Ready yet)"
-echo ""
-
-echo "--- Summary ---"
-echo ""
-echo "Resources created:"
-kubectl get skillcard,skillcollection,llmprovider,agent,agentrun 2>/dev/null || true
-echo ""
-
-# Check the AgentRun condition reason to report the test outcome.
-REASON=$(kubectl get agentrun e2e-run -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null || echo "Unknown")
-PHASE=$(kubectl get agentrun e2e-run -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
-
-echo "AgentRun phase: ${PHASE}"
-echo "AgentRun reason: ${REASON}"
-echo ""
-
-case "${REASON}" in
-    "Succeeded")
-        echo "E2E PASSED: AgentRun completed successfully."
-        echo ""
-        echo "Sandbox pod logs:"
-        kubectl logs -l konveyor.io/agentrun=e2e-run 2>/dev/null || echo "(no logs available)"
-        exit 0
-        ;;
-    "AgentNotReady")
-        echo "E2E PARTIAL: AgentRun is waiting for Agent to become Ready."
-        echo "This is expected when the LLMProvider endpoint is not reachable."
-        echo "The controller pipeline is working correctly up to the Agent readiness gate."
-        exit 0
-        ;;
-    "SandboxCreated"|"Running")
-        echo "E2E IN PROGRESS: Sandbox was created and is running."
-        echo "Waiting for completion..."
-        kubectl wait agentrun/e2e-run --for=jsonpath='{.status.phase}'=Succeeded --timeout="${E2E_TIMEOUT}" 2>/dev/null || {
-            echo "AgentRun did not complete within timeout."
-            kubectl get agentrun e2e-run -o yaml
-            exit 1
-        }
-        echo "E2E PASSED."
-        exit 0
-        ;;
-    *)
-        echo "E2E RESULT: ${REASON} (phase: ${PHASE})"
-        kubectl describe agentrun e2e-run
-        exit 1
-        ;;
-esac
+echo "  Secret -> LLMProvider (verified) -> SkillCard (resolved)"
+echo "  -> Agent (all deps ready) -> AgentRun -> Sandbox -> Pod"
+echo "  -> Params injected, skills mounted, instructions passed"
