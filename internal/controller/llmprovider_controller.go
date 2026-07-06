@@ -40,8 +40,9 @@ const (
 
 	// DefaultVerificationImage is the default image used for LLM provider
 	// verification when no override is configured. In production, the
-	// controller should use the agent base image from this repository.
-	DefaultVerificationImage = "quay.io/konveyor/agent-base:latest"
+	// controller should use the agentic-controller-agent image from
+	// this repository.
+	DefaultVerificationImage = "quay.io/konveyor/agentic-controller-agent:latest"
 )
 
 // LLMProviderReconciler reconciles an LLMProvider object.
