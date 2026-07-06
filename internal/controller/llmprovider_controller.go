@@ -228,8 +228,9 @@ func (r *LLMProviderReconciler) createVerificationJob(
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
-							Name:  "verify",
-							Image: image,
+							Name:            "verify",
+							Image:           image,
+							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command: []string{
 								"sh", "-c",
 								fmt.Sprintf("wget -q --spider --timeout=10 %s || curl -sf --max-time 10 %s > /dev/null",
