@@ -79,6 +79,33 @@ kubectl wait deployment/agent-sandbox-controller \
     --timeout=120s
 
 echo ""
+echo "=== Installing LLEmulator (mock LLM server) ==="
+LLEMULATOR_DIR=$(mktemp -d)
+git clone --depth 1 https://github.com/fabianvf/llemulator.git "${LLEMULATOR_DIR}" 2>&1
+
+# Build the llemulator image and load into Kind.
+if [ "${CONTAINER_TOOL}" = "podman" ]; then
+    ${CONTAINER_TOOL} build -t openai-emulator:e2e "${LLEMULATOR_DIR}"
+    LLEM_TMP=$(mktemp -d)
+    ${CONTAINER_TOOL} save openai-emulator:e2e -o "${LLEM_TMP}/llemulator.tar"
+    kind load image-archive "${LLEM_TMP}/llemulator.tar" --name "${KIND_CLUSTER}"
+    rm -rf "${LLEM_TMP}"
+else
+    ${CONTAINER_TOOL} build -t openai-emulator:e2e "${LLEMULATOR_DIR}"
+    kind load docker-image openai-emulator:e2e --name "${KIND_CLUSTER}"
+fi
+
+# Deploy llemulator using our own manifest (imagePullPolicy: Never).
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+kubectl apply -f "${SCRIPT_DIR}/e2e/llemulator.yaml"
+rm -rf "${LLEMULATOR_DIR}"
+
+echo "Waiting for llemulator..."
+kubectl wait deployment/openai-emulator \
+    --for=condition=Available \
+    --timeout=120s
+
+echo ""
 echo "=== Cluster ready ==="
 kubectl get nodes
 echo ""

@@ -15,15 +15,16 @@ metadata:
 stringData:
   api-key: "e2e-test-key-not-real"
 ---
-# LLMProvider pointing at the Kubernetes API server.
-# The verification Job checks reachability — the k8s API responds
-# (even with 401/403), which is enough to pass the wget --spider check.
+# LLMProvider pointing at llemulator (mock OpenAI API).
+# The verification Job checks reachability against the mock server.
+# When the harness is implemented, goose can talk to this for
+# scripted LLM responses without real API credentials.
 apiVersion: konveyor.io/v1alpha1
 kind: LLMProvider
 metadata:
   name: e2e-provider
 spec:
-  endpoint: "https://kubernetes.default.svc"
+  endpoint: "http://openai-emulator.default.svc"
   credentialRef:
     secretName: e2e-llm-credentials
     key: api-key
