@@ -104,8 +104,10 @@ fi
 
 echo ""
 echo "=== Deploying controller ==="
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 make install
-make deploy IMG="${IMG}"
+make kustomize
+bin/kustomize build "${SCRIPT_DIR}/e2e" | kubectl apply -f -
 
 echo ""
 echo "=== Waiting for controller ==="

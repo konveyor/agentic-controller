@@ -304,7 +304,9 @@ spec:
                       description: |-
                         Role is the purpose of this model in the run (e.g. "primary", "efficient").
                         The harness maps roles to runtime-specific configuration.
+                        Must be a valid env var identifier (used in KONVEYOR_MODEL_{ROLE}_*).
                       minLength: 1
+                      pattern: ^[a-zA-Z_][a-zA-Z0-9_]*$
                       type: string
                   required:
                   - model

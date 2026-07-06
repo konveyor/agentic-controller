@@ -21,7 +21,7 @@ make controller-agent-push CONTAINER_TOOL=podman      # push to quay
 Placeholder Containerfiles for the production agent image hierarchy.
 These will be implemented as part of Stream 4.
 
-```
+```text
 agent-base-goose       Goose runtime (extends future agent-base)
 agent-java-goose       JDK 21 + Maven (extends agent-base-goose)
 ```

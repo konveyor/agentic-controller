@@ -90,6 +90,7 @@ func (r *LLMProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.Get(ctx, secretKey, &secret); err != nil {
 		if errors.IsNotFound(err) {
 			provider.Status.ConnectionVerified = false
+			provider.Status.DiscoveredModels = nil
 			meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
 				Type:               ConditionTypeReady,
 				Status:             metav1.ConditionFalse,
@@ -105,6 +106,7 @@ func (r *LLMProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Check the expected key exists in the Secret.
 	if _, ok := secret.Data[provider.Spec.CredentialRef.Key]; !ok {
 		provider.Status.ConnectionVerified = false
+		provider.Status.DiscoveredModels = nil
 		meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
 			Type:               ConditionTypeReady,
 			Status:             metav1.ConditionFalse,
@@ -169,6 +171,7 @@ func (r *LLMProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			})
 		} else {
 			provider.Status.ConnectionVerified = false
+			provider.Status.DiscoveredModels = nil
 			meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
 				Type:               ConditionTypeReady,
 				Status:             metav1.ConditionFalse,
@@ -233,10 +236,14 @@ func (r *LLMProviderReconciler) createVerificationJob(
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command: []string{
 								"sh", "-c",
-								fmt.Sprintf("curl -sk --max-time 10 -o /dev/null -w '%%{http_code}' %q | grep -qE '^[2-5]'",
-									provider.Spec.Endpoint),
+								// Use $LLM_ENDPOINT env var to avoid shell injection.
+								"curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \"$LLM_ENDPOINT\" | grep -qE '^[2-5]'",
 							},
 							Env: []corev1.EnvVar{
+								{
+									Name:  "LLM_ENDPOINT",
+									Value: provider.Spec.Endpoint,
+								},
 								{
 									Name: "LLM_API_KEY",
 									ValueFrom: &corev1.EnvVarSource{

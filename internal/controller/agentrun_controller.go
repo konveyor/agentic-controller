@@ -163,7 +163,12 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				Reason:             "SandboxCreationFailed",
 				Message:            fmt.Sprintf("Failed to create Sandbox for Agent %q: %v", agent.Name, err),
 			})
-			return r.patchRunStatus(ctx, &run, original)
+			// Patch status then return the error so controller-runtime
+			// requeues with exponential backoff.
+			if _, patchErr := r.patchRunStatus(ctx, &run, original); patchErr != nil {
+				return ctrl.Result{}, patchErr
+			}
+			return ctrl.Result{}, err
 		}
 		run.Status.SandboxName = sandboxName
 		run.Status.Phase = konveyoriov1alpha1.AgentRunPhasePending
@@ -354,7 +359,7 @@ func (r *AgentRunReconciler) createSandbox(
 		return "", fmt.Errorf("setting Sandbox owner reference: %w", err)
 	}
 
-	if err := r.Create(ctx, sandbox); err != nil {
+	if err := r.Create(ctx, sandbox); err != nil && !errors.IsAlreadyExists(err) {
 		return "", fmt.Errorf("creating Sandbox: %w", err)
 	}
 

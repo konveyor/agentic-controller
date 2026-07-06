@@ -9,7 +9,7 @@ echo "=== konveyor agent-base ==="
 echo "Workspace: $(pwd)"
 echo "Skills:    $(ls /opt/skills/ 2>/dev/null || echo 'none')"
 echo "Params:    $(env | grep KONVEYOR_PARAM_ | sort || echo 'none')"
-echo "Models:    $(env | grep KONVEYOR_MODEL_ | sort || echo 'none')"
+echo "Models:    $(env | grep KONVEYOR_MODEL_ | cut -d= -f1 | sort || echo 'none')"
 echo ""
 
 if [ -n "$KONVEYOR_INSTRUCTIONS" ]; then

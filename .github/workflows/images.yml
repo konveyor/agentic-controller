@@ -6,10 +6,20 @@ on:
     paths:
       - 'images/**'
       - 'Dockerfile'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'api/**'
+      - 'go.mod'
+      - 'go.sum'
   pull_request:
     paths:
       - 'images/**'
       - 'Dockerfile'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'api/**'
+      - 'go.mod'
+      - 'go.sum'
   workflow_dispatch: {}
 
 permissions: {}

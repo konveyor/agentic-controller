@@ -36,7 +36,9 @@ const (
 type AgentRunModelSelection struct {
 	// Role is the purpose of this model in the run (e.g. "primary", "efficient").
 	// The harness maps roles to runtime-specific configuration.
+	// Must be a valid env var identifier (used in KONVEYOR_MODEL_{ROLE}_*).
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z_][a-zA-Z0-9_]*$`
 	Role string `json:"role"`
 
 	// Provider is the name of an LLMProvider CR. Must be in the Agent's

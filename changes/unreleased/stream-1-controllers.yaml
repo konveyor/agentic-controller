@@ -1,0 +1,8 @@
+kind: feature
+description: >
+  Add LLMProvider, Agent, and AgentRun controllers completing the
+  Stream 1 POC controller implementation. Includes LLMProvider
+  connectivity verification via Jobs, Agent dependency readiness
+  tracking, AgentRun param/model validation with Sandbox creation,
+  e2e test infrastructure on Kind with Agent Sandbox and llemulator,
+  and the agentic-controller-agent test image.
