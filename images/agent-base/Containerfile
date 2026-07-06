@@ -8,12 +8,16 @@
 # as the harness implementation matures.
 # See: https://github.com/konveyor/enhancements/pull/296
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+FROM registry.access.redhat.com/ubi10/ubi-minimal:latest
 
-RUN microdnf install -y curl git tar && microdnf clean all
+RUN microdnf install -y git tar && microdnf clean all
 
 # Create directories used by the controller and harness.
 RUN mkdir -p /opt/skills /workspace /.konveyor
 
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+
 USER 65532:65532
 WORKDIR /workspace
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
