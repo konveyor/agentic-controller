@@ -1,0 +1,83 @@
+---
+# E2E test resources: full chain from credentials to AgentRun.
+#
+# This creates a complete pipeline:
+#   Secret → LLMProvider → SkillCard → Agent → AgentRun → Sandbox
+#
+# The AgentRun uses the agentic-controller-agent image which logs
+# params/skills/instructions and exits 0, proving the full pipeline.
+
+# Dummy LLM credential Secret (not a real API key).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: e2e-llm-credentials
+stringData:
+  api-key: "e2e-test-key-not-real"
+---
+# LLMProvider pointing at llemulator (mock OpenAI API).
+# The verification Job checks reachability against the mock server.
+# When the harness is implemented, goose can talk to this for
+# scripted LLM responses without real API credentials.
+apiVersion: konveyor.io/v1alpha1
+kind: LLMProvider
+metadata:
+  name: e2e-provider
+spec:
+  endpoint: "http://openai-emulator.default.svc"
+  credentialRef:
+    secretName: e2e-llm-credentials
+    key: api-key
+  models:
+    - name: test-model
+      contextWindow: 100000
+      tier: efficient
+---
+# SkillCard with an image source.
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: e2e-skill
+spec:
+  image: quay.io/konveyor/skills:maven-migration
+  displayName: E2E Test Skill
+  version: "1.0.0"
+  description: A skill for e2e testing.
+  type: skill
+---
+# Agent referencing the provider and skill.
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: e2e-agent
+spec:
+  image: quay.io/konveyor/agentic-controller-agent:e2e
+  prompt: "You are an e2e test agent."
+  providers:
+    - ref: e2e-provider
+  skillCards:
+    - ref: e2e-skill
+  params:
+    - name: source_url
+      type: string
+      description: Git URL of the source repository
+      required: true
+    - name: target_branch
+      type: string
+      default: konveyor/e2e-test
+---
+# AgentRun that exercises the full pipeline.
+apiVersion: konveyor.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: e2e-run
+spec:
+  agentRef: e2e-agent
+  models:
+    - role: primary
+      provider: e2e-provider
+      model: test-model
+  params:
+    - name: source_url
+      value: "https://github.com/konveyor/example-app.git"
+  instructions: "This is an e2e test. Log params and exit."

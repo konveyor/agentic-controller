@@ -1,49 +1,27 @@
-# Agent Container Images
+# Container Images
 
-Layered image hierarchy for agent workloads. Each layer adds
-capabilities on top of the previous one.
+## agentic-controller-agent
 
-```
-agent-base            UBI9 + harness + skillctl + system tools
-  └─ agent-base-goose   + goose runtime
-       └─ agent-java-goose   + JDK 21 + Maven
-```
+Minimal agent image owned by the controller for verification and
+testing. Used by:
+- LLMProvider verification Jobs (connectivity check)
+- E2E tests (proves the controller → Sandbox → Pod pipeline)
 
-## Images
-
-### agent-base
-
-The base image for all agents. Contains:
-- UBI 9 minimal
-- `konveyor-harness` binary (Go entrypoint managing git lifecycle)
-- `skillctl` for skill management
-- System tools (git, etc.)
-- `/opt/skills/` directory for skill mounting
-- Non-root execution compatible with OpenShift restricted SCC
-
-### agent-base-goose
-
-Extends `agent-base` with the Goose agent runtime. Goose exposes
-ACP over HTTP via `goose serve --port 4000`.
-
-### agent-java-goose
-
-Extends `agent-base-goose` with Java development toolchains:
-- JDK 21
-- Maven
-
-## Building
+This is NOT the production agent base image. The real agent images
+(harness, goose runtime, language toolchains) are Stream 4 work
+tracked in the [agent-base-image-composition enhancement](https://github.com/konveyor/enhancements/pull/296).
 
 ```bash
-# Build base image
-podman build -t quay.io/konveyor/agent-base:latest images/agent-base/
-
-# Build goose runtime image
-podman build -t quay.io/konveyor/agent-base-goose:latest images/agent-base-goose/
-
-# Build Java language image
-podman build -t quay.io/konveyor/agent-java-goose:latest images/agent-java-goose/
+make controller-agent-build                           # build locally
+make controller-agent-push CONTAINER_TOOL=podman      # push to quay
 ```
 
-See the [agent-base-image-composition enhancement](https://github.com/konveyor/enhancements/pull/296)
-for the full design.
+## Stream 4 placeholders
+
+Placeholder Containerfiles for the production agent image hierarchy.
+These will be implemented as part of Stream 4.
+
+```text
+agent-base-goose       Goose runtime (extends future agent-base)
+agent-java-goose       JDK 21 + Maven (extends agent-base-goose)
+```

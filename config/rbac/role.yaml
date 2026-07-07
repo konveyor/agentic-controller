@@ -5,8 +5,42 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - agents.x-k8s.io
+  resources:
+  - sandboxes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
   - konveyor.io
   resources:
+  - agentruns
+  - agents
+  - llmproviders
   - skillcards
   - skillcollections
   verbs:
@@ -20,6 +54,9 @@ rules:
 - apiGroups:
   - konveyor.io
   resources:
+  - agentruns/finalizers
+  - agents/finalizers
+  - llmproviders/finalizers
   - skillcards/finalizers
   - skillcollections/finalizers
   verbs:
@@ -27,6 +64,9 @@ rules:
 - apiGroups:
   - konveyor.io
   resources:
+  - agentruns/status
+  - agents/status
+  - llmproviders/status
   - skillcards/status
   - skillcollections/status
   verbs:

@@ -7,7 +7,7 @@ on:
 permissions: {}
 
 jobs:
-  test-e2e:
+  test:
     permissions:
       contents: read
     name: Run on Ubuntu
@@ -29,10 +29,9 @@ jobs:
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
 
-      - name: Verify kind installation
-        run: kind version
-
-      - name: Running Test e2e
+      - name: Install Helm
         run: |
-          go mod tidy
-          make test-e2e
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Running e2e
+        run: make e2e

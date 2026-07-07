@@ -63,36 +63,23 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# kubectl kuberc is disabled by default for test isolation; enable with:
-# - KUBECTL_KUBERC=true
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
-KIND_CLUSTER ?= agentic-controller-test-e2e
+KIND_CLUSTER ?= agentic-controller-e2e
 
-.PHONY: setup-test-e2e
-setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
-	@command -v $(KIND) >/dev/null 2>&1 || { \
-		echo "Kind is not installed. Please install Kind manually."; \
-		exit 1; \
-	}
-	@case "$$($(KIND) get clusters)" in \
-		*"$(KIND_CLUSTER)"*) \
-			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
-		*) \
-			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
-	esac
+.PHONY: e2e-setup
+e2e-setup: ## Create a Kind cluster with Agent Sandbox and deploy the controller.
+	hack/start-kind.sh
+	hack/setup-e2e.sh
 
-.PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
-	$(MAKE) cleanup-test-e2e
+.PHONY: e2e-run
+e2e-run: ## Run the e2e test (cluster must be set up with e2e-setup).
+	hack/run-e2e.sh
 
-.PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+.PHONY: e2e
+e2e: e2e-setup e2e-run ## Full e2e: create cluster, deploy, test.
+
+.PHONY: e2e-cleanup
+e2e-cleanup: ## Tear down the Kind cluster used for e2e tests.
+	kind delete cluster --name $(KIND_CLUSTER)
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -108,9 +95,19 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 ##@ Build
 
+CONTROLLER_AGENT_IMG ?= quay.io/konveyor/agentic-controller-agent:latest
+
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
+
+.PHONY: controller-agent-build
+controller-agent-build: ## Build the controller's test/verification agent image.
+	$(CONTAINER_TOOL) build -t $(CONTROLLER_AGENT_IMG) -f images/agentic-controller-agent/Containerfile images/agentic-controller-agent/
+
+.PHONY: controller-agent-push
+controller-agent-push: controller-agent-build ## Build and push the controller's test/verification agent image.
+	$(CONTAINER_TOOL) push $(CONTROLLER_AGENT_IMG)
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.

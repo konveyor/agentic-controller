@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -33,10 +35,22 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 )
 
-const testNamespace = "default"
+const (
+	testNamespace     = "default"
+	testAgentImage    = "quay.io/konveyor/agent-base:latest"
+	testEndpoint      = "https://api.example.com"
+	testSecretKey     = "api-key"
+	testLLMModelName  = "test-model"
+	testProviderName  = "some-provider"
+	testRepoURL       = "https://github.com/test/repo.git"
+	testRolePrimary   = "primary"
+	testDefaultBranch = "main"
+)
 
 var (
 	cfg       *rest.Config
@@ -51,6 +65,21 @@ func TestControllers(t *testing.T) {
 	RunSpecs(t, "Controller Suite")
 }
 
+// sandboxCRDPath returns the path to the Agent Sandbox CRD manifests
+// in the Go module cache.
+func sandboxCRDPath() string {
+	cmd := exec.Command("go", "list", "-m", "-json", "sigs.k8s.io/agent-sandbox")
+	out, err := cmd.Output()
+	if err != nil {
+		panic("failed to resolve agent-sandbox module path: " + err.Error())
+	}
+	var mod struct{ Dir string }
+	if err := json.Unmarshal(out, &mod); err != nil {
+		panic("failed to parse go list output: " + err.Error())
+	}
+	return filepath.Join(mod.Dir, "k8s", "crds")
+}
+
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
@@ -58,7 +87,10 @@ var _ = BeforeSuite(func() {
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths: []string{
+			filepath.Join("..", "..", "config", "crd", "bases"),
+			sandboxCRDPath(),
+		},
 		ErrorIfCRDPathMissing: true,
 	}
 
@@ -68,6 +100,8 @@ var _ = BeforeSuite(func() {
 	Expect(cfg).NotTo(BeNil())
 
 	err = konveyoriov1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+	err = sandboxv1beta1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -90,6 +124,25 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = (&SkillCollectionReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = (&LLMProviderReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		VerificationImage: "test-image:latest", // not used in envtest
+	}).SetupWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = (&AgentReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = (&AgentRunReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr)

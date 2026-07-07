@@ -9,14 +9,14 @@ prompt file and a `skill.yaml` metadata file.
 Use `skillctl` to build and push skills as OCI images:
 
 ```bash
-# Build a skill
-skillctl build skills/examples/maven-migration/
+# Build all skills
+make skill-build
 
-# Push to a registry
-skillctl push quay.io/konveyor/skills/maven-migration:1.0.0
+# Build and push all skills to quay.io/konveyor/skills
+make skill-push
 
 # Install locally (for development)
-skillctl install quay.io/konveyor/skills/maven-migration:1.0.0 --target opencode
+skillctl install quay.io/konveyor/skills:maven-migration --target opencode
 ```
 
 ## Using with SkillCard CRs
@@ -27,7 +27,7 @@ kind: SkillCard
 metadata:
   name: maven-migration
 spec:
-  image: quay.io/konveyor/skills/maven-migration:1.0.0
+  image: quay.io/konveyor/skills:maven-migration
   displayName: Maven Migration
   version: "1.0.0"
   description: Migrates Maven POM files from Java EE to Jakarta EE.
@@ -41,3 +41,4 @@ spec:
 |-------|------|-------------|
 | `maven-migration` | skill | Migrates Maven POM files from Java EE to Jakarta EE |
 | `no-javax-imports` | rule | Enforces that no javax.* imports remain after migration |
+| `ejb-to-cdi` | skill | Migrates EJB components to CDI managed beans |

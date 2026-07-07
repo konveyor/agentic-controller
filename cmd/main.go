@@ -35,6 +35,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 	"github.com/konveyor/agentic-controller/internal/controller"
 	// +kubebuilder:scaffold:imports
@@ -48,6 +50,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(konveyoriov1alpha1.AddToScheme(scheme))
+	utilruntime.Must(sandboxv1beta1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -189,6 +192,27 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "SkillCollection")
+		os.Exit(1)
+	}
+	if err := (&controller.LLMProviderReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "LLMProvider")
+		os.Exit(1)
+	}
+	if err := (&controller.AgentReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "Agent")
+		os.Exit(1)
+	}
+	if err := (&controller.AgentRunReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "AgentRun")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

@@ -1,0 +1,23 @@
+# agent-base: Base image for all agent workloads.
+#
+# This is a minimal buildable image for testing the controller plumbing.
+# It includes basic tools (curl, git) needed by the LLMProvider
+# verification Job and the harness entrypoint stub.
+#
+# The full harness binary, skillctl, and runtime tooling will be added
+# as the harness implementation matures.
+# See: https://github.com/konveyor/enhancements/pull/296
+
+FROM registry.access.redhat.com/ubi10/ubi-minimal:latest
+
+RUN microdnf install -y git tar curl-minimal && microdnf clean all
+
+# Create directories used by the controller and harness.
+RUN mkdir -p /opt/skills /workspace /.konveyor
+
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+
+USER 65532:65532
+WORKDIR /workspace
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
