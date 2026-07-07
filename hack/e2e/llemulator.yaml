@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: openai-emulator
-        image: openai-emulator:e2e
+        image: docker.io/library/openai-emulator:e2e
         imagePullPolicy: Never
         ports:
         - containerPort: 8080

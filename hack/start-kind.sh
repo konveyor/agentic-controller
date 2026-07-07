@@ -83,7 +83,7 @@ LLEMULATOR_DIR=$(mktemp -d)
 git clone --depth 1 https://github.com/fabianvf/llemulator.git "${LLEMULATOR_DIR}" 2>&1
 
 # Build the llemulator image and load into Kind.
-LLEM_IMG="openai-emulator:e2e"
+LLEM_IMG="docker.io/library/openai-emulator:e2e"
 ${CONTAINER_TOOL} build -t "${LLEM_IMG}" "${LLEMULATOR_DIR}"
 if [ "${CONTAINER_TOOL}" = "podman" ]; then
     LLEM_TMP=$(mktemp -d)
