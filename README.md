@@ -49,6 +49,8 @@ agentic-controller/
   internal/controller/    Controller implementations
   internal/registry/      OCI registry client
   docs/adr/               Architecture Decision Records
+  clients/                Reference client stack (client core, hub-shim,
+                          browser UI, agent harnesses, demo) — see clients/README.md
   skills/                 Agent skills for contributors
   CONTEXT.md              Domain glossary
   AGENTS.md               Agent-facing instructions

@@ -1,0 +1,55 @@
+# agentic-ui: static SPA behind unprivileged nginx; nginx proxies /api
+# (HTTP + WebSocket) to the agentic-gateway Service (same-origin for the
+# browser).
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentic-ui
+  namespace: konveyor-agents
+  labels:
+    app.kubernetes.io/name: agentic-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentic-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentic-ui
+    spec:
+      containers:
+        - name: ui
+          image: agentic-ui:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentic-ui
+  namespace: konveyor-agents
+  labels:
+    app.kubernetes.io/name: agentic-ui
+spec:
+  selector:
+    app.kubernetes.io/name: agentic-ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

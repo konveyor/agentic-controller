@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# In-cluster deployment of the interim agentic UI + gateway.
+# Prereqs: the agentic-controller and Agent Sandbox are already installed
+# (see manifests/controller/install.yaml), and the agentic-gateway:dev /
+# agentic-ui:dev images are loadable by the cluster (minikube image build,
+# or retag + push to a registry and patch the images below).
+resources:
+  - gateway.yaml
+  - ui.yaml
+
+# Ingress is environment-specific — see ingress.example.yaml. Put TLS and
+# SSO (oauth2-proxy / OpenShift Route auth) in front: the gateway itself
+# is deliberately auth-less, exactly like the future Hub proxy seat it
+# stands in for is not.

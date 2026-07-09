@@ -1,0 +1,99 @@
+# agentic-gateway: in-cluster stand-in for the future Hub passthrough proxy.
+# Namespace-scoped RBAC — exactly the surface the SHIM API v1 needs.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agentic-gateway
+  namespace: konveyor-agents
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agentic-gateway
+  namespace: konveyor-agents
+rules:
+  - apiGroups: ["konveyor.io"]
+    resources: ["agentruns"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: ["konveyor.io"]
+    resources: ["agents", "llmproviders"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agentic-gateway
+  namespace: konveyor-agents
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agentic-gateway
+subjects:
+  - kind: ServiceAccount
+    name: agentic-gateway
+    namespace: konveyor-agents
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentic-gateway
+  namespace: konveyor-agents
+  labels:
+    app.kubernetes.io/name: agentic-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentic-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentic-gateway
+    spec:
+      serviceAccountName: agentic-gateway
+      containers:
+        - name: gateway
+          image: agentic-gateway:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 7080
+              name: http
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentic-gateway
+  namespace: konveyor-agents
+  labels:
+    app.kubernetes.io/name: agentic-gateway
+spec:
+  selector:
+    app.kubernetes.io/name: agentic-gateway
+  ports:
+    - name: http
+      port: 7080
+      targetPort: http

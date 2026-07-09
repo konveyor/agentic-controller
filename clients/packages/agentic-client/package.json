@@ -1,0 +1,39 @@
+{
+  "name": "@konveyor/agentic-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Isomorphic (browser + node) client core for the konveyor agentic-controller: CRD contract types + helpers, ACP session over WebSocket (JSON-RPC 2.0), and the hub-shim HTTP transport. Zero runtime dependencies; no node builtins in src/.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./contract": {
+      "types": "./src/contract/index.ts",
+      "development": "./src/contract/index.ts",
+      "default": "./src/contract/index.ts"
+    },
+    "./acp": {
+      "types": "./src/acp/index.ts",
+      "development": "./src/acp/index.ts",
+      "default": "./src/acp/index.ts"
+    },
+    "./transport-shim": {
+      "types": "./src/transport-shim/index.ts",
+      "development": "./src/transport-shim/index.ts",
+      "default": "./src/transport-shim/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "selfcheck": "tsx dev/selfcheck.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

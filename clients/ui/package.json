@@ -1,0 +1,27 @@
+{
+  "name": "@konveyor/agentic-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser UI prototype (tackle2-ui-shaped) for konveyor agentic runs: PatternFly 6 over the hub-shim HTTP/WS API via @konveyor/agentic-client.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@patternfly/react-core": "^6.2.2",
+    "@patternfly/react-icons": "^6.2.2",
+    "@patternfly/react-table": "^6.2.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.4.1",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5"
+  }
+}

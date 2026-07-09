@@ -1,0 +1,10 @@
+{
+  "name": "acp-mock-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.1.0",
+    "ws": "^8.21.0"
+  }
+}
