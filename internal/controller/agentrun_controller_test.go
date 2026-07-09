@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 )
@@ -322,12 +323,31 @@ var _ = Describe("AgentRun Controller", func() {
 
 			By("verifying the Sandbox is created with correct config")
 			runKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			var fetchedRun konveyoriov1alpha1.AgentRun
 			Eventually(func(g Gomega) {
-				var fetched konveyoriov1alpha1.AgentRun
-				g.Expect(k8sClient.Get(ctx, runKey, &fetched)).To(Succeed())
-				g.Expect(fetched.Status.SandboxName).NotTo(BeEmpty())
-				g.Expect(fetched.Status.SecretKeyRef).NotTo(BeNil())
+				g.Expect(k8sClient.Get(ctx, runKey, &fetchedRun)).To(Succeed())
+				g.Expect(fetchedRun.Status.SandboxName).NotTo(BeEmpty())
+				g.Expect(fetchedRun.Status.SecretKeyRef).NotTo(BeNil())
 			}, timeout, interval).Should(Succeed())
+
+			By("verifying the sandbox pod template carries the run/agent labels")
+			var sandbox sandboxv1beta1.Sandbox
+			sandboxKey := types.NamespacedName{Name: fetchedRun.Status.SandboxName, Namespace: testNamespace}
+			Expect(k8sClient.Get(ctx, sandboxKey, &sandbox)).To(Succeed())
+			Expect(sandbox.Spec.PodTemplate.ObjectMeta.Labels).To(HaveKeyWithValue("konveyor.io/agentrun", name))
+			Expect(sandbox.Spec.PodTemplate.ObjectMeta.Labels).To(HaveKeyWithValue("konveyor.io/agent", agentName))
+
+			By("verifying the single-key provider credential is injected as API_KEY")
+			container := sandbox.Spec.PodTemplate.Spec.Containers[0]
+			var apiKey *corev1.EnvVar
+			for i := range container.Env {
+				if container.Env[i].Name == "KONVEYOR_MODEL_PRIMARY_API_KEY" {
+					apiKey = &container.Env[i]
+				}
+			}
+			Expect(apiKey).NotTo(BeNil())
+			Expect(apiKey.ValueFrom.SecretKeyRef.Name).To(Equal(secretName))
+			Expect(apiKey.ValueFrom.SecretKeyRef.Key).To(Equal(testSecretKey))
 
 			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, agent)).To(Succeed())

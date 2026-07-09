@@ -357,6 +357,15 @@ func (r *AgentRunReconciler) createSandbox(
 		},
 		Spec: sandboxv1beta1.SandboxSpec{
 			PodTemplate: sandboxv1beta1.PodTemplate{
+				// Agent Sandbox v0.5.0 copies only PodTemplate metadata
+				// onto the pod, so mirror the identifying labels here to
+				// make the pod discoverable by AgentRun / Agent name.
+				ObjectMeta: sandboxv1beta1.PodMetadata{
+					Labels: map[string]string{
+						"konveyor.io/agentrun": run.Name,
+						"konveyor.io/agent":    agent.Name,
+					},
+				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
