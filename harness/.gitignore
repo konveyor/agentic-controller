@@ -1,0 +1,18 @@
+# Runtime data — never commit
+*.jsonl
+*.json
+!package.json
+!coolstore.json
+
+# macOS
+.DS_Store
+
+# Go binary
+/migration-harness
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

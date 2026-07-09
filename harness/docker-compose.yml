@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  migration-harness:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: migration-harness:latest
+    container_name: migration-harness
+
+    # Mount volumes
+    volumes:
+      # Mount the repository to migrate
+      - ${REPO_PATH:-./repo}:/workspace/repo:rw
+
+      # Mount migration-harness config
+      - ${HOME}/.migration-harness/config:/root/.migration-harness/config:ro
+
+      # Mount goose config (for LLM provider credentials)
+      - ${HOME}/.config/goose:/root/.config/goose:ro
+
+      # Mount output directory for run results
+      - ${HOME}/.migration-harness/runs:/root/.migration-harness/runs:rw
+
+      # Optional: mount custom skill-bundle if developing
+      # - ./skill-bundle:/opt/migration-harness/skill-bundle:ro
+
+    # Environment variables
+    environment:
+      # Migration harness config (can override config file)
+      - MH_MODEL=${MH_MODEL:-}
+      - MH_PROVIDER=${MH_PROVIDER:-}
+      - MH_MAX_TURNS=${MH_MAX_TURNS:-200}
+      - MH_MAX_FIX_ITERATIONS=${MH_MAX_FIX_ITERATIONS:-3}
+
+      # Google Cloud (if using Vertex AI)
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID:-}
+      - GCP_LOCATION=${GCP_LOCATION:-}
+
+      # OpenAI (if using OpenAI provider)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+
+      # Goose provider settings (for custom endpoints like LiteLLM)
+      - GOOSE_PROVIDER=${GOOSE_PROVIDER:-}
+      - GOOSE_MODEL=${GOOSE_MODEL:-}
+
+    # Network access for LLM API calls
+    network_mode: bridge
+
+    # Keep container running for interactive usage
+    # Remove this if running one-shot migrations
+    # stdin_open: true
+    # tty: true
+
+    # Override entrypoint for debugging
+    # entrypoint: ["/bin/bash"]
+
+    # Command (override with docker-compose run)
+    # Example: docker-compose run migration-harness /workspace/repo "Migrate from Java EE to Quarkus"
+    command: ["--help"]

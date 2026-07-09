@@ -1,0 +1,79 @@
+version: "1.0.0"
+title: "Fix migration error"
+description: "Address a single compile or test error. Conservative — minimal edits."
+
+settings:
+  temperature: 1
+
+parameters:
+  - key: repo
+    input_type: string
+    requirement: required
+    description: "Absolute path to the repository"
+  - key: verification_report_path
+    input_type: string
+    requirement: required
+    description: "Path to verification-report.md with build errors"
+  - key: migration_type
+    input_type: string
+    requirement: required
+    description: "Migration key, e.g. java-ee-to-quarkus"
+  - key: error_file
+    input_type: string
+    requirement: required
+    description: "Path of the file reported in the verify error"
+  - key: error_message
+    input_type: string
+    requirement: required
+    description: "The error message text from verify"
+
+extensions:
+  - type: builtin
+    name: developer
+    timeout: 900
+    bundled: true
+
+instructions: |
+  Fix exactly ONE compilation error from the verification report.
+
+  PHASE 1 — UNDERSTAND THE ERROR:
+  1. Read {{ verification_report_path }} to see:
+     - Full list of compilation errors
+     - Context from verification
+     - What Step 4 (verify) already attempted to fix
+
+  2. Focus on the specific error:
+     - File: {{ error_file }}
+     - Message: {{ error_message }}
+
+  PHASE 2 — FIX THE ERROR:
+  3. Make the minimal edit needed to fix this ONE error
+  4. Only touch {{ error_file }} (or build manifest if it's a missing dependency)
+  5. Do NOT re-run compile or tests (Step 5 will re-verify)
+
+  RULES:
+  - Fix only ONE error at a time
+  - Minimal changes only (no refactoring)
+  - If it's a missing import/dependency, add it
+  - If it's a syntax error, fix the syntax
+  - Return success only if you made a change
+
+prompt: |
+  Fix a compilation error in {{ repo }}.
+
+  Verification report: {{ verification_report_path }}
+  Migration type: {{ migration_type }}
+  Error file: {{ error_file }}
+  Error message: {{ error_message }}
+
+  Read the verification report for context, then apply the minimal fix needed.
+
+response:
+  json_schema:
+    type: object
+    required: [fixed, summary]
+    properties:
+      fixed:         { type: boolean }
+      file_changed:  { type: string }
+      summary:       { type: string }
+      pom_changed:   { type: boolean, description: "True if build manifest was modified (means a re-resolve is needed)" }

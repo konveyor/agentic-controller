@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mh-config
+  namespace: migration-harness
+  labels:
+    app: migration-harness
+data:
+  # migration-harness config
+  mh-config: |
+    MH_MODEL="Qwen3.6-35B-A3B"
+    MH_PROVIDER="custom_testinglite"
+    MH_MAX_TURNS="200"
+    MH_MAX_FIX_ITERATIONS="3"
+
+  # goose config.yaml — uses custom_testinglite provider
+  goose-config.yaml: |
+    GOOSE_PROVIDER: custom_testinglite
+    GOOSE_MODEL: Qwen3.6-35B-A3B
+    extensions:
+      developer:
+        enabled: true
+        type: platform
+        name: developer
+        bundled: true
+
+  # custom provider definition
+  custom_testinglite.json: |
+    {
+      "name": "custom_testinglite",
+      "engine": "openai",
+      "display_name": "testingLite",
+      "description": "Custom testingLite provider",
+      "api_key_env": "CUSTOM_TESTINGLITE_API_KEY",
+      "base_url": "https://litellm-litemaas.apps.prod.rhoai.rh-aiservices-bu.com/v1",
+      "models": [
+        {
+          "name": "Granite-Vision-3.2",
+          "context_limit": 128000
+        },
+        {
+          "name": "Nomic-embed-text-v2-moe",
+          "context_limit": 128000
+        },
+        {
+          "name": "Qwen2.5-VL-7B-Instruct",
+          "context_limit": 128000
+        },
+        {
+          "name": "Qwen3.6-35B-A3B",
+          "context_limit": 128000
+        }
+      ],
+      "supports_streaming": true,
+      "requires_auth": true,
+      "base_path": "v1/chat/completions",
+      "skip_canonical_filtering": false
+    }

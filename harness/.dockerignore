@@ -1,0 +1,30 @@
+# Git
+.git/
+.gitignore
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Local run data
+.migration-harness/runs/
+mvc4/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+test/
+tests/
+*.test
+
+# Logs
+*.log
