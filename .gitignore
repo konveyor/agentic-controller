@@ -7,6 +7,9 @@
 # macOS
 .DS_Store
 
+# Go binary
+/migration-harness
+
 # Editor
 .vscode/
 .idea/
