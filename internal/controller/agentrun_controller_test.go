@@ -33,24 +33,39 @@ import (
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 )
 
-// makeReadyProvider creates an LLMProvider with a verified credential and
-// simulates successful verification. Returns cleanup function.
+// makeReadyProvider creates an LLMProvider with a verified single-key
+// credential and simulates successful verification. Returns cleanup function.
 func makeReadyProvider(provName, secretName string) func() {
+	return makeReadyProviderWithCred(provName, secretName,
+		map[string]string{testSecretKey: "test-value"}, testSecretKey)
+}
+
+// makeReadyProviderKeyless is makeReadyProvider with a keyless credentialRef
+// over a multi-variable (SigV4-style) Secret.
+func makeReadyProviderKeyless(provName, secretName string) func() {
+	return makeReadyProviderWithCred(provName, secretName, map[string]string{
+		"AWS_ACCESS_KEY_ID":     "test-access-key",
+		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
+		"AWS_REGION":            "us-east-1",
+	}, "")
+}
+
+func makeReadyProviderWithCred(provName, secretName string, stringData map[string]string, key string) func() {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespace},
-		StringData: map[string]string{testSecretKey: "test-value"},
+		StringData: stringData,
 	}
-	ExpectWithOffset(1, k8sClient.Create(ctx, secret)).To(Succeed())
+	ExpectWithOffset(2, k8sClient.Create(ctx, secret)).To(Succeed())
 
 	provider := &konveyoriov1alpha1.LLMProvider{
 		ObjectMeta: metav1.ObjectMeta{Name: provName, Namespace: testNamespace},
 		Spec: konveyoriov1alpha1.LLMProviderSpec{
 			Endpoint:      testEndpoint,
-			CredentialRef: konveyoriov1alpha1.LLMProviderCredentialRef{SecretName: secretName, Key: testSecretKey},
+			CredentialRef: konveyoriov1alpha1.LLMProviderCredentialRef{SecretName: secretName, Key: key},
 			Models:        []konveyoriov1alpha1.LLMProviderModel{{Name: testLLMModelName, ContextWindow: 100000}},
 		},
 	}
-	ExpectWithOffset(1, k8sClient.Create(ctx, provider)).To(Succeed())
+	ExpectWithOffset(2, k8sClient.Create(ctx, provider)).To(Succeed())
 
 	// Wait for verification Job, simulate success.
 	jobKey := types.NamespacedName{Name: fmt.Sprintf("%s%s-gen1", verificationJobPrefix, provName), Namespace: testNamespace}
@@ -352,6 +367,71 @@ var _ = Describe("AgentRun Controller", func() {
 			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, agent)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, skill)).To(Succeed())
+		})
+	})
+
+	Context("when the model's provider has a keyless credentialRef", func() {
+		const (
+			name       = "ar-ctrl-keyless-cred"
+			agentName  = "ar-ctrl-agent-keyless"
+			provName   = "ar-prov-keyless"
+			secretName = "ar-secret-keyless"
+		)
+
+		It("should expose the credential Secret via envFrom instead of API_KEY", func() {
+			cleanup := makeReadyProviderKeyless(provName, secretName)
+			defer cleanup()
+
+			agent := &konveyoriov1alpha1.Agent{
+				ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.AgentSpec{
+					Image:     testAgentImage,
+					Providers: []konveyoriov1alpha1.AgentProviderRef{{Ref: provName}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+			waitForAgentReady(agentName)
+
+			run := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.AgentRunSpec{
+					AgentRef: agentName,
+					Models:   []konveyoriov1alpha1.AgentRunModelSelection{{Role: testRolePrimary, Provider: provName, Model: testLLMModelName}},
+					EnvFrom: []corev1.EnvFromSource{
+						{ConfigMapRef: &corev1.ConfigMapEnvSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "user-extra-env"},
+						}},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, run)).To(Succeed())
+
+			runKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			var fetchedRun konveyoriov1alpha1.AgentRun
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, runKey, &fetchedRun)).To(Succeed())
+				g.Expect(fetchedRun.Status.SandboxName).NotTo(BeEmpty())
+			}, timeout, interval).Should(Succeed())
+
+			var sandbox sandboxv1beta1.Sandbox
+			sandboxKey := types.NamespacedName{Name: fetchedRun.Status.SandboxName, Namespace: testNamespace}
+			Expect(k8sClient.Get(ctx, sandboxKey, &sandbox)).To(Succeed())
+			container := sandbox.Spec.PodTemplate.Spec.Containers[0]
+
+			By("not injecting a single-key API_KEY env var")
+			for _, e := range container.Env {
+				Expect(e.Name).NotTo(Equal("KONVEYOR_MODEL_PRIMARY_API_KEY"))
+			}
+
+			By("exposing the whole credential Secret via envFrom, before user sources")
+			Expect(container.EnvFrom).To(HaveLen(2))
+			Expect(container.EnvFrom[0].SecretRef).NotTo(BeNil())
+			Expect(container.EnvFrom[0].SecretRef.Name).To(Equal(secretName))
+			Expect(container.EnvFrom[1].ConfigMapRef).NotTo(BeNil())
+			Expect(container.EnvFrom[1].ConfigMapRef.Name).To(Equal("user-extra-env"))
+
+			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, agent)).To(Succeed())
 		})
 	})
 })

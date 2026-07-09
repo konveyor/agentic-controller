@@ -103,17 +103,33 @@ func (r *LLMProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	// Check the expected key exists in the Secret.
-	if _, ok := secret.Data[provider.Spec.CredentialRef.Key]; !ok {
+	// Check the expected key exists in the Secret. A keyless credentialRef
+	// means the whole Secret is the credential (multi-variable, e.g. AWS
+	// SigV4) — then it just must not be empty.
+	if provider.Spec.CredentialRef.Key != "" {
+		if _, ok := secret.Data[provider.Spec.CredentialRef.Key]; !ok {
+			provider.Status.ConnectionVerified = false
+			provider.Status.DiscoveredModels = nil
+			meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
+				Type:               ConditionTypeReady,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: provider.Generation,
+				Reason:             "CredentialKeyNotFound",
+				Message: fmt.Sprintf("Key %q not found in Secret %q",
+					provider.Spec.CredentialRef.Key, provider.Spec.CredentialRef.SecretName),
+			})
+			return r.patchStatus(ctx, &provider, original)
+		}
+	} else if len(secret.Data) == 0 {
 		provider.Status.ConnectionVerified = false
 		provider.Status.DiscoveredModels = nil
 		meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
 			Type:               ConditionTypeReady,
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: provider.Generation,
-			Reason:             "CredentialKeyNotFound",
-			Message: fmt.Sprintf("Key %q not found in Secret %q",
-				provider.Spec.CredentialRef.Key, provider.Spec.CredentialRef.SecretName),
+			Reason:             "CredentialSecretEmpty",
+			Message: fmt.Sprintf("Secret %q has no data keys",
+				provider.Spec.CredentialRef.SecretName),
 		})
 		return r.patchStatus(ctx, &provider, original)
 	}
@@ -214,6 +230,24 @@ func (r *LLMProviderReconciler) createVerificationJob(
 
 	// The verification Job runs a simple curl/wget against the endpoint
 	// to check reachability. The agent base image includes curl.
+	// A keyless credentialRef (multi-variable credential, e.g. AWS SigV4)
+	// has no single value to send as a bearer token, so the probe runs
+	// unauthenticated — reachability still verifies (2xx-4xx passes).
+	env := []corev1.EnvVar{{Name: "LLM_ENDPOINT", Value: provider.Spec.Endpoint}}
+	if provider.Spec.CredentialRef.Key != "" {
+		env = append(env, corev1.EnvVar{
+			Name: "LLM_API_KEY",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: provider.Spec.CredentialRef.SecretName,
+					},
+					Key: provider.Spec.CredentialRef.Key,
+				},
+			},
+		})
+	}
+
 	backoffLimit := int32(0)
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -241,23 +275,7 @@ func (r *LLMProviderReconciler) createVerificationJob(
 								// Pass API key via Authorization header to validate credentials.
 								"curl -sk --max-time 10 -o /dev/null -w '%{http_code}' -H \"Authorization: Bearer $LLM_API_KEY\" \"$LLM_ENDPOINT/v1/models\" | grep -qE '^[2-4]'",
 							},
-							Env: []corev1.EnvVar{
-								{
-									Name:  "LLM_ENDPOINT",
-									Value: provider.Spec.Endpoint,
-								},
-								{
-									Name: "LLM_API_KEY",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{
-												Name: provider.Spec.CredentialRef.SecretName,
-											},
-											Key: provider.Spec.CredentialRef.Key,
-										},
-									},
-								},
-							},
+							Env: env,
 						},
 					},
 				},

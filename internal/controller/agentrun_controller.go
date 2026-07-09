@@ -298,8 +298,8 @@ func (r *AgentRunReconciler) createSandbox(
 			Name:      secretName,
 			Namespace: run.Namespace,
 			Labels: map[string]string{
-				labelManagedBy:         managedByLabel,
-				"konveyor.io/agentrun": run.Name,
+				labelManagedBy: managedByLabel,
+				labelAgentRun:  run.Name,
 			},
 		},
 		StringData: map[string]string{
@@ -317,7 +317,7 @@ func (r *AgentRunReconciler) createSandbox(
 	run.Status.SecretKeyRef = &corev1.LocalObjectReference{Name: secretName}
 
 	// Build env vars: KONVEYOR_PARAM_* from params + ACP secret key + LLM credentials.
-	env, err := r.buildEnvVars(ctx, run, agent, secretName)
+	env, envFrom, err := r.buildEnvVars(ctx, run, agent, secretName)
 	if err != nil {
 		return "", fmt.Errorf("building env vars: %w", err)
 	}
@@ -351,8 +351,8 @@ func (r *AgentRunReconciler) createSandbox(
 			Labels: map[string]string{
 				labelManagedBy:                managedByLabel,
 				"app.kubernetes.io/component": "agent-sandbox",
-				"konveyor.io/agentrun":        run.Name,
-				"konveyor.io/agent":           agent.Name,
+				labelAgentRun:                 run.Name,
+				labelAgent:                    agent.Name,
 			},
 		},
 		Spec: sandboxv1beta1.SandboxSpec{
@@ -362,17 +362,21 @@ func (r *AgentRunReconciler) createSandbox(
 				// make the pod discoverable by AgentRun / Agent name.
 				ObjectMeta: sandboxv1beta1.PodMetadata{
 					Labels: map[string]string{
-						"konveyor.io/agentrun": run.Name,
-						"konveyor.io/agent":    agent.Name,
+						labelAgentRun: run.Name,
+						labelAgent:    agent.Name,
 					},
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:         "agent",
-							Image:        agent.Spec.Image,
-							Env:          env,
-							EnvFrom:      run.Spec.EnvFrom,
+							Name:  "agent",
+							Image: agent.Spec.Image,
+							Env:   env,
+							// User-specified sources last: for duplicate
+							// keys across envFrom sources the last wins,
+							// so run.spec.envFrom overrides provider
+							// credentials.
+							EnvFrom:      append(envFrom, run.Spec.EnvFrom...),
 							VolumeMounts: volumeMounts,
 						},
 					},
@@ -394,14 +398,17 @@ func (r *AgentRunReconciler) createSandbox(
 	return sandboxName, nil
 }
 
-// buildEnvVars constructs the full env var list for the Sandbox container.
+// buildEnvVars constructs the env var list for the Sandbox container, plus
+// envFrom sources for providers whose credential Secret is exposed whole
+// (credentialRef without a key, e.g. AWS SigV4).
 func (r *AgentRunReconciler) buildEnvVars(
 	ctx context.Context,
 	run *konveyoriov1alpha1.AgentRun,
 	agent *konveyoriov1alpha1.Agent,
 	acpSecretName string,
-) ([]corev1.EnvVar, error) {
+) ([]corev1.EnvVar, []corev1.EnvFromSource, error) {
 	var env []corev1.EnvVar
+	var envFrom []corev1.EnvFromSource
 
 	// Build KONVEYOR_PARAM_* env vars from params (supplied values
 	// override defaults from the Agent).
@@ -451,6 +458,7 @@ func (r *AgentRunReconciler) buildEnvVars(
 	}
 
 	// Model selections and LLM credential mounting.
+	credSecretSeen := make(map[string]bool)
 	for _, m := range run.Spec.Models {
 		prefix := "KONVEYOR_MODEL_" + strings.ToUpper(m.Role) + "_"
 		env = append(env,
@@ -458,30 +466,46 @@ func (r *AgentRunReconciler) buildEnvVars(
 			corev1.EnvVar{Name: prefix + "MODEL", Value: m.Model},
 		)
 
-		// Mount the LLM provider's credential Secret.
+		// Mount the LLM provider's credential Secret. A single-key
+		// credentialRef is a bearer-token-style credential injected as
+		// <prefix>API_KEY; a keyless one spans multiple env vars (e.g.
+		// AWS SigV4) and is exposed whole via envFrom, with the Secret's
+		// keys as the variable names.
 		var provider konveyoriov1alpha1.LLMProvider
 		providerKey := types.NamespacedName{Namespace: run.Namespace, Name: m.Provider}
 		if err := r.Get(ctx, providerKey, &provider); err != nil {
-			return nil, fmt.Errorf("looking up LLMProvider %q for model role %q: %w",
+			return nil, nil, fmt.Errorf("looking up LLMProvider %q for model role %q: %w",
 				m.Provider, m.Role, err)
 		}
-		env = append(env, corev1.EnvVar{
-			Name: prefix + "API_KEY",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: provider.Spec.CredentialRef.SecretName,
+		credSecretName := provider.Spec.CredentialRef.SecretName
+		if provider.Spec.CredentialRef.Key != "" {
+			env = append(env, corev1.EnvVar{
+				Name: prefix + "API_KEY",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: credSecretName,
+						},
+						Key: provider.Spec.CredentialRef.Key,
 					},
-					Key: provider.Spec.CredentialRef.Key,
 				},
-			},
-		})
+			})
+		} else if !credSecretSeen[credSecretName] {
+			credSecretSeen[credSecretName] = true
+			envFrom = append(envFrom, corev1.EnvFromSource{
+				SecretRef: &corev1.SecretEnvSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: credSecretName,
+					},
+				},
+			})
+		}
 	}
 
 	// Pass through user-specified env vars.
 	env = append(env, run.Spec.Env...)
 
-	return env, nil
+	return env, envFrom, nil
 }
 
 // resolveSkillVolumes resolves SkillCard and SkillCollection refs to
