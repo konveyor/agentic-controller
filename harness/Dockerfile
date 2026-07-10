@@ -74,7 +74,9 @@ RUN apt-get update && apt-get install -y bzip2 \
     && rm -f /tmp/goose.tar.bz2 \
     && rm -rf /var/lib/apt/lists/*
 
-ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+RUN JAVA_HOME_PATH=$(dirname $(dirname $(readlink -f $(which java)))) \
+    && ln -sf "$JAVA_HOME_PATH" /usr/lib/jvm/java-current
+ENV JAVA_HOME=/usr/lib/jvm/java-current
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
 
@@ -85,9 +87,13 @@ COPY --from=builder /migration-harness /usr/local/bin/migration-harness
 COPY recipes/ /usr/local/bin/recipes/
 COPY skill-bundle/ /usr/local/bin/skill-bundle/
 
-RUN mkdir -p /root/.migration-harness /workspace
+RUN groupadd -r harness && useradd -r -g harness -d /home/harness -s /sbin/nologin harness \
+    && mkdir -p /home/harness/.migration-harness /workspace \
+    && chown -R harness:harness /home/harness /workspace
 
 WORKDIR /workspace
+
+USER harness
 
 ENTRYPOINT ["migration-harness"]
 CMD ["--help"]

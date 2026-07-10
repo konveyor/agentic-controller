@@ -72,10 +72,13 @@ instructions: |
   - Lessons learned are OPTIONAL — only include if there's something genuinely useful
 
   WHAT TO RETURN:
+  - n: The step number ({{ item_n }})
+  - path: The primary file path ({{ item_path }})
   - status: "ok" (you made the change), "failed" (couldn't do it), or "skipped" (not needed)
   - files_touched: List of files you modified/created/deleted
   - lesson: String describing what you learned (can be empty string)
   - error_log: Any errors encountered (syntax, missing files, etc.) — empty string if none
+  - summary: Brief description of what was done
 
 prompt: |
   Execute Step #{{ item_n }} from the migration plan.

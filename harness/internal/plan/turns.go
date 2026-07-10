@@ -23,12 +23,6 @@ func CalcPlanTurns(runDir, skillDir string) int {
 		return clampTurns(turns)
 	}
 
-	complex := patternComplexity(data)
-	if complex > 5 {
-		complex = 5
-	}
-	turns += complex
-
 	if !hasMatchingReference(skillDir, dr) {
 		turns += 2
 	}
@@ -42,38 +36,6 @@ func CalcPlanTurns(runDir, skillDir string) int {
 	}
 
 	return clampTurns(turns)
-}
-
-func patternComplexity(detectJSON []byte) int {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(detectJSON, &raw); err != nil {
-		return 0
-	}
-
-	patternsRaw, ok := raw["patterns"]
-	if !ok {
-		return 0
-	}
-
-	var patterns map[string]int
-	if err := json.Unmarshal(patternsRaw, &patterns); err != nil {
-		return 0
-	}
-
-	complex := 0
-	if v := patterns["mdb_files"]; v > 0 {
-		complex += v
-	}
-	if v := patterns["ejb_files"]; v > 0 {
-		complex++
-	}
-	if v := patterns["react_class_components"]; v > 0 {
-		complex++
-	}
-	if v := patterns["py2_xrange_files"]; v > 0 {
-		complex++
-	}
-	return complex
 }
 
 func hasMatchingReference(skillDir string, dr detect.DetectResult) bool {
@@ -96,6 +58,12 @@ func hasMatchingReference(skillDir string, dr detect.DetectResult) bool {
 					return true
 				}
 			}
+		}
+	}
+
+	if dr.Files.CSharp > 0 {
+		if _, err := os.Stat(filepath.Join(refsDir, "dotnet-framework-to-core.md")); err == nil {
+			return true
 		}
 	}
 

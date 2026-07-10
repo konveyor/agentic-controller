@@ -27,8 +27,6 @@ Stage 2: <execution skill>  → migrate one file at a time → compile → verif
 |---|---|
 | Java EE → Quarkus | `skills/javaee-quarkus/SKILL.md` |
 | Python 2 → Python 3 | `skills/python2-to-python3/SKILL.md` |
-| React class → hooks | `skills/react-class-to-hooks/SKILL.md` |
-| Node.js upgrade | `skills/react-class-to-hooks/SKILL.md` |
 
 ---
 

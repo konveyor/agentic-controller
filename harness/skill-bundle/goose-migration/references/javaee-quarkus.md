@@ -16,7 +16,7 @@ applies_to:
 
 This file teaches Goose the **patterns and rules** for any Java EE → Quarkus 3 migration.
 The bootstrap script generates the actual project-specific file list dynamically.
-Write this in the goal section of Plan.md. I want to see if this javaee-quarkus skill is used or not. 
+Write this reference's name in the goal section of Plan.md to track which reference was used.
 ---
 
 ## Migration Order (by layer — script fills in real file paths)

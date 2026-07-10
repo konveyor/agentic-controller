@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/konveyor/migration-harness/internal/logging"
 )
@@ -55,7 +56,7 @@ func (r *CLIRunner) RunRecipe(ctx context.Context, recipe string, maxTurns int, 
 	}
 
 	name := strings.TrimSuffix(filepath.Base(recipe), ".yaml")
-	logPath := filepath.Join(r.LogDir, fmt.Sprintf("%s-%d.json", name, os.Getpid()))
+	logPath := filepath.Join(r.LogDir, fmt.Sprintf("%s-%d-%d.json", name, os.Getpid(), time.Now().UnixNano()))
 
 	cmd := exec.CommandContext(ctx, goosePath, args...)
 	var stdout bytes.Buffer
@@ -64,17 +65,24 @@ func (r *CLIRunner) RunRecipe(ctx context.Context, recipe string, maxTurns int, 
 
 	logging.Info("goose run --recipe %s (max %d turns)", filepath.Base(recipe), maxTurns)
 
-	err = cmd.Run()
-	if err != nil {
-		logging.Warn("goose exited with error: %v", err)
-	}
+	runErr := cmd.Run()
 
 	raw := stdout.Bytes()
-	if len(raw) == 0 {
-		return nil, fmt.Errorf("goose produced no output")
+
+	if len(raw) > 0 {
+		if err := os.WriteFile(logPath, raw, 0644); err != nil {
+			logging.Warn("write goose log %s: %v", logPath, err)
+		}
 	}
 
-	os.WriteFile(logPath, raw, 0644)
+	if runErr != nil {
+		logging.Warn("goose exited with error: %v", runErr)
+		if len(raw) == 0 {
+			return nil, fmt.Errorf("goose failed with no output: %w", runErr)
+		}
+	} else if len(raw) == 0 {
+		return nil, fmt.Errorf("goose produced no output")
+	}
 
 	clean := StripBanner(raw)
 

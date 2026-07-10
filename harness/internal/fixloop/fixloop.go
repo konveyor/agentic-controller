@@ -62,8 +62,10 @@ func Run(ctx context.Context, repoDir, runDir, recipesDir, migrationType string,
 	logging.Info("starting fix loop (max %d iterations)...", maxIterations)
 
 	var commits []CommitRecord
+	lastIter := 0
 
 	for iter := 1; iter <= maxIterations; iter++ {
+		lastIter = iter
 		verifyIterPath := filepath.Join(runDir, fmt.Sprintf("verify-fix-%d.json", iter))
 
 		logging.Info("iteration %d/%d — re-verifying...", iter, maxIterations)
@@ -125,7 +127,7 @@ func Run(ctx context.Context, repoDir, runDir, recipesDir, migrationType string,
 
 	report := &FixLoopReport{
 		MigrationType: migrationType,
-		Iterations:    maxIterations,
+		Iterations:    lastIter,
 		Status:        "manual_intervention_needed",
 	}
 	writeFixReport(runDir, repoDir, report, migrationType)

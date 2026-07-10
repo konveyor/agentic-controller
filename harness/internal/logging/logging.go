@@ -1,53 +1,47 @@
 package logging
 
 import (
-	"fmt"
 	"os"
 
-	"golang.org/x/term"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
-var colorEnabled = term.IsTerminal(int(os.Stderr.Fd()))
+var logger *zap.SugaredLogger
 
-const (
-	reset  = "\033[0m"
-	red    = "\033[0;31m"
-	green  = "\033[0;32m"
-	yellow = "\033[0;33m"
-	cyan   = "\033[0;36m"
-	bold   = "\033[1m"
-	blue   = "\033[0;34m"
-)
+func init() {
+	cfg := zap.NewDevelopmentEncoderConfig()
+	cfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	cfg.EncodeTime = zapcore.ISO8601TimeEncoder
 
-func color(c, msg string) string {
-	if !colorEnabled {
-		return msg
-	}
-	return c + msg + reset
+	core := zapcore.NewCore(
+		zapcore.NewConsoleEncoder(cfg),
+		zapcore.AddSync(os.Stderr),
+		zapcore.DebugLevel,
+	)
+	logger = zap.New(core).Sugar()
 }
 
 func Info(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, color(cyan, "ℹ ")+format+"\n", a...)
+	logger.Infof(format, a...)
 }
 
 func Ok(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, color(green, "✓ ")+format+"\n", a...)
+	logger.Infof("[ok] "+format, a...)
 }
 
 func Warn(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, color(yellow, "⚠ ")+format+"\n", a...)
+	logger.Warnf(format, a...)
 }
 
 func Err(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, color(red, "✗ ")+format+"\n", a...)
+	logger.Errorf(format, a...)
 }
 
 func Fatal(format string, a ...any) {
-	Err(format, a...)
-	os.Exit(1)
+	logger.Fatalf(format, a...)
 }
 
 func Header(format string, a ...any) {
-	msg := fmt.Sprintf(format, a...)
-	fmt.Fprintf(os.Stderr, "\n%s\n", color(bold+blue, msg))
+	logger.Infof("[header] "+format, a...)
 }

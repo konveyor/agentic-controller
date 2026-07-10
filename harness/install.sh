@@ -2,11 +2,12 @@
 # install.sh — one-shot installation of migration-harness.
 #
 # What it does:
-#   1. Verifies goose, jq, git, graphify are installed.
-#   2. Copies the migration-harness payload to ~/.migration-harness/install/
-#   3. Symlinks ~/.local/bin/migration-harness → that payload
-#   4. Installs the goose-migration skill bundle to ~/.config/goose/skills/
-#   5. Prints next steps.
+#   1. Verifies goose, jq, git, go, graphify are installed.
+#   2. Builds the Go binary from cmd/migration-harness/.
+#   3. Installs the binary and data to ~/.migration-harness/install/
+#   4. Symlinks ~/.local/bin/migration-harness → that binary
+#   5. Installs the goose-migration skill bundle to ~/.config/goose/skills/
+#   6. Prints next steps.
 
 set -euo pipefail
 
@@ -45,29 +46,32 @@ fi
 
 ok "Dependencies present"
 
-# ── 2. Copy payload ─────────────────────────────────────────────
+# ── 2. Build Go binary ──────────────────────────────────────────
+command -v go >/dev/null 2>&1 || err "go is not installed (required to build migration-harness)"
+info "Building migration-harness from source"
+(cd "$SCRIPT_DIR" && go build -o migration-harness ./cmd/migration-harness) || err "Go build failed"
+ok "Binary built"
+
+# ── 3. Install payload ─────────────────────────────────────────
 INSTALL_DIR="$HOME/.migration-harness/install"
 info "Installing payload to $INSTALL_DIR"
-mkdir -p "$INSTALL_DIR"
-rm -rf "$INSTALL_DIR"/{bin,lib,recipes,skill-bundle}
-cp -r "$SCRIPT_DIR/bin"           "$INSTALL_DIR/"
-cp -r "$SCRIPT_DIR/lib"           "$INSTALL_DIR/"
-cp -r "$SCRIPT_DIR/recipes"       "$INSTALL_DIR/"
-cp -r "$SCRIPT_DIR/skill-bundle"  "$INSTALL_DIR/"
+mkdir -p "$INSTALL_DIR/bin"
+rm -rf "$INSTALL_DIR"/{bin,recipes,skill-bundle}
+mkdir -p "$INSTALL_DIR/bin"
+cp "$SCRIPT_DIR/migration-harness" "$INSTALL_DIR/bin/"
+cp -r "$SCRIPT_DIR/recipes"        "$INSTALL_DIR/"
+cp -r "$SCRIPT_DIR/skill-bundle"   "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/bin/migration-harness"
-
-# Remove old graphify.py if it exists (replaced by graphify CLI tool)
-rm -f "$INSTALL_DIR/lib/graphify.py"
-
+rm -f "$SCRIPT_DIR/migration-harness"
 ok "Payload installed"
 
-# ── 3. Symlink the command ──────────────────────────────────────
+# ── 4. Symlink the command ──────────────────────────────────────
 BIN_DIR="$HOME/.local/bin"
 mkdir -p "$BIN_DIR"
 ln -sf "$INSTALL_DIR/bin/migration-harness" "$BIN_DIR/migration-harness"
 ok "Symlink: $BIN_DIR/migration-harness → $INSTALL_DIR/bin/migration-harness"
 
-# ── 4. Install skill bundle ─────────────────────────────────────
+# ── 5. Install skill bundle ─────────────────────────────────────
 SKILLS_DIR="${GOOSE_SKILLS_DIR:-$HOME/.config/goose/skills}"
 info "Installing skill bundle to $SKILLS_DIR/goose-migration"
 mkdir -p "$SKILLS_DIR"
@@ -75,7 +79,7 @@ rm -rf "$SKILLS_DIR/goose-migration"
 cp -r "$SCRIPT_DIR/skill-bundle/goose-migration" "$SKILLS_DIR/"
 ok "Skill bundle installed"
 
-# ── 5. PATH check ───────────────────────────────────────────────
+# ── 6. PATH check ───────────────────────────────────────────────
 if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN_DIR"; then
   warn "$BIN_DIR is not in your PATH"
   echo

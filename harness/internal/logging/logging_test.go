@@ -4,15 +4,22 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestOutputFunctions(t *testing.T) {
-	// Capture stderr
 	old := os.Stderr
 	r, w, _ := os.Pipe()
 	os.Stderr = w
 
-	colorEnabled = false
+	core := zapcore.NewCore(
+		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
+		zapcore.AddSync(w),
+		zapcore.DebugLevel,
+	)
+	logger = zap.New(core).Sugar()
 
 	Info("test %s", "info")
 	Ok("test %s", "ok")

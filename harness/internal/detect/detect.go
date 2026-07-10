@@ -242,7 +242,10 @@ func ensureGitignore(repoDir string) {
 func copyFile(src, dst string) {
 	data, err := os.ReadFile(src)
 	if err != nil {
+		logging.Warn("copyFile: read %s: %v", src, err)
 		return
 	}
-	os.WriteFile(dst, data, 0644)
+	if err := os.WriteFile(dst, data, 0644); err != nil {
+		logging.Warn("copyFile: write %s: %v", dst, err)
+	}
 }

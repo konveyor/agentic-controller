@@ -90,8 +90,8 @@ Credentials come from environment variables:
 4. CheckoutBranch(dir, branch) — create or checkout the target branch
 5. CommitStep(dir, msg)    — git add -A && git commit (called after each plan item)
 6. CommitHandoff(dir)      — commit .konveyor/handoff.md + .konveyor/session.json
-7. Push(dir, branch)       — temporarily re-inject credentials into remote URL,
-                             git push, then strip credentials again
+7. Push(dir, branch)       — git push with per-operation auth (credentials
+                             never injected into the remote URL)
 8. WriteResults(dir)       — write .konveyor/results.json (pod-local, not pushed)
 ```
 

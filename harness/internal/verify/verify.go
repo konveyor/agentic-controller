@@ -40,8 +40,12 @@ func Run(ctx context.Context, repoDir, runDir, recipesDir, migrationType string,
 		return nil, err
 	}
 
-	data, _ := json.MarshalIndent(result, "", "  ")
-	os.WriteFile(outPath, data, 0644)
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		logging.Warn("marshal verify.json: %v", err)
+	} else if err := os.WriteFile(outPath, data, 0644); err != nil {
+		logging.Warn("write verify.json: %v", err)
+	}
 
 	if result.FixAttempts > 0 {
 		logging.Info("fix attempts: %d", result.FixAttempts)
@@ -67,7 +71,9 @@ func Run(ctx context.Context, repoDir, runDir, recipesDir, migrationType string,
 	}
 
 	writeVerifyReport(filepath.Join(runDir, "verification-report.md"), result, migrationType)
-	copyFile(filepath.Join(runDir, "verification-report.md"), filepath.Join(repoDir, "verification-report.md"))
+	if err := copyFile(filepath.Join(runDir, "verification-report.md"), filepath.Join(repoDir, "verification-report.md")); err != nil {
+		logging.Warn("copy verification report to repo: %v", err)
+	}
 
 	logging.Ok("Step 4/5 complete")
 	return result, nil
@@ -138,13 +144,15 @@ func writeVerifyReport(path string, r *VerifyResult, migrationType string) {
 	}
 	b.WriteString("\n")
 
-	os.WriteFile(path, []byte(b.String()), 0644)
+	if err := os.WriteFile(path, []byte(b.String()), 0644); err != nil {
+		logging.Warn("write verify report %s: %v", path, err)
+	}
 }
 
-func copyFile(src, dst string) {
+func copyFile(src, dst string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
-		return
+		return fmt.Errorf("read %s: %w", src, err)
 	}
-	os.WriteFile(dst, data, 0644)
+	return os.WriteFile(dst, data, 0644)
 }

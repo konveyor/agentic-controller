@@ -1,15 +1,22 @@
 package plan
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/konveyor/migration-harness/internal/logging"
 )
 
 func RenderRecipe(repoDir, request, context, skillDir string) string {
 	var plannerSkill string
 	skillPath := filepath.Join(skillDir, "skills", "migration-plan", "SKILL.md")
-	if data, err := os.ReadFile(skillPath); err == nil {
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		logging.Warn("failed to read planner skill at %s: %v", skillPath, err)
+		plannerSkill = indentBlock(fmt.Sprintf("WARNING: planner skill not found at %s", skillPath), 4)
+	} else {
 		plannerSkill = indentBlock(string(data), 4)
 	}
 
