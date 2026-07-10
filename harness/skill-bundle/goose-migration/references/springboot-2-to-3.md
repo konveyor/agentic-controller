@@ -525,7 +525,7 @@ public class UserControllerTest { }
 ### 10. **Deprecation Warnings**
 After migration, run with deprecation warnings enabled to catch remaining issues:
 ```bash
-mvn clean compile -Xlint:deprecation
+mvn clean compile -Dmaven.compiler.showDeprecation=true
 ```
 
 ---

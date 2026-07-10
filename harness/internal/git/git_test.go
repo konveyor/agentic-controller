@@ -160,7 +160,10 @@ func TestFullLifecycle(t *testing.T) {
 	}
 
 	// Verify the branch exists on the remote
-	remoteRepo, _ := gogit.PlainOpen(remoteDir)
+	remoteRepo, err := gogit.PlainOpen(remoteDir)
+	if err != nil {
+		t.Fatalf("open remote repo: %v", err)
+	}
 	ref, err := remoteRepo.Reference(plumbing.NewBranchReferenceName(cred.Branch), false)
 	if err != nil {
 		t.Fatalf("remote branch not found: %v", err)

@@ -1,6 +1,6 @@
 version: "1.0.0"
 title: "Verify migration"
-description: "Compile and test the migrated repo. Reports errors but does NOT fix them."
+description: "Compile and test the migrated repo. Attempts up to 3 fix iterations for compilation errors."
 
 settings:
   temperature: 1

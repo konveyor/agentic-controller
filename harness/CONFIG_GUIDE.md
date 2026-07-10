@@ -103,9 +103,9 @@ The specific model name to use for migrations.
 
 | Provider | Best for Migrations | Good for Testing | Fast/Cheap |
 |---|---|---|---|
-| `gcp_vertex_ai` | `gemini-2.5-pro` | `gemini-2.0-flash` | `gemini-1.5-flash` |
+| `gcp_vertex_ai` | `gemini-2.5-pro` | `gemini-2.0-flash` | `gemini-2.0-flash` |
 | `openai` | `o1`, `gpt-4o` | `gpt-4o-mini` | `gpt-4o-mini` |
-| `anthropic` | `claude-opus-4-0` | `claude-sonnet-4-0` | `claude-haiku-3-5` |
+| `anthropic` | `claude-opus-4-8` | `claude-sonnet-5` | `claude-haiku-4-5` |
 
 **Why it matters:**
 - **Plan quality:** More powerful models generate better migration plans (fewer missed dependencies)

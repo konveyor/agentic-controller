@@ -57,7 +57,7 @@ public class OrderServiceMDB {
     @Incoming("orders")
     public void onMessage(String orderJson) { ... }
 }
-// + in application.properties:
+// + in application.properties (using AMQP — adjust connector if using JMS):
 // mp.messaging.incoming.orders.connector=smallrye-amqp
 // mp.messaging.incoming.orders.address=orders
 ```

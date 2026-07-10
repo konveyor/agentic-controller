@@ -183,7 +183,7 @@ reference's "Pattern Catalog" section and adapt it to this file.
   "plan_written": true,
   "step_count": 34,
   "complex_count": 5,
-  "reference_used": "javaee-quarkus",  // ← REQUIRED
+  "reference_used": "javaee-quarkus",
   "summary": "Migrate 28 Java files..."
 }
 ```

@@ -76,10 +76,17 @@ func Run(ctx context.Context, repoDir, runDir, request string, skillDir string, 
 		return nil, fmt.Errorf("plan rejected by user")
 	case Edited:
 		copyFile(planMD, filepath.Join(runDir, "PLAN.md"))
-		content, _ = os.ReadFile(planMD)
+		content, err = os.ReadFile(planMD)
+		if err != nil {
+			logging.Warn("re-read edited PLAN.md: %v", err)
+		}
 		plan = ParsePlanMD(string(content))
-		planJSON, _ = json.MarshalIndent(plan, "", "  ")
-		os.WriteFile(planJSONPath, planJSON, 0644)
+		planJSON, err = json.MarshalIndent(plan, "", "  ")
+		if err != nil {
+			logging.Warn("re-marshal plan.json: %v", err)
+		} else if err := os.WriteFile(planJSONPath, planJSON, 0644); err != nil {
+			logging.Warn("re-write plan.json: %v", err)
+		}
 		logging.Ok("2g. plan edited and re-parsed")
 	case Approved:
 		logging.Ok("2g. plan approved")
@@ -113,7 +120,10 @@ func countRefs(skillDir string) int {
 func copyFile(src, dst string) {
 	data, err := os.ReadFile(src)
 	if err != nil {
+		logging.Warn("copyFile: read %s: %v", src, err)
 		return
 	}
-	os.WriteFile(dst, data, 0644)
+	if err := os.WriteFile(dst, data, 0644); err != nil {
+		logging.Warn("copyFile: write %s: %v", dst, err)
+	}
 }

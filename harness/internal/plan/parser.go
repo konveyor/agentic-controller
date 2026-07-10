@@ -24,8 +24,8 @@ var (
 		"spring-boot-upgrade":   regexp.MustCompile(`(?i)spring.?boot|spring.?framework`),
 	}
 
-	reSource = regexp.MustCompile(`(?i)(?:from|source)[:\s]+(.+?)(?:\n|→|->)`)
-	reTarget = regexp.MustCompile(`(?i)(?:to|target|→|->)\s*(.+?)(?:\n|$)`)
+	reSource = regexp.MustCompile(`(?i)\b(?:from|source)[:\s]+(.+?)(?:\n|→|->)`)
+	reTarget = regexp.MustCompile(`(?i)(?:\b(?:to|target)[:\s]+|(?:→|->)\s*)(.+?)(?:\n|$)`)
 )
 
 func ParsePlanMD(content string) *Plan {

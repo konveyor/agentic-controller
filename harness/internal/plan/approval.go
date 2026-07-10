@@ -51,7 +51,12 @@ func PromptApproval(planMDPath string) (ApprovalResult, error) {
 		if editor == "" {
 			editor = "vi"
 		}
-		cmd := exec.Command(editor, planMDPath)
+		parts := strings.Fields(editor)
+		if len(parts) == 0 {
+			parts = []string{"vi"}
+		}
+		editorArgs := append(parts[1:], planMDPath)
+		cmd := exec.Command(parts[0], editorArgs...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

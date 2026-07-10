@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -44,9 +45,20 @@ func StripCredentials(repo *gogit.Repository) error {
 		return fmt.Errorf("delete remote: %w", err)
 	}
 
+	bareURLs := make([]string, len(cfg.URLs))
+	for i, u := range cfg.URLs {
+		parsed, err := url.Parse(u)
+		if err == nil && parsed.User != nil {
+			parsed.User = nil
+			bareURLs[i] = parsed.String()
+		} else {
+			bareURLs[i] = u
+		}
+	}
+
 	_, err = repo.CreateRemote(&gogitcfg.RemoteConfig{
 		Name: "origin",
-		URLs: cfg.URLs,
+		URLs: bareURLs,
 	})
 	if err != nil {
 		return fmt.Errorf("recreate remote: %w", err)

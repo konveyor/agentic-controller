@@ -165,7 +165,10 @@ func runMigration(cmd *cobra.Command, args []string) error {
 		logging.Header("Git Setup")
 		logging.Info("cloning %s...", creds.RepoURL)
 
-		workDir = filepath.Join(os.TempDir(), "migration-harness-"+filepath.Base(creds.RepoURL))
+		workDir, err = os.MkdirTemp("", "migration-harness-"+filepath.Base(creds.RepoURL)+"-*")
+		if err != nil {
+			return fmt.Errorf("create temp dir: %w", err)
+		}
 		repo, err = git.Clone(ctx, creds, workDir)
 		if err != nil {
 			return fmt.Errorf("clone: %w", err)
@@ -372,13 +375,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runResume(cmd *cobra.Command, args []string) error {
-	logging.Info("Resume not yet implemented")
-	return nil
+	return fmt.Errorf("resume is not yet implemented")
 }
 
 func runStep(cmd *cobra.Command, args []string) error {
-	logging.Info("Step execution not yet implemented")
-	return nil
+	return fmt.Errorf("step execution is not yet implemented")
 }
 
 func findInstallDir() string {

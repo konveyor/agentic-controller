@@ -75,11 +75,11 @@ These rules are non-negotiable — enforce them in every stage:
 
 ---
 
-## Rate Limit Guidance
+## Model Guidance
 
-| Model | Tokens/min | Best for |
-|---|---|---|
-| claude-sonnet-4-5 | 30,000 | Complex transforms (MDB, JNDI) |
-| claude-haiku-4-5 | 100,000 | Mechanical imports, simple renames |
+| Model | Recommended for |
+|---|---|
+| claude-sonnet-5 | Complex transforms (MDB, JNDI) |
+| claude-haiku-4-5 | Mechanical imports, simple renames |
 
-If rate limits hit: `goose configure` → switch to `claude-haiku-4-5-20251001`
+If rate limits hit: `goose configure` → switch to a faster model like `claude-haiku-4-5`
