@@ -1,0 +1,4 @@
+kind: feature
+description: >
+  Add migration harness as a subtree and remove legacy shell-based
+  harness scripts.

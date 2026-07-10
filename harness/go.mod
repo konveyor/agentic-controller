@@ -1,6 +1,6 @@
 module github.com/konveyor/migration-harness
 
-go 1.26.4
+go 1.26.2
 
 require (
 	github.com/go-git/go-git/v5 v5.19.1
