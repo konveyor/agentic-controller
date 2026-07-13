@@ -133,6 +133,7 @@ func clearKonveyorEnv(t *testing.T) {
 
 func TestLoadFromEnv(t *testing.T) {
 	t.Run("returns config from env", func(t *testing.T) {
+		clearKonveyorEnv(t)
 		t.Setenv("KONVEYOR_MODEL_PRIMARY_MODEL", "claude-sonnet-4-5")
 		t.Setenv("KONVEYOR_MODEL_PRIMARY_PROVIDER", "anthropic")
 		t.Setenv("KONVEYOR_MODEL_PRIMARY_ENDPOINT", "https://api.anthropic.com")

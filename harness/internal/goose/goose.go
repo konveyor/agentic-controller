@@ -83,7 +83,7 @@ func (r *CLIRunner) RunRecipe(ctx context.Context, recipe string, maxTurns int, 
 	raw := stdout.Bytes()
 
 	if len(raw) > 0 {
-		if err := os.WriteFile(logPath, raw, 0644); err != nil {
+		if err := os.WriteFile(logPath, raw, 0600); err != nil {
 			logging.Warn("write goose log %s: %v", logPath, err)
 		}
 	}
