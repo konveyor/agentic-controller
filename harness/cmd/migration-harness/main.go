@@ -43,9 +43,9 @@ var initCmd = &cobra.Command{
 }
 
 var runCmd = &cobra.Command{
-	Use:   "run <repo-or-url> <request>",
+	Use:   "run [repo-or-url] [request]",
 	Short: "Run a full migration pipeline",
-	Args:  cobra.ExactArgs(2),
+	Args:  cobra.MaximumNArgs(2),
 	RunE:  runMigration,
 }
 
@@ -138,8 +138,26 @@ func promptWithDefault(reader *bufio.Reader, prompt, defaultVal string) string {
 }
 
 func runMigration(cmd *cobra.Command, args []string) error {
-	repoArg := args[0]
-	request := args[1]
+	var repoArg, request string
+	switch len(args) {
+	case 2:
+		repoArg = args[0]
+		request = args[1]
+	case 1:
+		repoArg = args[0]
+	}
+	if request == "" {
+		request = os.Getenv("KONVEYOR_INSTRUCTIONS")
+	}
+	if request == "" {
+		return fmt.Errorf("request is required: pass as argument or set KONVEYOR_INSTRUCTIONS")
+	}
+	if repoArg == "" {
+		repoArg = os.Getenv("GIT_REPO_URL")
+	}
+	if repoArg == "" {
+		return fmt.Errorf("repo is required: pass as argument or set GIT_REPO_URL")
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -165,7 +183,11 @@ func runMigration(cmd *cobra.Command, args []string) error {
 		logging.Header("Git Setup")
 		logging.Info("cloning %s...", creds.RepoURL)
 
-		workDir, err = os.MkdirTemp("", "migration-harness-"+filepath.Base(creds.RepoURL)+"-*")
+		tmpBase := os.Getenv("HARNESS_WORK_DIR")
+		if tmpBase == "" {
+			tmpBase = os.TempDir()
+		}
+		workDir, err = os.MkdirTemp(tmpBase, "migration-harness-"+filepath.Base(creds.RepoURL)+"-*")
 		if err != nil {
 			return fmt.Errorf("create temp dir: %w", err)
 		}
@@ -205,7 +227,7 @@ func runMigration(cmd *cobra.Command, args []string) error {
 	recipesDir := filepath.Join(installDir, "recipes")
 	logDir := filepath.Join(runDir, "logs")
 
-	runner := goose.NewCLIRunner(cfg.Provider, cfg.Model, logDir)
+	runner := goose.NewCLIRunnerFull(cfg.Provider, cfg.Model, cfg.Endpoint, cfg.APIKey, logDir)
 
 	var pushFn func() error
 	if creds != nil && repo != nil {

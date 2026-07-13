@@ -456,17 +456,20 @@ func (r *AgentRunReconciler) buildEnvVars(
 			return nil, fmt.Errorf("looking up LLMProvider %q for model role %q: %w",
 				m.Provider, m.Role, err)
 		}
-		env = append(env, corev1.EnvVar{
-			Name: prefix + "API_KEY",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: provider.Spec.CredentialRef.SecretName,
+		env = append(env,
+			corev1.EnvVar{Name: prefix + "ENDPOINT", Value: provider.Spec.Endpoint},
+			corev1.EnvVar{
+				Name: prefix + "API_KEY",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: provider.Spec.CredentialRef.SecretName,
+						},
+						Key: provider.Spec.CredentialRef.Key,
 					},
-					Key: provider.Spec.CredentialRef.Key,
 				},
 			},
-		})
+		)
 	}
 
 	// Pass through user-specified env vars.

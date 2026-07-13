@@ -22,11 +22,23 @@ type Runner interface {
 type CLIRunner struct {
 	Provider string
 	Model    string
+	Endpoint string
+	APIKey   string
 	LogDir   string
 }
 
 func NewCLIRunner(provider, model, logDir string) *CLIRunner {
 	return &CLIRunner{Provider: provider, Model: model, LogDir: logDir}
+}
+
+func NewCLIRunnerFull(provider, model, endpoint, apiKey, logDir string) *CLIRunner {
+	return &CLIRunner{
+		Provider: provider,
+		Model:    model,
+		Endpoint: endpoint,
+		APIKey:   apiKey,
+		LogDir:   logDir,
+	}
 }
 
 func (r *CLIRunner) RunRecipe(ctx context.Context, recipe string, maxTurns int, params map[string]string) (json.RawMessage, error) {
@@ -59,9 +71,10 @@ func (r *CLIRunner) RunRecipe(ctx context.Context, recipe string, maxTurns int, 
 	logPath := filepath.Join(r.LogDir, fmt.Sprintf("%s-%d-%d.json", name, os.Getpid(), time.Now().UnixNano()))
 
 	cmd := exec.CommandContext(ctx, goosePath, args...)
-	var stdout bytes.Buffer
+	cmd.Env = providerEnv(r.Provider, r.APIKey, r.Endpoint)
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = &stderr
 
 	logging.Info("goose run --recipe %s (max %d turns)", filepath.Base(recipe), maxTurns)
 
@@ -73,6 +86,10 @@ func (r *CLIRunner) RunRecipe(ctx context.Context, recipe string, maxTurns int, 
 		if err := os.WriteFile(logPath, raw, 0644); err != nil {
 			logging.Warn("write goose log %s: %v", logPath, err)
 		}
+	}
+
+	if stderrOut := stderr.String(); stderrOut != "" {
+		logging.Warn("goose stderr: %s", stderrOut)
 	}
 
 	if runErr != nil {
@@ -98,8 +115,63 @@ func (r *CLIRunner) RunRecipe(ctx context.Context, recipe string, maxTurns int, 
 	return result, nil
 }
 
-// StripBanner removes any text before the first '{' in goose output.
-// Goose sometimes prints ASCII art banners before the JSON conversation.
+// providerEnv returns the current process environment with credentials
+// set in the provider-specific env vars that Goose expects.
+//
+// Goose env var reference:
+//
+//	Anthropic:    ANTHROPIC_API_KEY, ANTHROPIC_HOST
+//	OpenAI:       OPENAI_API_KEY, OPENAI_HOST
+//	Google:       GOOGLE_API_KEY
+//	GCP Vertex:   GOOGLE_APPLICATION_CREDENTIALS (ADC), GCP_PROJECT_ID, GCP_LOCATION
+func providerEnv(provider, apiKey, endpoint string) []string {
+	env := os.Environ()
+
+	p := strings.ToLower(provider)
+
+	if apiKey != "" {
+		switch p {
+		case "anthropic":
+			env = append(env, "ANTHROPIC_API_KEY="+apiKey)
+		case "openai":
+			env = append(env, "OPENAI_API_KEY="+apiKey)
+		case "google":
+			env = append(env, "GOOGLE_API_KEY="+apiKey)
+		case "gcp_vertex_ai":
+			path, err := writeADCFile(apiKey)
+			if err != nil {
+				logging.Warn("write ADC file: %v", err)
+			} else {
+				env = append(env, "GOOGLE_APPLICATION_CREDENTIALS="+path)
+			}
+		}
+	}
+
+	if endpoint != "" {
+		switch p {
+		case "anthropic":
+			env = append(env, "ANTHROPIC_HOST="+endpoint)
+		case "openai":
+			env = append(env, "OPENAI_HOST="+endpoint)
+		}
+	}
+
+	return env
+}
+
+// writeADCFile writes the service account JSON to a file for Google
+// ADC. Goose reads credentials from a file path, not inline. Uses
+// $HOME/.migration-harness/ since /tmp may not be writable in containers.
+func writeADCFile(content string) (string, error) {
+	dir := filepath.Join(os.Getenv("HOME"), ".migration-harness")
+	os.MkdirAll(dir, 0700)
+	path := filepath.Join(dir, "gcp-adc.json")
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		return "", fmt.Errorf("write ADC file: %w", err)
+	}
+	return path, nil
+}
+
 func StripBanner(data []byte) []byte {
 	idx := bytes.IndexByte(data, '{')
 	if idx < 0 {

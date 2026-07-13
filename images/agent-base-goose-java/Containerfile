@@ -1,15 +1,20 @@
-# Migration Harness Container
-# Multi-stage build: compile Go binary, then copy into runtime image
-# Supports Java, Python, .NET, Node.js migrations
+# agent-base-goose-java: Migration harness image with Goose + Java toolchain.
+#
+# Multi-stage build: compiles the Go harness binary, then layers Goose,
+# JDK 21, Maven, graphifyy, and the migration recipes/skills into a
+# runtime image.
+#
+# Build context must be the repository root:
+#   podman build -t agent-base-goose-java -f images/agent-base-goose-java/Containerfile .
 
 # --- Build stage ---
-FROM golang:1.23 AS builder
+FROM golang:1.26 AS builder
 
 WORKDIR /src
-COPY go.mod go.sum ./
+COPY harness/go.mod harness/go.sum ./
 RUN go mod download
-COPY cmd/ cmd/
-COPY internal/ internal/
+COPY harness/cmd/ cmd/
+COPY harness/internal/ internal/
 RUN CGO_ENABLED=0 go build -o /migration-harness ./cmd/migration-harness/
 
 # --- Runtime stage ---
@@ -47,19 +52,6 @@ RUN apt-get update && apt-get install -y \
     maven \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20 LTS
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install .NET 8 SDK
-RUN wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
-    && dpkg -i packages-microsoft-prod.deb \
-    && rm packages-microsoft-prod.deb \
-    && apt-get update \
-    && apt-get install -y dotnet-sdk-8.0 \
-    && rm -rf /var/lib/apt/lists/*
-
 # Install Goose (Block's LLM orchestrator)
 RUN apt-get update && apt-get install -y bzip2 \
     && mkdir -p /usr/local/bin \
@@ -79,21 +71,22 @@ RUN JAVA_HOME_PATH=$(dirname $(dirname $(readlink -f $(which java)))) \
 ENV JAVA_HOME=/usr/lib/jvm/java-current
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
+ENV HARNESS_WORK_DIR=/workspace
 
 # Copy Go binary from build stage
 COPY --from=builder /migration-harness /usr/local/bin/migration-harness
 
-# Copy recipes and skill bundle (resolved relative to binary location)
-COPY recipes/ /usr/local/bin/recipes/
-COPY skill-bundle/ /usr/local/bin/skill-bundle/
+# Copy recipes and skill bundle
+COPY harness/recipes/ /usr/local/bin/recipes/
+COPY harness/skill-bundle/ /usr/local/bin/skill-bundle/
 
 RUN groupadd -r harness && useradd -r -g harness -d /home/harness -s /sbin/nologin harness \
     && mkdir -p /home/harness/.migration-harness /workspace \
-    && chown -R harness:harness /home/harness /workspace
+    && chown -R harness:harness /home/harness /workspace /tmp
 
 WORKDIR /workspace
 
 USER harness
 
 ENTRYPOINT ["migration-harness"]
-CMD ["--help"]
+CMD ["run", "--auto-approve"]
