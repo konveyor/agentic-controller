@@ -358,6 +358,7 @@ func (r *AgentRunReconciler) createSandbox(
 		Spec: sandboxv1beta1.SandboxSpec{
 			PodTemplate: sandboxv1beta1.PodTemplate{
 				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyOnFailure,
 					Containers: []corev1.Container{
 						{
 							Name:         "agent",
