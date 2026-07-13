@@ -1,0 +1,67 @@
+# Harness integration test resources for Kind.
+# Creates the full CR chain: Secret → LLMProvider → Agent → AgentRun
+#
+# Usage:
+#   # 1. Create the secret from your local ADC file:
+#   kubectl create secret generic vertex-credentials \
+#     --from-file=credentials.json=$HOME/.config/gcloud/application_default_credentials.json
+#
+#   # 2. Apply these resources:
+#   kubectl apply -f hack/harness-test/resources.yaml
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: LLMProvider
+metadata:
+  name: gcp-vertex-ai
+spec:
+  endpoint: "global-aiplatform.googleapis.com"
+  credentialRef:
+    secretName: vertex-credentials
+    key: credentials.json
+  models:
+    - name: claude-sonnet-4-5
+      contextWindow: 200000
+      tier: premium
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: migration-harness
+spec:
+  image: localhost/agent-base-goose-java:dev
+  providers:
+    - ref: gcp-vertex-ai
+  params:
+    - name: max_turns
+      type: number
+      default: "200"
+    - name: max_fix_iterations
+      type: number
+      default: "3"
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: coolstore-migration
+spec:
+  agentRef: migration-harness
+  models:
+    - role: primary
+      provider: gcp-vertex-ai
+      model: claude-sonnet-4-5
+  instructions: "Migrate this Java EE application to Quarkus"
+  env:
+    - name: GIT_REPO_URL
+      value: "https://github.com/savitharaghunathan/coolstore.git"
+    - name: GIT_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: git-credentials
+          key: token
+    - name: GCP_PROJECT_ID
+      value: "__GCP_PROJECT_ID__"
+    - name: GCP_LOCATION
+      value: "global"

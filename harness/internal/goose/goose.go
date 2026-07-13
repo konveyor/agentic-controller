@@ -33,7 +33,7 @@ func NewCLIRunner(provider, model, logDir string) *CLIRunner {
 
 func NewCLIRunnerFull(provider, model, endpoint, apiKey, logDir string) *CLIRunner {
 	return &CLIRunner{
-		Provider: provider,
+		Provider: strings.ReplaceAll(strings.ToLower(provider), "-", "_"),
 		Model:    model,
 		Endpoint: endpoint,
 		APIKey:   apiKey,
