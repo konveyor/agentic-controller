@@ -43,7 +43,7 @@ func NewWSClient(host string, port int, secretKey string) (*WSClient, error) {
 		host:      host,
 		port:      port,
 		secretKey: secretKey,
-		recv:      make(chan *RPCResponse, 64),
+		recv:      make(chan *RPCResponse, 256),
 		done:      make(chan struct{}),
 	}
 

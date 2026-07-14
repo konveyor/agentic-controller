@@ -229,13 +229,20 @@ func runMigration(cmd *cobra.Command, args []string) error {
 	recipesDir := filepath.Join(installDir, "recipes")
 	logDir := filepath.Join(runDir, "logs")
 
-	runner, cleanup, err := createRunner(ctx, cfg, logDir, workDir)
+	srv, err := goose.StartServe(ctx, 0)
 	if err != nil {
-		return fmt.Errorf("create runner: %w", err)
+		return fmt.Errorf("start goose serve: %w", err)
 	}
-	if cleanup != nil {
-		defer cleanup()
+	defer srv.Stop()
+
+	wsClient, err := acp.WaitReadyDial(ctx, "127.0.0.1", srv.Port(), srv.SecretKey(), 30*time.Second)
+	if err != nil {
+		return fmt.Errorf("connect to goose serve: %w", err)
 	}
+	defer wsClient.Close()
+
+	acpSession := acp.NewSessionClient(wsClient)
+	runner := goose.NewACPRunner(acpSession, srv, cfg.Provider, cfg.Model, logDir, workDir)
 
 	var pushFn func() error
 	if creds != nil && repo != nil {
@@ -306,7 +313,8 @@ func runMigration(cmd *cobra.Command, args []string) error {
 
 	// Step 2: Plan
 	tracker.StartStep("plan")
-	p, err := plan.Run(ctx, workDir, runDir, request, skillDir, runner)
+	autoApprove := plan.AutoApprove
+	p, err := plan.Run(ctx, workDir, runDir, request, skillDir, runner, autoApprove)
 	if err != nil {
 		pipelineStatus = "failed"
 		return fmt.Errorf("plan: %w", err)
@@ -414,7 +422,7 @@ func runStep(cmd *cobra.Command, args []string) error {
 
 func findInstallDir() string {
 	// Environment override takes priority (set by Dockerfile or operator)
-	if dir := os.Getenv("MH_INSTALL_DIR"); dir != "" {
+	if dir := os.Getenv("KONVEYOR_INSTALL_DIR"); dir != "" {
 		return dir
 	}
 	// Default: go up one level from the binary location.
@@ -473,51 +481,6 @@ func commitAndPush(repo *gogit.Repository, pushFn func() error, msg string) {
 			logging.Warn("push (%s): %v", msg, err)
 		}
 	}
-}
-
-// createRunner builds either an ACPRunner or CLIRunner based on config.
-func createRunner(ctx context.Context, cfg *config.Config, logDir, cwd string) (goose.Runner, func(), error) {
-	mode := resolveRunnerMode(cfg.RunnerMode)
-	logging.Info("runner mode: %s", mode)
-
-	switch mode {
-	case "acp":
-		srv, err := goose.StartServe(ctx, cfg.ACPPort)
-		if err != nil {
-			return nil, nil, fmt.Errorf("start goose serve: %w", err)
-		}
-
-		client, err := acp.WaitReadyDial(ctx, "127.0.0.1", srv.Port(), srv.SecretKey(), 30*time.Second)
-		if err != nil {
-			srv.Stop()
-			return nil, nil, fmt.Errorf("connect to goose serve: %w", err)
-		}
-
-		session := acp.NewSessionClient(client)
-		runner := goose.NewACPRunner(session, srv, cfg.Provider, cfg.Model, logDir, cwd)
-		cleanup := func() {
-			client.Close()
-			srv.Stop()
-		}
-		return runner, cleanup, nil
-
-	default: // "cli"
-		return goose.NewCLIRunnerFull(cfg.Provider, cfg.Model, cfg.Endpoint, cfg.APIKey, logDir), nil, nil
-	}
-}
-
-func resolveRunnerMode(mode string) string {
-	if mode == "cli" || mode == "acp" {
-		return mode
-	}
-	// auto: check if goose supports serve
-	out, err := exec.Command("goose", "serve", "--help").CombinedOutput()
-	if err == nil && strings.Contains(string(out), "serve") {
-		logging.Info("auto-detected goose serve support → using ACP runner")
-		return "acp"
-	}
-	logging.Info("goose serve not available → using CLI runner")
-	return "cli"
 }
 
 func generateSessionID() string {

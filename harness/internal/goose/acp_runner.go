@@ -95,7 +95,7 @@ func (r *ACPRunner) RunRecipe(ctx context.Context, recipe string, maxTurns int, 
 	// Log the full response
 	logPath := filepath.Join(r.logDir, fmt.Sprintf("%s-%d.json", recipeName, os.Getpid()))
 	logData, _ := json.MarshalIndent(result, "", "  ")
-	os.WriteFile(logPath, logData, 0644)
+	os.WriteFile(logPath, logData, 0600)
 
 	// Check stop reason
 	switch result.StopReason {

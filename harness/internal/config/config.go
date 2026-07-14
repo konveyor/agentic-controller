@@ -12,8 +12,6 @@ import (
 const (
 	DefaultMaxTurns         = 200
 	DefaultMaxFixIterations = 3
-	DefaultRunnerMode       = "auto"
-	DefaultACPPort          = 0 // 0 means use goose.DefaultACPPort (4000)
 )
 
 type Config struct {
@@ -23,8 +21,6 @@ type Config struct {
 	APIKey           string
 	MaxTurns         int
 	MaxFixIterations int
-	RunnerMode       string // "cli", "acp", or "auto" (default)
-	ACPPort          int    // port for goose serve; 0 = default (4000)
 }
 
 func DefaultHome() string {
@@ -78,8 +74,6 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{
 		MaxTurns:         DefaultMaxTurns,
 		MaxFixIterations: DefaultMaxFixIterations,
-		RunnerMode:       DefaultRunnerMode,
-		ACPPort:          DefaultACPPort,
 	}
 
 	scanner := bufio.NewScanner(f)
@@ -106,12 +100,6 @@ func Load(path string) (*Config, error) {
 		case "MH_MAX_FIX_ITERATIONS":
 			if n, err := strconv.Atoi(value); err == nil {
 				cfg.MaxFixIterations = n
-			}
-		case "MH_RUNNER_MODE":
-			cfg.RunnerMode = value
-		case "MH_ACP_PORT":
-			if n, err := strconv.Atoi(value); err == nil {
-				cfg.ACPPort = n
 			}
 		}
 	}
