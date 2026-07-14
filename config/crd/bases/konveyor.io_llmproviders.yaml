@@ -62,8 +62,14 @@ spec:
                   credential.
                 properties:
                   key:
-                    description: Key is the key within the Secret that contains the
-                      credential value.
+                    description: |-
+                      Key is the key within the Secret that contains the credential value.
+                      When set, the credential is a single value (e.g. a bearer token) and
+                      is injected into sandbox containers as KONVEYOR_MODEL_<ROLE>_API_KEY.
+                      When omitted, the credential spans multiple environment variables
+                      (e.g. AWS SigV4: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+                      AWS_REGION) and the whole Secret is exposed to the sandbox container
+                      via envFrom, with the Secret's keys as the variable names.
                     minLength: 1
                     type: string
                   secretName:
@@ -72,7 +78,6 @@ spec:
                     minLength: 1
                     type: string
                 required:
-                - key
                 - secretName
                 type: object
               endpoint:

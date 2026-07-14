@@ -27,6 +27,12 @@ const (
 	// managedByLabel is the value used for app.kubernetes.io/managed-by labels.
 	managedByLabel = "agentic-controller"
 
+	// labelAgentRun identifies resources belonging to an AgentRun.
+	labelAgentRun = "konveyor.io/agentrun"
+
+	// labelAgent identifies resources belonging to an Agent.
+	labelAgent = "konveyor.io/agent"
+
 	// jobConditionSuccessCriteriaMet is the K8s 1.36+ condition required
 	// alongside JobComplete for valid Job status updates.
 	jobConditionSuccessCriteriaMet = "SuccessCriteriaMet"

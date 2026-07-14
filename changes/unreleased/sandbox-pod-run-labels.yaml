@@ -1,0 +1,6 @@
+kind: bugfix
+
+description: >
+  Mirror the konveyor.io/agentrun and konveyor.io/agent labels onto the
+  sandbox pod template so the pod is discoverable by run or agent name
+  (Agent Sandbox copies only pod-template metadata onto the pod it creates).
