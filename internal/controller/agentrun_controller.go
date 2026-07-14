@@ -51,7 +51,7 @@ const (
 	workspaceVolumeName = "workspace"
 
 	// sandboxFinishedReasonSucceeded is the Sandbox condition reason for success.
-	sandboxFinishedReasonSucceeded = "Succeeded"
+	sandboxFinishedReasonSucceeded = "PodSucceeded"
 
 	// agentRunRefIndexField is the field index for looking up AgentRuns by agentRef.
 	agentRunRefIndexField = ".spec.agentRef"
