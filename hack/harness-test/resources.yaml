@@ -2,12 +2,7 @@
 # Creates the full CR chain: Secret → LLMProvider → Agent → AgentRun
 #
 # Usage:
-#   # 1. Create the secret from your local ADC file:
-#   kubectl create secret generic vertex-credentials \
-#     --from-file=credentials.json=$HOME/.config/gcloud/application_default_credentials.json
-#
-#   # 2. Apply these resources:
-#   kubectl apply -f hack/harness-test/resources.yaml
+#   hack/harness-test/setup.sh
 
 ---
 apiVersion: konveyor.io/v1alpha1
@@ -18,7 +13,6 @@ spec:
   endpoint: "global-aiplatform.googleapis.com"
   credentialRef:
     secretName: vertex-credentials
-    key: credentials.json
   models:
     - name: claude-sonnet-4-5
       contextWindow: 200000

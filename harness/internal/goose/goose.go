@@ -137,8 +137,13 @@ func providerEnv(provider, apiKey, endpoint string) []string {
 			env = append(env, "OPENAI_API_KEY="+apiKey)
 		case "google":
 			env = append(env, "GOOGLE_API_KEY="+apiKey)
-		case "gcp_vertex_ai":
-			path, err := writeADCFile(apiKey)
+		}
+	}
+
+	if p == "gcp_vertex_ai" {
+		content := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+		if content != "" {
+			path, err := writeADCFile(content)
 			if err != nil {
 				logging.Warn("write ADC file: %v", err)
 			} else {

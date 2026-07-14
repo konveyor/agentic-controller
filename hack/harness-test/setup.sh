@@ -23,7 +23,7 @@ if [ ! -f "$ADC_PATH" ]; then
     exit 1
 fi
 kubectl create secret generic vertex-credentials \
-    --from-file=credentials.json="$ADC_PATH" \
+    --from-file=GOOGLE_APPLICATION_CREDENTIALS_JSON="$ADC_PATH" \
     --dry-run=client -o yaml | kubectl apply -f -
 echo "  vertex-credentials created"
 
