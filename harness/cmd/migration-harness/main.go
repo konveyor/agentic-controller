@@ -229,7 +229,7 @@ func runMigration(cmd *cobra.Command, args []string) error {
 	recipesDir := filepath.Join(installDir, "recipes")
 	logDir := filepath.Join(runDir, "logs")
 
-	srv, err := goose.StartServe(ctx, 0)
+	srv, err := goose.StartServe(ctx, 0, cfg.Provider, cfg.Model, cfg.APIKey, cfg.Endpoint)
 	if err != nil {
 		return fmt.Errorf("start goose serve: %w", err)
 	}
