@@ -27,8 +27,15 @@ type LLMProviderCredentialRef struct {
 	SecretName string `json:"secretName"`
 
 	// Key is the key within the Secret that contains the credential value.
+	// When set, the credential is a single value (e.g. a bearer token) and
+	// is injected into sandbox containers as KONVEYOR_MODEL_<ROLE>_API_KEY.
+	// When omitted, the credential spans multiple environment variables
+	// (e.g. AWS SigV4: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+	// AWS_REGION) and the whole Secret is exposed to the sandbox container
+	// via envFrom, with the Secret's keys as the variable names.
 	// +kubebuilder:validation:MinLength=1
-	Key string `json:"key"`
+	// +optional
+	Key string `json:"key,omitempty"`
 }
 
 // LLMProviderModel declares a model available through this provider.
