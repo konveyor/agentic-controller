@@ -50,7 +50,11 @@ func (s *StubClient) Close() error {
 	return nil
 }
 
-// LaunchGooseServe starts `goose serve --port <port>` as a background process.
+// LaunchGooseServe is deprecated. Use goose.StartServe() from
+// internal/goose/lifecycle.go instead, which provides full lifecycle
+// management (readiness polling, alive checks, clean shutdown).
+//
+// Kept for backward compatibility — will be removed in a future PR.
 func LaunchGooseServe(ctx context.Context, port int) (*os.Process, error) {
 	goosePath, err := exec.LookPath("goose")
 	if err != nil {
