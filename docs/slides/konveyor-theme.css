@@ -1,0 +1,132 @@
+/* @theme konveyor */
+
+@import 'default';
+
+:root {
+  --konveyor-dark: #1a1a2e;
+  --konveyor-dark-alt: #16213e;
+  --konveyor-blue: #343983;
+  --konveyor-gold: #b09454;
+  --konveyor-gold-light: #c4aa6e;
+  --konveyor-white: #ffffff;
+  --konveyor-gray: #e0e0e0;
+  --konveyor-gray-dim: #a0a0a0;
+}
+
+section {
+  background: var(--konveyor-dark);
+  color: var(--konveyor-white);
+  font-family: 'Red Hat Display', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  padding: 40px 60px 80px 60px;
+}
+
+section::after {
+  color: var(--konveyor-gray-dim);
+  font-size: 0.7em;
+}
+
+h1 {
+  color: var(--konveyor-gold);
+  border-bottom: 2px solid var(--konveyor-gold);
+  padding-bottom: 10px;
+  font-size: 1.8em;
+}
+
+h2 {
+  color: var(--konveyor-gold-light);
+  font-size: 1.3em;
+}
+
+strong {
+  color: var(--konveyor-gold-light);
+}
+
+a {
+  color: var(--konveyor-gold);
+  text-decoration: underline;
+}
+
+a:hover {
+  color: var(--konveyor-gold-light);
+}
+
+code {
+  background: var(--konveyor-dark-alt);
+  color: var(--konveyor-gray);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+pre {
+  background: var(--konveyor-dark-alt) !important;
+  border: 1px solid var(--konveyor-blue);
+  border-radius: 8px;
+  padding: 16px !important;
+}
+
+pre code {
+  color: var(--konveyor-gray);
+  background: transparent;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85em;
+}
+
+table th {
+  background: var(--konveyor-blue);
+  color: var(--konveyor-white);
+  padding: 8px 12px;
+  text-align: left;
+  border: 1px solid #4a4f8a;
+}
+
+table td {
+  background: var(--konveyor-dark-alt);
+  color: var(--konveyor-gray);
+  padding: 8px 12px;
+  border: 1px solid #2a2a4e;
+}
+
+table tr:nth-child(even) td {
+  background: #1e1e3a;
+}
+
+ul, ol {
+  color: var(--konveyor-gray);
+}
+
+li {
+  margin-bottom: 0.4em;
+}
+
+blockquote {
+  border-left: 4px solid var(--konveyor-gold);
+  background: var(--konveyor-dark-alt);
+  padding: 12px 20px;
+  color: var(--konveyor-gray);
+  border-radius: 0 8px 8px 0;
+}
+
+/* Lead slides (title, closing) */
+section.lead {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  background: linear-gradient(135deg, var(--konveyor-dark) 0%, var(--konveyor-dark-alt) 50%, var(--konveyor-blue) 100%);
+}
+
+section.lead h1 {
+  border-bottom: none;
+  font-size: 2.2em;
+  color: var(--konveyor-white);
+}
+
+section.lead p {
+  color: var(--konveyor-gold-light);
+  font-size: 1.1em;
+}
