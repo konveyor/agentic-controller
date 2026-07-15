@@ -11,11 +11,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/spf13/cobra"
 
+	"github.com/konveyor/migration-harness/internal/acp"
 	"github.com/konveyor/migration-harness/internal/config"
 	"github.com/konveyor/migration-harness/internal/detect"
 	"github.com/konveyor/migration-harness/internal/execute"
@@ -227,7 +229,20 @@ func runMigration(cmd *cobra.Command, args []string) error {
 	recipesDir := filepath.Join(installDir, "recipes")
 	logDir := filepath.Join(runDir, "logs")
 
-	runner := goose.NewCLIRunnerFull(cfg.Provider, cfg.Model, cfg.Endpoint, cfg.APIKey, logDir)
+	srv, err := goose.StartServe(ctx, 0, cfg.Provider, cfg.Model, cfg.APIKey, cfg.Endpoint)
+	if err != nil {
+		return fmt.Errorf("start goose serve: %w", err)
+	}
+	defer srv.Stop()
+
+	wsClient, err := acp.WaitReadyDial(ctx, "127.0.0.1", srv.Port(), srv.SecretKey(), 30*time.Second)
+	if err != nil {
+		return fmt.Errorf("connect to goose serve: %w", err)
+	}
+	defer wsClient.Close()
+
+	acpSession := acp.NewSessionClient(wsClient)
+	runner := goose.NewACPRunner(acpSession, srv, cfg.Provider, cfg.Model, logDir, workDir)
 
 	var pushFn func() error
 	if creds != nil && repo != nil {
@@ -298,7 +313,8 @@ func runMigration(cmd *cobra.Command, args []string) error {
 
 	// Step 2: Plan
 	tracker.StartStep("plan")
-	p, err := plan.Run(ctx, workDir, runDir, request, skillDir, runner)
+	autoApprove := plan.AutoApprove
+	p, err := plan.Run(ctx, workDir, runDir, request, skillDir, runner, autoApprove)
 	if err != nil {
 		pipelineStatus = "failed"
 		return fmt.Errorf("plan: %w", err)
@@ -405,11 +421,19 @@ func runStep(cmd *cobra.Command, args []string) error {
 }
 
 func findInstallDir() string {
+	// Environment override takes priority (set by Dockerfile or operator)
+	if dir := os.Getenv("KONVEYOR_INSTALL_DIR"); dir != "" {
+		return dir
+	}
+	// Default: go up one level from the binary location.
+	// Binary at /opt/migration-harness/bin/migration-harness
+	//        → installDir = /opt/migration-harness/
+	// This matches the bash version's behavior.
 	exe, err := os.Executable()
 	if err != nil {
 		return "."
 	}
-	return filepath.Dir(exe)
+	return filepath.Dir(filepath.Dir(exe))
 }
 
 func branchName(creds *git.Credentials) string {

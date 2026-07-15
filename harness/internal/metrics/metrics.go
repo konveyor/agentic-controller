@@ -18,6 +18,8 @@ type StepTiming struct {
 
 type Metrics struct {
 	Status    string       `json:"status"`
+	Model     string       `json:"model,omitempty"`
+	Provider  string       `json:"provider,omitempty"`
 	StartedAt time.Time    `json:"started_at"`
 	EndedAt   time.Time    `json:"ended_at"`
 	Seconds   float64      `json:"total_seconds"`
@@ -55,13 +57,15 @@ func (t *Tracker) EndStep() {
 	t.current = nil
 }
 
-func (t *Tracker) Generate(status string) *Metrics {
+func (t *Tracker) Generate(status, model, provider string) *Metrics {
 	if t.current != nil {
 		t.EndStep()
 	}
 	now := time.Now()
 	return &Metrics{
 		Status:    status,
+		Model:     model,
+		Provider:  provider,
 		StartedAt: t.startedAt,
 		EndedAt:   now,
 		Seconds:   now.Sub(t.startedAt).Seconds(),

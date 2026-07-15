@@ -9,6 +9,7 @@
 
 # Go binary
 /migration-harness
+/bin/
 
 # Editor
 .vscode/
