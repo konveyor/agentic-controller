@@ -43,14 +43,16 @@ echo "=== Loading harness image into Kind ==="
 CONTAINER_TOOL="${CONTAINER_TOOL:-podman}"
 KIND_CLUSTER="${KIND_CLUSTER:-agentic-controller-e2e}"
 
+HARNESS_IMG="quay.io/konveyor/agent-base-goose-java"
 make -C "$REPO_ROOT" agent-java-goose-build CONTAINER_TOOL="$CONTAINER_TOOL"
+$CONTAINER_TOOL tag "${HARNESS_IMG}:latest" "${HARNESS_IMG}:dev"
 
 if [ "$CONTAINER_TOOL" = "podman" ]; then
-    $CONTAINER_TOOL save localhost/agent-base-goose-java:dev -o /tmp/harness-image.tar
+    $CONTAINER_TOOL save "${HARNESS_IMG}:dev" -o /tmp/harness-image.tar
     KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/harness-image.tar --name "$KIND_CLUSTER"
     rm -f /tmp/harness-image.tar
 else
-    kind load docker-image localhost/agent-base-goose-java:dev --name "$KIND_CLUSTER"
+    kind load docker-image "${HARNESS_IMG}:dev" --name "$KIND_CLUSTER"
 fi
 echo "  image loaded"
 

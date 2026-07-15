@@ -277,7 +277,7 @@ func runMigration(cmd *cobra.Command, args []string) error {
 			logging.Warn("write session.json: %v", err)
 		}
 
-		m := tracker.Generate(pipelineStatus)
+		m := tracker.Generate(pipelineStatus, cfg.Model, cfg.Provider)
 		if err := metrics.WriteMetrics(runDir, m); err != nil {
 			logging.Warn("write metrics: %v", err)
 		}
@@ -313,8 +313,7 @@ func runMigration(cmd *cobra.Command, args []string) error {
 
 	// Step 2: Plan
 	tracker.StartStep("plan")
-	autoApprove := plan.AutoApprove
-	p, err := plan.Run(ctx, workDir, runDir, request, skillDir, runner, autoApprove)
+	p, err := plan.Run(ctx, workDir, runDir, request, skillDir, runner)
 	if err != nil {
 		pipelineStatus = "failed"
 		return fmt.Errorf("plan: %w", err)

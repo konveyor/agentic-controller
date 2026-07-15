@@ -164,7 +164,6 @@ func providerEnv(provider, model, apiKey, endpoint string) []string {
 	env := os.Environ()
 	p := strings.ReplaceAll(strings.ToLower(provider), "-", "_")
 
-	// Tell goose which provider and model to use (no config file in Sandbox)
 	if p != "" {
 		env = append(env, "GOOSE_PROVIDER="+p)
 	}

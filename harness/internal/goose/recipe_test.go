@@ -3,6 +3,7 @@ package goose
 import (
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -61,13 +62,13 @@ func TestRenderRecipe(t *testing.T) {
 	}
 
 	// Verify templates were substituted
-	if contains(instructions, "{{ repo }}") || contains(instructions, "{{repo}}") {
+	if strings.Contains(instructions, "{{ repo }}") || strings.Contains(instructions, "{{repo}}") {
 		t.Error("unsubstituted {{ repo }} in instructions")
 	}
-	if !contains(instructions, "/workspace/coolstore") {
+	if !strings.Contains(instructions, "/workspace/coolstore") {
 		t.Error("expected rendered repo path in instructions")
 	}
-	if !contains(prompt, "cannot find symbol") {
+	if !strings.Contains(prompt, "cannot find symbol") {
 		t.Error("expected error message in prompt")
 	}
 
@@ -107,26 +108,11 @@ func TestBuildACPPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildACPPrompt: %v", err)
 	}
-	if !contains(full, "do this") || !contains(full, "now please") {
+	if !strings.Contains(full, "do this") || !strings.Contains(full, "now please") {
 		t.Error("expected instructions and prompt in output")
 	}
-	if !contains(full, "fixed") || !contains(full, "boolean") {
+	if !strings.Contains(full, "fixed") || !strings.Contains(full, "boolean") {
 		t.Errorf("expected JSON schema with 'fixed' and 'boolean' in output, got: %s", full[len(full)-200:])
 	}
 	t.Logf("Full ACP prompt: %d bytes", len(full))
-}
-
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && // avoid false positives
-		(len(s) >= len(substr)) &&
-		(s == substr || len(s) > len(substr) && findSubstring(s, substr))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

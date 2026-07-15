@@ -24,7 +24,7 @@ kind: Agent
 metadata:
   name: migration-harness
 spec:
-  image: localhost/agent-base-goose-java:dev
+  image: quay.io/konveyor/agent-base-goose-java:dev
   providers:
     - ref: gcp-vertex-ai
   params:

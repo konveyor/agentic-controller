@@ -121,15 +121,6 @@ func (c *WSClient) Call(ctx context.Context, method string, params any) (json.Ra
 	}
 }
 
-// WaitReady polls until goose serve accepts WebSocket connections.
-func (c *WSClient) WaitReady(ctx context.Context, timeout time.Duration) error {
-	// If we already have a connection, we're ready
-	if c.conn != nil {
-		return nil
-	}
-	return fmt.Errorf("no websocket connection")
-}
-
 // WaitReadyDial attempts to connect to goose serve with retries.
 func WaitReadyDial(ctx context.Context, host string, port int, secretKey string, timeout time.Duration) (*WSClient, error) {
 	deadline := time.Now().Add(timeout)

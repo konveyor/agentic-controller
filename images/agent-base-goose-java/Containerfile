@@ -62,17 +62,17 @@ RUN ARCH=$(uname -m) \
 RUN JAVA_HOME_PATH=$(dirname $(dirname $(readlink -f $(which java)))) \
     && ln -sf "$JAVA_HOME_PATH" /usr/lib/jvm/java-current
 ENV JAVA_HOME=/usr/lib/jvm/java-current
-ENV PATH="${JAVA_HOME}/bin:${PATH}"
+ENV PATH="/opt/migration-harness/bin:${JAVA_HOME}/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
 ENV HARNESS_WORK_DIR=/workspace
-ENV KONVEYOR_INSTALL_DIR=/usr/local/bin
+ENV KONVEYOR_INSTALL_DIR=/opt/migration-harness
 
 # Copy Go binary from build stage
-COPY --from=builder /migration-harness /usr/local/bin/migration-harness
+COPY --from=builder /migration-harness /opt/migration-harness/bin/migration-harness
 
 # Copy recipes and skill bundle
-COPY harness/recipes/ /usr/local/bin/recipes/
-COPY harness/skill-bundle/ /usr/local/bin/skill-bundle/
+COPY harness/recipes/ /opt/migration-harness/recipes/
+COPY harness/skill-bundle/ /opt/migration-harness/skill-bundle/
 
 # Create directories used by the controller and harness
 RUN mkdir -p /opt/skills /workspace /.konveyor /home/harness/.migration-harness \

@@ -11,7 +11,7 @@ import (
 	"github.com/konveyor/migration-harness/internal/logging"
 )
 
-func Run(ctx context.Context, repoDir, runDir, request string, skillDir string, runner goose.Runner, autoApprove bool) (*Plan, error) {
+func Run(ctx context.Context, repoDir, runDir, request string, skillDir string, runner goose.Runner) (*Plan, error) {
 	logging.Header("Step 2: Plan")
 
 	logging.Info("2a. gathering project context...")
@@ -67,33 +67,29 @@ func Run(ctx context.Context, repoDir, runDir, request string, skillDir string, 
 	}
 	logging.Ok("2f. parsed %d items from PLAN.md", len(plan.Items))
 
-	if autoApprove {
-		logging.Ok("2g. plan auto-approved")
-	} else {
-		approval, err := PromptApproval(planMD)
+	approval, err := PromptApproval(planMD)
+	if err != nil {
+		return nil, fmt.Errorf("approval: %w", err)
+	}
+	switch approval {
+	case Rejected:
+		return nil, fmt.Errorf("plan rejected by user")
+	case Edited:
+		copyFile(planMD, filepath.Join(runDir, "PLAN.md"))
+		content, err = os.ReadFile(planMD)
 		if err != nil {
-			return nil, fmt.Errorf("approval: %w", err)
+			logging.Warn("re-read edited PLAN.md: %v", err)
 		}
-		switch approval {
-		case Rejected:
-			return nil, fmt.Errorf("plan rejected by user")
-		case Edited:
-			copyFile(planMD, filepath.Join(runDir, "PLAN.md"))
-			content, err = os.ReadFile(planMD)
-			if err != nil {
-				logging.Warn("re-read edited PLAN.md: %v", err)
-			}
-			plan = ParsePlanMD(string(content))
-			planJSON, err = json.MarshalIndent(plan, "", "  ")
-			if err != nil {
-				logging.Warn("re-marshal plan.json: %v", err)
-			} else if err := os.WriteFile(planJSONPath, planJSON, 0644); err != nil {
-				logging.Warn("re-write plan.json: %v", err)
-			}
-			logging.Ok("2g. plan edited and re-parsed")
-		case Approved:
-			logging.Ok("2g. plan approved")
+		plan = ParsePlanMD(string(content))
+		planJSON, err = json.MarshalIndent(plan, "", "  ")
+		if err != nil {
+			logging.Warn("re-marshal plan.json: %v", err)
+		} else if err := os.WriteFile(planJSONPath, planJSON, 0644); err != nil {
+			logging.Warn("re-write plan.json: %v", err)
 		}
+		logging.Ok("2g. plan edited and re-parsed")
+	case Approved:
+		logging.Ok("2g. plan approved")
 	}
 
 	logging.Info("2h. writing .goosehints...")
