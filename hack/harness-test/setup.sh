@@ -47,7 +47,7 @@ make -C "$REPO_ROOT" agent-java-goose-build CONTAINER_TOOL="$CONTAINER_TOOL"
 
 if [ "$CONTAINER_TOOL" = "podman" ]; then
     $CONTAINER_TOOL save localhost/agent-base-goose-java:dev -o /tmp/harness-image.tar
-    kind load image-archive /tmp/harness-image.tar --name "$KIND_CLUSTER"
+    KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/harness-image.tar --name "$KIND_CLUSTER"
     rm -f /tmp/harness-image.tar
 else
     kind load docker-image localhost/agent-base-goose-java:dev --name "$KIND_CLUSTER"

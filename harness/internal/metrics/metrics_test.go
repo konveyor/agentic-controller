@@ -19,7 +19,7 @@ func TestTrackerLifecycle(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	tracker.EndStep()
 
-	m := tracker.Generate("completed")
+	m := tracker.Generate("completed", "test-model", "test-provider")
 
 	if m.Status != "completed" {
 		t.Errorf("status = %q", m.Status)
@@ -41,7 +41,7 @@ func TestTrackerLifecycle(t *testing.T) {
 func TestTrackerAutoEndOnGenerate(t *testing.T) {
 	tracker := NewTracker()
 	tracker.StartStep("detect")
-	m := tracker.Generate("completed")
+	m := tracker.Generate("completed", "test-model", "test-provider")
 
 	if len(m.Steps) != 1 {
 		t.Fatalf("steps = %d, want 1", len(m.Steps))
@@ -54,7 +54,7 @@ func TestTrackerAutoEndOnStartStep(t *testing.T) {
 	tracker.StartStep("plan")
 	tracker.EndStep()
 
-	m := tracker.Generate("completed")
+	m := tracker.Generate("completed", "test-model", "test-provider")
 	if len(m.Steps) != 2 {
 		t.Fatalf("steps = %d, want 2", len(m.Steps))
 	}

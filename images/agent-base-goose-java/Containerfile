@@ -65,6 +65,7 @@ ENV JAVA_HOME=/usr/lib/jvm/java-current
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 ENV PYTHONUNBUFFERED=1
 ENV HARNESS_WORK_DIR=/workspace
+ENV KONVEYOR_INSTALL_DIR=/usr/local/bin
 
 # Copy Go binary from build stage
 COPY --from=builder /migration-harness /usr/local/bin/migration-harness
