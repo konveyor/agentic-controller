@@ -77,14 +77,23 @@ helm install openai-gw    oci://ghcr.io/.../helm-chart -n konveyor
 ```
 
 Each produces a separate Service (`anthropic-gw`, `openai-gw`) that
-the controller can reach without cross-namespace access.
+the controller can reach without cross-namespace access. Each gateway
+is fully independent — its own database, TLS material, provider
+config, and inference route. They do not share state.
+
+**This is not multi-tenancy.** OpenShell has open upstream work on
+multi-tenant deployments (NVIDIA/OpenShell#1722), a Kubernetes
+operator (NVIDIA/OpenShell#1719), and cross-namespace sandbox
+creation (NVIDIA/OpenShell#1795). Our design does not depend on any
+of these. We are running multiple independent single-user gateway
+instances in one namespace — this is supported today via Helm and
+does not require upstream multi-tenancy features.
 
 OpenShell is explicit about its current scope: "Alpha software —
 single-player mode. One developer, one environment, one gateway. We
 are building toward multi-tenant enterprise deployments." There are
 no Kubernetes CRDs for providers, inference routes, or policies —
 configuration is imperative (CLI/gRPC against the gateway).
-Multi-tenancy and multi-namespace support are not yet available.
 
 ### UX impact
 
@@ -111,14 +120,23 @@ not in scope for this decision.
 OpenShell's namespace-scoped gateway model means all gateways, all
 sandbox pods, and all our CRs live in one namespace today. This works
 for our current single-namespace deployment but does not scale to
-multi-tenant scenarios where teams need isolated gateway
-configurations. Multi-namespace support would require either:
+multi-tenant scenarios where teams need namespace-level isolation
+between gateway configurations. Relevant upstream work:
+
+- NVIDIA/OpenShell#1719 — Kubernetes operator (status: Idea)
+- NVIDIA/OpenShell#1722 — Multi-tenant deployments (milestone:
+  OpenShell Beta, status: Idea)
+- NVIDIA/OpenShell#1795 — Cross-namespace sandbox CRs (open)
+
+Multi-namespace support would require either:
 
 - OpenShell adding cross-namespace or cluster-scoped gateway support
 - Us contributing upstream to OpenShell to expand their deployment model
 - Running separate controller + OpenShell stacks per namespace
 
 This is a known constraint, not a blocker for the current phase.
+Our single-namespace, multi-gateway design works today without any
+upstream changes.
 
 ## Considered Options
 
