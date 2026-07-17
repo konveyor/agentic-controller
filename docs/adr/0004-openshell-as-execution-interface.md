@@ -59,6 +59,67 @@ Sandbox under the hood. The controller no longer imports the Agent
 Sandbox Go module or creates Sandbox CRs directly. Agent Sandbox must
 still be installed in the cluster as an OpenShell prerequisite.
 
+## Deployment Model
+
+OpenShell deploys one gateway per Helm release. Each gateway is a
+StatefulSet (or Deployment with external Postgres) with its own
+Service, database, TLS Secrets, and RBAC — all namespace-scoped.
+Sandboxes are created in the same namespace as the gateway
+(`server.sandboxNamespace` defaults to the release namespace).
+
+**This means all OpenShell gateways must be installed in the same
+namespace as our controller and Hub** (e.g. the konveyor namespace).
+Multiple gateways coexist by using different Helm release names:
+
+```sh
+helm install anthropic-gw oci://ghcr.io/.../helm-chart -n konveyor
+helm install openai-gw    oci://ghcr.io/.../helm-chart -n konveyor
+```
+
+Each produces a separate Service (`anthropic-gw`, `openai-gw`) that
+the controller can reach without cross-namespace access.
+
+OpenShell is explicit about its current scope: "Alpha software —
+single-player mode. One developer, one environment, one gateway. We
+are building toward multi-tenant enterprise deployments." There are
+no Kubernetes CRDs for providers, inference routes, or policies —
+configuration is imperative (CLI/gRPC against the gateway).
+Multi-tenancy and multi-namespace support are not yet available.
+
+### UX impact
+
+LLM provider configuration moves from "create an LLMProvider CR" to
+"Platform Admin pre-provisions OpenShell gateways, users select from
+them." The per-persona experience:
+
+- **Platform Admin**: deploys gateways via Helm, configures providers
+  and inference routing via the OpenShell CLI. This is infrastructure
+  setup comparable to deploying the Agent Sandbox controller today.
+- **Architect**: references available gateways by Service name in Agent
+  CRDs. Does not interact with OpenShell directly.
+- **Developer**: picks an Agent and a gateway, runs it. Does not
+  configure providers, credentials, or OpenShell. Hub presents
+  available gateways through its REST API / UI.
+
+Hub could eventually provide a UI for managing OpenShell gateways
+(creating providers, setting inference routes) so the admin does not
+need the CLI. That is a Hub feature, not a controller concern, and
+not in scope for this decision.
+
+### Multi-tenancy limitations
+
+OpenShell's namespace-scoped gateway model means all gateways, all
+sandbox pods, and all our CRs live in one namespace today. This works
+for our current single-namespace deployment but does not scale to
+multi-tenant scenarios where teams need isolated gateway
+configurations. Multi-namespace support would require either:
+
+- OpenShell adding cross-namespace or cluster-scoped gateway support
+- Us contributing upstream to OpenShell to expand their deployment model
+- Running separate controller + OpenShell stacks per namespace
+
+This is a known constraint, not a blocker for the current phase.
+
 ## Considered Options
 
 ### Controller creates Sandbox CRs directly, OpenShell deployed alongside

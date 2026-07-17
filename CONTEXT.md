@@ -129,9 +129,12 @@ for sandbox creation, replacing the direct Agent Sandbox dependency.
 deployed as a Kubernetes Service. Each gateway serves exactly one
 provider/model combination via `inference.local`. Platform Admin
 deploys multiple gateways (one per provider/model combo) into the
-shared namespace via Helm. An Agent references one or more gateways;
-an AgentRun selects one. The controller connects to the gateway using
-the OpenShell Go SDK and the gateway's client TLS credentials.
+shared namespace via Helm. All gateways must live in the same
+namespace as the controller and Hub — OpenShell's gateway, sandbox
+pods, TLS Secrets, and database are all namespace-scoped. An Agent
+references one or more gateways; an AgentRun selects one. The
+controller connects to the gateway using the OpenShell Go SDK and
+the gateway's client TLS credentials.
 _Avoid_: gateway (lowercase) when referring to Kubernetes Gateway API
 resources — always capitalize when referring to an OpenShell Gateway.
 
