@@ -50,7 +50,8 @@ const (
 	// workspaceVolumeName is the name of the EmptyDir volume for the agent workspace.
 	workspaceVolumeName = "workspace"
 
-	// sandboxFinishedReasonSucceeded is the Sandbox condition reason for success.
+	// sandboxFinishedReasonSucceeded is the Sandbox condition reason for
+	// success. Must match Agent Sandbox's SandboxReasonPodSucceeded constant.
 	sandboxFinishedReasonSucceeded = "PodSucceeded"
 
 	// agentRunRefIndexField is the field index for looking up AgentRuns by agentRef.
