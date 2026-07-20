@@ -4,14 +4,25 @@
 FROM debian:bookworm-slim
 
 ARG GOOSE_VERSION=v1.39.0
-ARG GOOSE_ARCH=aarch64-unknown-linux-gnu
+# Release-triple override; when empty the RUN below derives it from
+# TARGETARCH (BuildKit) or dpkg (classic builder).
+ARG GOOSE_ARCH=
+ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl bzip2 git libxcb1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL \
-      "https://github.com/aaif-goose/goose/releases/download/${GOOSE_VERSION}/goose-${GOOSE_ARCH}.tar.bz2" \
+RUN arch="${GOOSE_ARCH}"; \
+    if [ -z "$arch" ]; then \
+      case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+        amd64) arch=x86_64-unknown-linux-gnu ;; \
+        arm64) arch=aarch64-unknown-linux-gnu ;; \
+        *) echo "unsupported arch '${TARGETARCH}' — set GOOSE_ARCH explicitly" >&2; exit 1 ;; \
+      esac; \
+    fi; \
+    curl -fsSL \
+      "https://github.com/aaif-goose/goose/releases/download/${GOOSE_VERSION}/goose-${arch}.tar.bz2" \
       -o /tmp/goose.tar.bz2 \
     && tar -xjf /tmp/goose.tar.bz2 -C /usr/local/bin \
     && rm /tmp/goose.tar.bz2 \

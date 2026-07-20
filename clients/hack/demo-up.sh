@@ -101,7 +101,9 @@ echo "── hub-shim (:$SHIM_PORT) ──────────────�
 if curl -sf --max-time 2 "http://127.0.0.1:$SHIM_PORT/healthz" >/dev/null 2>&1; then
   ok "already serving — reusing"
 else
-  [ -d "$ROOT/packages/hub-shim/node_modules" ] || (cd "$ROOT/packages/hub-shim" && npm install >/dev/null 2>&1)
+  [ -d "$ROOT/packages/hub-shim/node_modules" ] \
+    || (cd "$ROOT/packages/hub-shim" && npm install > /tmp/demo-hub-shim-install.log 2>&1) \
+    || die "npm install failed in packages/hub-shim — /tmp/demo-hub-shim-install.log"
   # Background ONLY the nohup command (an `&` after a `cmd1 && cmd2` list
   # would fork a lingering wrapper shell that holds our stdout open and
   # poisons the pidfile).
@@ -122,7 +124,9 @@ echo "── ui (:$UI_PORT) ─────────────────�
 if curl -sf --max-time 2 "http://127.0.0.1:$UI_PORT/" >/dev/null 2>&1; then
   ok "already serving — reusing"
 else
-  [ -d "$ROOT/ui/node_modules" ] || (cd "$ROOT/ui" && npm install >/dev/null 2>&1)
+  [ -d "$ROOT/ui/node_modules" ] \
+    || (cd "$ROOT/ui" && npm install > /tmp/demo-ui-install.log 2>&1) \
+    || die "npm install failed in ui — /tmp/demo-ui-install.log"
   (
     cd "$ROOT/ui"
     VITE_SHIM_URL="http://127.0.0.1:$SHIM_PORT" nohup npm run dev -- --host 127.0.0.1 --port "$UI_PORT" --strictPort </dev/null > /tmp/demo-ui.log 2>&1 &

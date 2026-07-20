@@ -41,6 +41,15 @@ export interface WaitOptions {
 const SECRET_DATA_KEYS = ["secret-key", "ACP_SECRET_KEY"];
 const ACP_PORT = 4000;
 
+/** HTTP status carried by a @kubernetes/client-node error, or undefined. */
+function k8sStatusCode(err: unknown): number | undefined {
+  if (err && typeof err === "object" && "code" in err) {
+    const code = (err as { code: unknown }).code;
+    if (typeof code === "number" && code >= 400 && code <= 599) return code;
+  }
+  return undefined;
+}
+
 export class AgentRunClient {
   readonly kc: k8s.KubeConfig;
   readonly namespace: string;
@@ -183,7 +192,12 @@ export class AgentRunClient {
     let podName = await this.core
       .readNamespacedPod({ name: ready.sandboxName, namespace: this.namespace })
       .then((p) => p.metadata?.name)
-      .catch(() => undefined);
+      .catch((err) => {
+        // Only 404 means "fall through to the label selector" — anything
+        // else (RBAC, network, 5xx) is a real failure the caller must see.
+        if (k8sStatusCode(err) === 404) return undefined;
+        throw err;
+      });
     if (!podName) {
       const pods = await this.core.listNamespacedPod({
         namespace: this.namespace,

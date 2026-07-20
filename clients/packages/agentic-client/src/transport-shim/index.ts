@@ -22,6 +22,9 @@ import type {
   RunApi,
 } from "../contract/index.js";
 
+/** Abort any REST call that hasn't answered within this budget. */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export class ShimClient implements RunApi {
   /** Normalized base URL, no trailing slash (e.g. http://127.0.0.1:7080). */
   readonly baseUrl: string;
@@ -103,6 +106,9 @@ export class ShimClient implements RunApi {
         method,
         headers: body !== undefined ? { "content-type": "application/json" } : undefined,
         body: body !== undefined ? JSON.stringify(body) : undefined,
+        // fetch has no built-in timeout; without this a stalled shim or a
+        // network partition hangs every RunApi call forever.
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (err) {
       throw new Error(
