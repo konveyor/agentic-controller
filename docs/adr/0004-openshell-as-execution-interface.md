@@ -14,14 +14,6 @@ OpenShell, which already solves these problems.
 
 ## Context
 
-The controller previously created Sandbox CRs directly via the Agent
-Sandbox API and managed LLM credentials through its own LLMProvider
-CRD. The LLMProvider controller validated Secrets, ran connectivity
-verification Jobs, and the AgentRun controller built `KONVEYOR_MODEL_*`
-environment variables to inject provider endpoints, model names, and
-API keys into sandbox containers. The agent inside the sandbox received
-real LLM credentials in its environment.
-
 OpenShell (NVIDIA) is a secure runtime that layers on top of Agent
 Sandbox. It provides inference routing through a sandbox-local
 `inference.local` HTTPS endpoint, a privacy router that strips
@@ -30,6 +22,33 @@ declarative security policies. OpenShell's Go SDK
 (github.com/NVIDIA/OpenShell, in-progress) provides typed clients for
 sandbox lifecycle management following client-go conventions, including
 watch primitives suitable for controller use.
+
+### Current state
+
+The controller creates `agents.x-k8s.io` Sandbox CRs directly and
+has RBAC permissions for that API group. The AgentRun controller
+manages LLM credentials through the LLMProvider CRD: validates
+Secrets, runs connectivity verification Jobs, and builds
+`KONVEYOR_MODEL_*` environment variables to inject provider endpoints,
+model names, and API keys into sandbox containers. The agent inside
+the sandbox receives real LLM credentials in its environment.
+
+### What changes
+
+The controller stops creating Sandbox CRs directly and instead
+creates sandboxes through the OpenShell gateway API using the Go SDK.
+The LLMProvider CRD, its controller, and all credential plumbing are
+removed. Agent references OpenShell Gateways instead of LLMProviders.
+AgentRun selects a single gateway instead of provider/model/role
+combinations. The controller's `agents.x-k8s.io` RBAC is no longer
+needed — the OpenShell gateway owns Sandbox CR lifecycle.
+
+### Prerequisites
+
+- **OpenShell Go SDK** (NVIDIA/OpenShell#2270): PR A is in review,
+  5 more PRs follow. Must land before implementation can begin.
+- **OpenShell gateways deployed in the namespace**: Platform Admin
+  installs and configures gateways via Helm + OpenShell CLI.
 
 ## Decision
 
@@ -189,8 +208,8 @@ do. Keeping it would mean maintaining dead validation logic.
   being deployed and reachable. This is the same shape of dependency as
   the existing Agent Sandbox requirement.
 - The `sigs.k8s.io/agent-sandbox` Go module dependency is replaced by
-  the OpenShell Go SDK. The SDK is in-progress (NVIDIA/OpenShell#2270)
-  and must land before this migration can be implemented.
+  the OpenShell Go SDK. The controller's RBAC for `agents.x-k8s.io`
+  Sandboxes is removed — the gateway owns that lifecycle.
 - Hub discovers gateways by listing annotated Services and exposes
   them through its curated REST API. The UI shows available gateways
   to users.
