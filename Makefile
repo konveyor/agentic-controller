@@ -70,6 +70,10 @@ e2e-setup: ## Create a Kind cluster with Agent Sandbox and deploy the controller
 	hack/start-kind.sh
 	hack/setup-e2e.sh
 
+.PHONY: harness-test
+harness-test: ## Build, load, and deploy the harness agent in Kind (requires e2e-setup).
+	hack/harness-test/setup.sh
+
 .PHONY: e2e-run
 e2e-run: ## Run the e2e test (cluster must be set up with e2e-setup).
 	hack/run-e2e.sh
@@ -96,6 +100,7 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 ##@ Build
 
 CONTROLLER_AGENT_IMG ?= quay.io/konveyor/agentic-controller-agent:latest
+AGENT_JAVA_GOOSE_IMG ?= quay.io/konveyor/agent-base-goose-java:latest
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
@@ -108,6 +113,14 @@ controller-agent-build: ## Build the controller's test/verification agent image.
 .PHONY: controller-agent-push
 controller-agent-push: controller-agent-build ## Build and push the controller's test/verification agent image.
 	$(CONTAINER_TOOL) push $(CONTROLLER_AGENT_IMG)
+
+.PHONY: agent-java-goose-build
+agent-java-goose-build: ## Build the Java migration agent image (Goose + JDK 21 + harness).
+	$(CONTAINER_TOOL) build -t $(AGENT_JAVA_GOOSE_IMG) -f images/agent-base-goose-java/Containerfile .
+
+.PHONY: agent-java-goose-push
+agent-java-goose-push: agent-java-goose-build ## Build and push the Java migration agent image.
+	$(CONTAINER_TOOL) push $(AGENT_JAVA_GOOSE_IMG)
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.

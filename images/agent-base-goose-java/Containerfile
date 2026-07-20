@@ -1,0 +1,87 @@
+# agent-base-goose-java: Migration harness image with Goose + Java toolchain.
+#
+# Multi-stage build: compiles the Go harness binary, then layers Goose,
+# JDK 21, Maven, graphifyy, and the migration recipes/skills into a
+# UBI 10 runtime image.
+#
+# Build context must be the repository root:
+#   podman build -t agent-base-goose-java -f images/agent-base-goose-java/Containerfile .
+
+# --- Build stage ---
+FROM golang:1.26 AS builder
+
+WORKDIR /src
+COPY harness/go.mod harness/go.sum ./
+RUN go mod download
+COPY harness/cmd/ cmd/
+COPY harness/internal/ internal/
+RUN CGO_ENABLED=0 go build -o /migration-harness ./cmd/migration-harness/
+
+# --- Runtime stage ---
+FROM registry.access.redhat.com/ubi10/ubi:latest
+
+# Install system dependencies
+RUN dnf install -y \
+    curl \
+    wget \
+    git \
+    unzip \
+    ca-certificates \
+    gcc \
+    gcc-c++ \
+    make \
+    python3 \
+    python3-pip \
+    python3-devel \
+    libffi-devel \
+    pkg-config \
+    bzip2 \
+    tar \
+    && dnf clean all
+
+# Install graphifyy (code graph generator - required for detect step)
+RUN python3 -m pip install --no-cache-dir graphifyy==0.7.17
+
+# Install Java (OpenJDK 21) and Maven
+RUN dnf install -y \
+    java-21-openjdk-devel \
+    maven \
+    && dnf clean all
+
+# Install Goose (Block's LLM orchestrator)
+RUN ARCH=$(uname -m) \
+    && if [ "$ARCH" = "x86_64" ]; then GOOSE_ARCH="x86_64-unknown-linux-gnu"; \
+       elif [ "$ARCH" = "aarch64" ]; then GOOSE_ARCH="aarch64-unknown-linux-gnu"; \
+       else echo "Unsupported architecture: $ARCH" && exit 1; fi \
+    && curl -fsSL "https://github.com/block/goose/releases/download/stable/goose-${GOOSE_ARCH}.tar.bz2" -o /tmp/goose.tar.bz2 \
+    && tar -xjf /tmp/goose.tar.bz2 -C /tmp \
+    && mv /tmp/goose /usr/local/bin/goose \
+    && chmod +x /usr/local/bin/goose \
+    && rm -f /tmp/goose.tar.bz2
+
+RUN JAVA_HOME_PATH=$(dirname $(dirname $(readlink -f $(which java)))) \
+    && ln -sf "$JAVA_HOME_PATH" /usr/lib/jvm/java-current
+ENV JAVA_HOME=/usr/lib/jvm/java-current
+ENV PATH="/opt/migration-harness/bin:${JAVA_HOME}/bin:${PATH}"
+ENV PYTHONUNBUFFERED=1
+ENV HARNESS_WORK_DIR=/workspace
+ENV KONVEYOR_INSTALL_DIR=/opt/migration-harness
+
+# Copy Go binary from build stage
+COPY --from=builder /migration-harness /opt/migration-harness/bin/migration-harness
+
+# Copy recipes and skill bundle
+COPY harness/recipes/ /opt/migration-harness/recipes/
+COPY harness/skill-bundle/ /opt/migration-harness/skill-bundle/
+
+# Create directories used by the controller and harness
+RUN mkdir -p /opt/skills /workspace /.konveyor /home/harness/.migration-harness \
+    && useradd -r -d /home/harness -s /sbin/nologin harness \
+    && chown -R harness:harness /home/harness /workspace /tmp
+
+WORKDIR /workspace
+
+USER harness
+
+ENTRYPOINT ["migration-harness"]
+CMD ["run", "--auto-approve"]

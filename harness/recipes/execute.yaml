@@ -1,0 +1,105 @@
+version: "1.0.0"
+title: "Execute migration item"
+description: "Migrate one item from the plan. The matching execution sub-skill auto-activates."
+
+settings:
+  temperature: 1
+
+parameters:
+  - key: repo
+    input_type: string
+    requirement: required
+    description: "Absolute path to the source repository"
+  - key: plan_md_path
+    input_type: string
+    requirement: required
+    description: "Path to PLAN.md file with goal and steps"
+  - key: migration_type
+    input_type: string
+    requirement: required
+    description: "Migration key, e.g. java-ee-to-quarkus, python2-to-python3"
+  - key: item_n
+    input_type: string
+    requirement: required
+    description: "1-based item number in the migration plan"
+  - key: item_path
+    input_type: string
+    requirement: required
+    description: "File or marker path for this item"
+  - key: item_action
+    input_type: string
+    requirement: required
+    description: "Action for this item: migrate, create, or delete"
+
+extensions:
+  - type: builtin
+    name: developer
+    timeout: 1200
+    bundled: true
+
+instructions: |
+  You are executing ONE migration step from a comprehensive migration plan.
+
+  PHASE 1 — UNDERSTAND THE CONTEXT (2 reads max):
+  1. Read {{ plan_md_path }} to understand:
+     - The migration GOAL (what we're trying to achieve overall)
+     - The PROJECT SUMMARY (complexity, key challenges)
+     - The specific step you're working on (Step #{{ item_n }})
+     - What dependencies this step has (what should already be done)
+
+  2. Read {{ repo }}/.goosehints for:
+     - Project-specific guidance
+     - Token discipline rules
+     - The checklist of all steps
+
+  PHASE 2 — EXECUTE THE STEP:
+  3. Apply the transformation described in your step:
+     - {{ item_action }} the file: {{ item_path }}
+     - Follow the step's "What to do" instructions exactly
+     - Use the GOAL to guide any judgment calls
+
+  4. If you encounter problems:
+     - Syntax errors → document in your response
+     - Compilation errors → document (but don't try to compile)
+     - Missing files → document
+     - Uncertainty → document what you're unsure about
+
+  RULES:
+  - Execute ONLY step #{{ item_n }}, do NOT touch other files
+  - Do NOT compile, test, or verify — that's a separate step
+  - Read files as needed to understand the change, but minimize reads
+  - If something is unclear, make your best attempt and document the uncertainty
+  - Lessons learned are OPTIONAL — only include if there's something genuinely useful
+
+  WHAT TO RETURN:
+  - n: The step number ({{ item_n }})
+  - path: The primary file path ({{ item_path }})
+  - status: "ok" (you made the change), "failed" (couldn't do it), or "skipped" (not needed)
+  - files_touched: List of files you modified/created/deleted
+  - lesson: String describing what you learned (can be empty string)
+  - error_log: Any errors encountered (syntax, missing files, etc.) — empty string if none
+  - summary: Brief description of what was done
+
+prompt: |
+  Execute Step #{{ item_n }} from the migration plan.
+
+  Action: {{ item_action }}
+  File: {{ item_path }}
+  Repository: {{ repo }}
+  Migration Type: {{ migration_type }}
+
+  First, read {{ plan_md_path }} to understand the goal and this specific step.
+  Then execute the transformation and report results.
+
+response:
+  json_schema:
+    type: object
+    required: [n, path, status, files_touched, lesson, error_log]
+    properties:
+      n:             { type: integer, description: "Step number" }
+      path:          { type: string, description: "Primary file path" }
+      status:        { type: string, enum: [ok, failed, skipped] }
+      files_touched: { type: array, items: { type: string }, description: "All files modified/created/deleted" }
+      lesson:        { type: string, description: "What was learned (can be empty string)" }
+      error_log:     { type: string, description: "Syntax errors, compilation issues, etc. (empty if none)" }
+      summary:       { type: string, description: "Brief description of what was done" }

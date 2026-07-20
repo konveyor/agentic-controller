@@ -51,7 +51,7 @@ const (
 	workspaceVolumeName = "workspace"
 
 	// sandboxFinishedReasonSucceeded is the Sandbox condition reason for success.
-	sandboxFinishedReasonSucceeded = "Succeeded"
+	sandboxFinishedReasonSucceeded = "PodSucceeded"
 
 	// agentRunRefIndexField is the field index for looking up AgentRuns by agentRef.
 	agentRunRefIndexField = ".spec.agentRef"
@@ -367,6 +367,7 @@ func (r *AgentRunReconciler) createSandbox(
 					},
 				},
 				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyOnFailure,
 					Containers: []corev1.Container{
 						{
 							Name:  "agent",
@@ -477,6 +478,7 @@ func (r *AgentRunReconciler) buildEnvVars(
 			return nil, nil, fmt.Errorf("looking up LLMProvider %q for model role %q: %w",
 				m.Provider, m.Role, err)
 		}
+		env = append(env, corev1.EnvVar{Name: prefix + "ENDPOINT", Value: provider.Spec.Endpoint})
 		credSecretName := provider.Spec.CredentialRef.SecretName
 		if provider.Spec.CredentialRef.Key != "" {
 			env = append(env, corev1.EnvVar{
