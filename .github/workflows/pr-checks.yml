@@ -23,13 +23,20 @@ jobs:
     if: contains(fromJSON('["feature", "bugfix", "breaking"]'), needs.verify.outputs.pr_type)
     name: Verify changelog fragment
     steps:
+      # actions/checkout refuses to check out fork PR code in a
+      # pull_request_target workflow, so check out the base repo and fetch
+      # the PR head as a ref that is only diffed, never checked out or run.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch PR head ref
+        run: git fetch origin pull/${{ github.event.pull_request.number }}/head:pr-head
       - name: Check for changelog fragment
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          FRAGMENTS=$(git diff --name-only --diff-filter=AM origin/${{ github.event.pull_request.base.ref }}...HEAD -- 'changes/unreleased/*.yaml' 'changes/unreleased/*.yml')
+          FRAGMENTS=$(git diff --name-only --diff-filter=AM "origin/${BASE_REF}...pr-head" -- 'changes/unreleased/*.yaml' 'changes/unreleased/*.yml')
           if [ -z "$FRAGMENTS" ]; then
             echo "::error::This is a ${{ needs.verify.outputs.pr_type }} PR — a changelog fragment is required in changes/unreleased/"
             echo ""
