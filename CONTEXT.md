@@ -7,8 +7,8 @@ following the skillimage.io/v1alpha1 SkillCard format. A SkillCard with
 `type: skill` (default) is on-demand — only its name and description
 are loaded at startup; the full content activates when the agent
 invokes it. A SkillCard with `type: rule` is always-loaded — its full
-content is injected into every agent turn and counts toward the LLM's
-context budget. A SkillCard CR supports three source types: an OCI
+content is injected into every agent turn. A SkillCard CR supports
+three source types: an OCI
 image ref (pre-built artifact), a git source URL (controller clones,
 builds, and pushes the OCI artifact), or inline markdown content
 (controller builds and pushes). All three converge to a resolved OCI

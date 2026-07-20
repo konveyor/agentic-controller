@@ -1,6 +1,8 @@
-# OpenShell as Execution Interface
+# ADR 0004: OpenShell as Execution Interface
 
-Status: accepted | Date: 2026-07-16
+**Status:** Accepted
+**Date:** 2026-07-20
+**Authors:** David Zager
 
 The controller replaces its direct Agent Sandbox dependency with
 OpenShell as the execution interface. Instead of creating
@@ -53,6 +55,15 @@ Service exists and creates the sandbox through it.
 deployed independently. The controller discovers them as Services in
 the shared namespace — it does not create, manage, or mirror them as
 custom resources.
+
+**Multi-model per run is dropped.** ADR-0001 introduced per-run model
+selection with roles (e.g. primary, efficient) via
+`KONVEYOR_MODEL_<ROLE>_*` env vars. OpenShell's `inference.local`
+serves exactly one model per gateway, and each sandbox lives on one
+gateway. Multi-role model selection within a single run is not
+possible through OpenShell's routing. An AgentRun selects one
+gateway = one model. The multi-role design was speculative and not
+exercised in practice.
 
 **Agent Sandbox remains a transitive dependency.** OpenShell uses Agent
 Sandbox under the hood. The controller no longer imports the Agent
@@ -138,7 +149,7 @@ This is a known constraint, not a blocker for the current phase.
 Our single-namespace, multi-gateway design works today without any
 upstream changes.
 
-## Considered Options
+## Alternatives Considered
 
 ### Controller creates Sandbox CRs directly, OpenShell deployed alongside
 
