@@ -60,7 +60,7 @@ if kubectl get secret aws-bedrock-creds -n $NS >/dev/null 2>&1; then
   kubectl apply -f "$ROOT/manifests/goose-bedrock.yaml" >/dev/null
   ok "goose-bedrock applied (aws-bedrock-creds present)"
 else
-  warn "aws-bedrock-creds secret missing — skipping goose-bedrock.yaml (mock-only demo); see README to create it"
+  warn "aws-bedrock-creds secret missing — skipping goose-bedrock.yaml (mock-only demo); see manifests/goose-bedrock.yaml header to create it"
 fi
 
 # Readiness gate: providers verify via a Job, then agents flip Ready.
@@ -141,6 +141,6 @@ echo "ready:"
 echo "  ui        http://localhost:$UI_PORT"
 echo "  shim      http://127.0.0.1:$SHIM_PORT/healthz"
 echo "  real run  kubectl create -f docs/demo/real-run.yaml   (goose+Bedrock; needs aws-bedrock-creds)"
-echo "  note      sandbox pods do not survive a minikube restart (restartPolicy Never) —"
-echo "            old runs flip Failed after reboot; create a fresh run instead."
+echo "  note      don't rely on runs across a minikube restart —"
+echo "            create a fresh run right before presenting."
 echo "  script    docs/DEMO.md"

@@ -176,10 +176,10 @@ export class AgentRunClient {
     }
 
     // Both the real Agent Sandbox controller and the dev simulator name the
-    // backing pod after the Sandbox, so resolve it by name first. Fall back to
-    // the run label — the real controller does NOT put konveyor.io/agentrun on
-    // the pod (only agents.x-k8s.io/sandbox-name-hash), so name-first is what
-    // makes this work against agentic-controller.
+    // backing pod after the Sandbox, so resolve it by name first — the only
+    // mechanism that works against every controller build. Fall back to the
+    // run label, which controllers since #34 mirror onto the pod
+    // (pre-#34 pods carry only agents.x-k8s.io/sandbox-name-hash).
     let podName = await this.core
       .readNamespacedPod({ name: ready.sandboxName, namespace: this.namespace })
       .then((p) => p.metadata?.name)

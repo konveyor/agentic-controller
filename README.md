@@ -49,6 +49,8 @@ agentic-controller/
   internal/controller/    Controller implementations
   internal/registry/      OCI registry client
   docs/adr/               Architecture Decision Records
+  harness/                Migration harness (Go) baked into the base image
+  images/                 Agent container images (base, runtime, language)
   clients/                Reference client stack (client core, hub-shim,
                           browser UI, agent harnesses, demo) — see clients/README.md
   skills/                 Agent skills for contributors

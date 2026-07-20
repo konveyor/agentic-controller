@@ -3,16 +3,17 @@
 # env contract to goose, then serve ACP.
 #
 # The controller injects: KONVEYOR_PARAM_* (run params),
-# KONVEYOR_MODEL_<ROLE>_{PROVIDER,MODEL,API_KEY} (model selections),
+# KONVEYOR_MODEL_<ROLE>_{PROVIDER,MODEL,ENDPOINT,API_KEY} (model selections),
 # KONVEYOR_PROMPT / KONVEYOR_INSTRUCTIONS, GOOSE_SERVER__SECRET_KEY,
 # plus run.spec.env / run.spec.envFrom passthrough. It does NOT clone the
 # repository (the retired dev simulator did that in an init container) —
 # the agent base owns workspace setup now.
 #
-# Credentials: the controller's single-key API_KEY injection fits
-# OpenAI-style providers only. For SigV4 (Bedrock), pass the whole
-# credential secret via run.spec.envFrom (AWS_ACCESS_KEY_ID,
-# AWS_SECRET_ACCESS_KEY, AWS_REGION).
+# Credentials: API_KEY is injected only when the provider's credentialRef
+# names a key (OpenAI-style bearer token). For SigV4 (Bedrock), use a
+# keyless credentialRef — the controller exposes the whole credential
+# secret (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION) to this
+# container via envFrom (#34).
 set -u
 
 log() { echo "[agent-base] $*"; }
@@ -55,7 +56,7 @@ if [ -z "${GOOSE_PROVIDER:-}" ] && [ -n "${KONVEYOR_MODEL_PRIMARY_PROVIDER:-}" ]
 fi
 log "provider=${GOOSE_PROVIDER:-unset} model=${GOOSE_MODEL:-unset}"
 if [ "${GOOSE_PROVIDER:-}" = "aws_bedrock" ] && [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
-  log "WARNING: aws_bedrock selected but AWS_ACCESS_KEY_ID is unset — pass the credential secret via run.spec.envFrom"
+  log "WARNING: aws_bedrock selected but AWS_ACCESS_KEY_ID is unset — use a keyless credentialRef on the LLMProvider so the controller mounts the credential secret"
 fi
 
 # 3. Standing prompt + instructions -> .goosehints in the workspace

@@ -1,6 +1,10 @@
 # Real goose harness wired to AWS Bedrock.
-# The aws-bedrock-creds secret is created separately (see README) so
-# credentials never land in this file.
+# The aws-bedrock-creds secret is created separately so credentials never
+# land in this file:
+#   kubectl create secret generic aws-bedrock-creds -n konveyor-agents \
+#     --from-literal=AWS_ACCESS_KEY_ID=... \
+#     --from-literal=AWS_SECRET_ACCESS_KEY=... \
+#     --from-literal=AWS_REGION=us-east-1
 ---
 apiVersion: konveyor.io/v1alpha1
 kind: LLMProvider
@@ -13,9 +17,12 @@ metadata:
     konveyor.io/goose-provider: aws_bedrock
 spec:
   endpoint: "https://bedrock-runtime.us-east-1.amazonaws.com"
+  # Keyless: with key omitted the controller exposes the whole Secret to the
+  # sandbox via envFrom — required for SigV4 providers, which need the
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION triple, not a
+  # single bearer token.
   credentialRef:
     secretName: aws-bedrock-creds
-    key: AWS_ACCESS_KEY_ID
   models:
     - name: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       contextWindow: 200000

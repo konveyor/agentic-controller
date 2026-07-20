@@ -10,8 +10,11 @@ running code instead of a whiteboard:
   passthrough proxy (stream 2, issue #21) — see ADR 0004
 - the **UI** and **client core** are the reference for the tackle2-ui
   client layer (stream 3, issues #22–#24)
-- the **goose harness** is a working reference for the base-image harness
-  (stream 4, issues #25/#26)
+- the **goose harness** is a working reference for the interactive
+  (ACP-serving) side of the base image (stream 4, issues #25/#26). The
+  batch-mode harness landed separately as the repo-root `harness/` Go
+  module + `images/agent-base-goose-java` (#33); both consume the same
+  `KONVEYOR_MODEL_*` env contract.
 
 ## Layout
 
@@ -55,7 +58,9 @@ is scaffolding with a named replacement:
 - `hub-shim` → the real Hub passthrough proxy (its route table is the
   handover spec)
 - `ui` → absorbed into tackle2-ui
-- `harness-goose` → the stream-4 base image
+- `harness-goose` → the stream-4 base image (the batch side already exists:
+  repo-root `harness/` + `images/agent-base-goose-java`, #33; this one
+  covers the interactive `goose serve` / ACP mode until they converge)
 - `harness-mock` → stays, as a deterministic test fixture
 
 Every piece encodes contract facts verified against the live controller

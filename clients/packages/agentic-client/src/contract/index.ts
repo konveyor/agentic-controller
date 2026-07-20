@@ -71,8 +71,9 @@ export interface AgentRunStatus {
   observedGeneration?: number;
   /**
    * Name of the Sandbox CR created for this run. The backing pod has this
-   * EXACT name — resolve the pod by name, never by label (the pod carries
-   * only agents.x-k8s.io/sandbox-name-hash, no konveyor.io/agentrun label).
+   * EXACT name — resolve the pod by name (works against every controller
+   * build; the konveyor.io/agentrun pod label exists only since #34 and is
+   * a fallback, not the primary mechanism).
    */
   sandboxName?: string;
   startTime?: string;

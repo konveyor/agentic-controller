@@ -393,11 +393,13 @@ async function resolveSources(input: CreateRunBody): Promise<ResolvedSources> {
  * Agent's declared providers — the platform-side policy the controller does
  * not perform for itself.
  *
- * The controller turns spec.models into KONVEYOR_MODEL_{ROLE}_* env, but its
- * single-key API_KEY injection only fits OpenAI-style providers; a SigV4
- * provider (Bedrock) needs its whole credential secret, so we mount it via
- * envFrom. The secretRef is `optional` so a provider whose secret has not
- * been created (e.g. the mock provider) still lets the run start — the
+ * The controller turns spec.models into KONVEYOR_MODEL_{ROLE}_* env. Since
+ * #34 it also handles SigV4-style providers itself: a keyless credentialRef
+ * exposes the whole credential Secret to the sandbox via envFrom. The
+ * envFrom we add here duplicates that for keyless providers (same secret,
+ * harmless) and remains the only credential path against pre-#34
+ * controllers. The secretRef is `optional` so a provider whose secret has
+ * not been created (e.g. the mock provider) still lets the run start — the
  * harness warns at runtime instead of the pod wedging on a missing Secret.
  *
  * Defaults to the Agent's first declared provider and that provider's

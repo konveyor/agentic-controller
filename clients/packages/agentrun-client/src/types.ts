@@ -142,7 +142,12 @@ export interface LLMProviderModel {
 
 export interface LLMProviderSpec {
   endpoint: string;
-  credentialRef: { secretName: string; key: string };
+  /**
+   * key names the Secret entry injected as KONVEYOR_MODEL_<ROLE>_API_KEY.
+   * Omitted (keyless): the controller exposes the whole Secret to the
+   * sandbox via envFrom — the multi-variable/SigV4 path.
+   */
+  credentialRef: { secretName: string; key?: string };
   models: LLMProviderModel[];
 }
 

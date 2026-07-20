@@ -37,9 +37,9 @@ It verifies the controller deployment, rebuilds missing harness images,
 applies `manifests/samples.yaml` (+ `goose-bedrock.yaml` when
 `aws-bedrock-creds` exists), and gates on the Agent going Ready. Only true
 prerequisites: minikube running, Agent Sandbox installed, and the
-controller deployed from this repo (see the stack table). Runs do not
-survive a minikube restart
-(`restartPolicy: Never`) — create fresh ones, don't rely on old pods.
+controller deployed from this repo (see the stack table). Sandbox pods run
+with `restartPolicy: OnFailure` (since #33), but don't rely on old runs
+after a minikube restart — create fresh ones right before presenting.
 
 ## Beat 1 — create a run in the browser (2 min)
 
@@ -69,7 +69,7 @@ create the real run via the API — which is the point: same CR, any client:
 
 ```sh
 kubectl create -f docs/demo/real-run.yaml
-kubectl logs -f -n konveyor-agents -l agents.x-k8s.io/sandbox-name-hash --tail=50   # or: kubectl logs <run-name>
+kubectl logs -f -n konveyor-agents -l konveyor.io/agentrun=<run-name> --tail=50   # or: kubectl logs <run-name>
 ```
 
 Show the agent-base log lines: `cloning …coolstore@main`, `clone OK: … pom.xml …`,
@@ -136,12 +136,14 @@ no-cluster direct-dial check.
 - **Nobody rewrites UX**: the extension kept its panel/tree; tackle2-ui
   gains chat capability it doesn't have (zero WS code today).
 - **Contract is verified, not aspirational**: pod == `status.sandboxName`,
-  ACP key `secret-key`, headless portless Service, no run label on the pod,
-  whole-spec immutability — all proven against the live controller and
-  encoded in the shared client core.
-- **Controller gaps this stack surfaced are upstreamed**: CRD CEL fixes and
-  the scheme-builder cleanup are merged; sandbox pod run-labels and
-  multi-key (SigV4) provider credentials are proposed as a follow-up PR.
+  ACP key `secret-key`, headless portless Service, whole-spec immutability
+  — all proven against the live controller and encoded in the shared
+  client core.
+- **Controller gaps this stack surfaced are upstreamed and merged**: CRD
+  CEL fixes, the scheme-builder cleanup, and (#34) sandbox pod run-labels
+  plus multi-variable (SigV4) provider credentials via keyless
+  `credentialRef` — the client-side `envFrom` workaround is gone from this
+  stack.
 
 ## Cleanup
 

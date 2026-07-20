@@ -17,6 +17,3 @@ spec:
   env:
   - name: GOOSE_MODE
     value: auto
-  envFrom:
-  - secretRef:
-      name: aws-bedrock-creds

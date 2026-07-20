@@ -49,15 +49,24 @@ verified against the real controller (PR #4) on a live cluster:
 - **ACP server:** pod port `4000`, path `/acp`, speaking WebSocket and
   streamable HTTP, authenticated with the `X-Secret-Key` header. `/healthz`
   returns `ok` unauthenticated and is the liveness probe clients may use.
-- **Pod labels:** the pod carries ONLY `agents.x-k8s.io/sandbox-name-hash` —
-  there is NO `konveyor.io/agentrun` label on the pod. Label-based pod
-  discovery is broken by design in the current controller; resolve by name
-  (see Consequences for the prepared upstream patch).
+- **Pod resolution stays name-based even though run labels exist.** Since
+  PR #34 the controller mirrors `konveyor.io/agentrun` and
+  `konveyor.io/agent` into the Sandbox PodTemplate, so current pods DO carry
+  the run label. Clients MUST still resolve the pod by name
+  (`status.sandboxName`): it is the only mechanism that works against every
+  controller build (pre-#34 pods carry only
+  `agents.x-k8s.io/sandbox-name-hash`), and name resolution has no
+  ambiguity. The label is a convenience for humans (`kubectl logs -l
+  konveyor.io/agentrun=<run>`) and MAY be used as a fallback.
 - **Service:** the auto-created Service is HEADLESS (`clusterIP: None`, no
   ports). Clients MUST port-forward / dial the POD, not the Service.
 - **Injected env** (contract between controller and harness images):
   `GOOSE_SERVER__SECRET_KEY`, `KONVEYOR_PARAM_<NAME>`, `KONVEYOR_PROMPT`,
-  `KONVEYOR_INSTRUCTIONS`.
+  `KONVEYOR_INSTRUCTIONS`, and per model role
+  `KONVEYOR_MODEL_<ROLE>_{PROVIDER,MODEL,ENDPOINT,API_KEY}`. `API_KEY` is
+  injected only when the provider's `credentialRef` names a `key`; a keyless
+  `credentialRef` instead exposes the WHOLE credential Secret to the sandbox
+  via `envFrom` (the SigV4/multi-variable path, PR #34).
 - **AgentRun spec is IMMUTABLE after create** (a whole-spec CEL rule).
   Clients MUST delete + recreate to change anything; PATCHing spec will be
   rejected by the apiserver.
@@ -128,13 +137,12 @@ past runs, not by mutating one.
 - **Known cosmetic gap (harness):** the mock harness accepts the legacy
   `AGENT_PROMPT` env var as a fallback for `KONVEYOR_PROMPT`
   (`clients/harness-mock/server.mjs`). Harmless; remove once nothing legacy remains.
-- **Known gap (pod labels):** because Agent Sandbox v0.5.0 copies only
-  PodTemplate labels onto the pod, the pod is not selectable by
-  `konveyor.io/agentrun`. A controller fix mirroring the labels into the
-  Sandbox PodTemplate is proposed separately; until it merges, name-based
-  resolution remains the only correct discovery mechanism — which is why
-  (a) mandates it (and why it stays mandated: name-based resolution keeps
-  working either way).
+- **Pod labels (resolved):** Agent Sandbox v0.5.0 copies only PodTemplate
+  labels onto the pod, so pods were originally not selectable by
+  `konveyor.io/agentrun`. The controller fix mirroring the labels into the
+  Sandbox PodTemplate merged as PR #34. Name-based resolution stays
+  mandated regardless — it works against every controller build and has no
+  ambiguity; the label is a fallback and a human convenience.
 - **Risk:** the contract is verified against the controller at `main`
   (post-#4 merge), not a tagged release. If status fields or the secret
   data key are renamed before release, this ADR and
