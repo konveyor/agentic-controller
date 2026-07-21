@@ -1,0 +1,24 @@
+{
+  "name": "@konveyor/hub-shim",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Localhost dev gateway serving the SHIM HTTP API v1 — stands in for the future Konveyor Hub passthrough proxy so browser UIs can drive the real agentic-controller.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx dev/browser-smoke.ts",
+    "dial-check": "tsx dev/dial-check.ts",
+    "drop-check": "tsx dev/drop-check.ts"
+  },
+  "dependencies": {
+    "@kubernetes/client-node": "^1.4.0",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

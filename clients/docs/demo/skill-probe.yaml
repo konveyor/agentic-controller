@@ -1,0 +1,41 @@
+# Skills-mount probe — reproduces the ImageVolume platform finding
+# (docs/UPSTREAM-FEEDBACK.md item 5).
+#
+# Build the skill image first (content = any dir with a SKILL.md; PR #4's
+# skills/examples/ejb-to-cdi works verbatim):
+#   printf 'FROM scratch\nCOPY . /\n' > Containerfile
+#   minikube image build -t skills-ejb-to-cdi:dev -f Containerfile .
+#
+# Then: kubectl apply -f this file, create an AgentRun with
+# agentRef: skill-probe, and watch the pod.
+#
+# RESULT ON docker/cri-dockerd RUNTIMES (default minikube): the controller
+# resolves everything (SkillCard Ready, Agent Ready, ImageVolume in the pod
+# spec) but the pod sticks in CreateContainerError:
+#   Error response from daemon: invalid mount config for type "bind":
+#   field Source must not be empty
+# ...while the AgentRun still reports phase=Running. Needs containerd >= 2.0
+# or CRI-O with image-volume support.
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: ejb-to-cdi
+  namespace: konveyor-agents
+spec:
+  image: skills-ejb-to-cdi:dev
+  displayName: EJB to CDI Migration
+  description: Migrates EJB components to CDI managed beans.
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: skill-probe
+  namespace: konveyor-agents
+spec:
+  image: acp-mock-harness:dev
+  prompt: Probe agent for the skills mount experiment.
+  providers:
+    - ref: mock-provider
+  skillCards:
+    - ref: ejb-to-cdi

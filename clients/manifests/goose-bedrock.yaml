@@ -1,0 +1,63 @@
+# Real goose harness wired to AWS Bedrock.
+# The aws-bedrock-creds secret is created separately so credentials never
+# land in this file:
+#   kubectl create secret generic aws-bedrock-creds -n konveyor-agents \
+#     --from-literal=AWS_ACCESS_KEY_ID=... \
+#     --from-literal=AWS_SECRET_ACCESS_KEY=... \
+#     --from-literal=AWS_REGION=us-east-1
+---
+apiVersion: konveyor.io/v1alpha1
+kind: LLMProvider
+metadata:
+  name: bedrock
+  namespace: konveyor-agents
+  annotations:
+    # POC contract: tells the harness which goose provider implementation
+    # this LLMProvider maps to. See simulate-controller.ts.
+    konveyor.io/goose-provider: aws_bedrock
+spec:
+  endpoint: "https://bedrock-runtime.us-east-1.amazonaws.com"
+  # Keyless: with key omitted the controller exposes the whole Secret to the
+  # sandbox via envFrom — required for SigV4 providers, which need the
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION triple, not a
+  # single bearer token.
+  credentialRef:
+    secretName: aws-bedrock-creds
+  models:
+    - name: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      contextWindow: 200000
+      tier: efficient
+    - name: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      contextWindow: 200000
+      tier: primary
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: migration-analyzer-goose
+  namespace: konveyor-agents
+  labels:
+    konveyor.io/managed: "true"
+  annotations:
+    # Platform-resolved params (ADR 0005) — same contract as the mock agent.
+    konveyor.io/param-sources: |
+      {"repository": "konveyor.io/application-repository-url",
+       "branch": "konveyor.io/application-repository-branch"}
+    konveyor.io/credential-sources: |
+      {"git": "konveyor.io/application-identity"}
+spec:
+  image: "goose-harness:dev"
+  prompt: |
+    You are a migration analysis agent. The application source is checked
+    out at /workspace. Answer questions about it concisely.
+  providers:
+    - ref: bedrock
+  params:
+    - name: repository
+      type: string
+      description: Git URL of the application repository
+      required: true
+    - name: branch
+      type: string
+      description: Branch to analyze
+      default: main

@@ -1,0 +1,29 @@
+# EXAMPLE — not applied by the kustomization. Adapt host/class/TLS to your
+# environment and put SSO in front (oauth2-proxy annotations, or on
+# OpenShift use a Route with an oauth-proxy sidecar instead).
+#
+# Only the UI needs exposing: nginx inside agentic-ui proxies /api (HTTP +
+# WebSocket) to the gateway Service, so one host serves everything
+# same-origin.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentic-ui
+  namespace: konveyor-agents
+  annotations:
+    # WebSocket sessions are long-lived:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: agentic.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentic-ui
+                port:
+                  number: 80

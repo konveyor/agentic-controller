@@ -1,0 +1,130 @@
+# Sample resources for the agentrun-client demo against minikube.
+# Mirrors what Hub (per ADR 0003) or an admin would create.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openai-compatible-credentials
+  namespace: konveyor-agents
+type: Opaque
+stringData:
+  apiKey: "not-a-real-key-mock-harness-never-calls-an-llm"
+---
+apiVersion: konveyor.io/v1alpha1
+kind: LLMProvider
+metadata:
+  name: mock-provider
+  namespace: konveyor-agents
+spec:
+  # The real controller's verification Job is a reachability probe (any
+  # HTTP 2xx-5xx passes, no auth). The in-cluster apiserver always answers
+  # 403, needs no egress, and the mock harness never calls an LLM anyway.
+  # A dead/unresolvable endpoint here leaves the provider NotReady and
+  # blocks every AgentRun with AgentNotReady.
+  endpoint: "https://kubernetes.default.svc"
+  credentialRef:
+    secretName: openai-compatible-credentials
+    key: apiKey
+  models:
+    - name: mock-model-large
+      contextWindow: 200000
+      tier: primary
+    - name: mock-model-small
+      contextWindow: 32000
+      tier: efficient
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-credentials-coolstore
+  namespace: konveyor-agents
+type: Opaque
+stringData:
+  # Mock application identity (see hub-shim's application inventory). The
+  # platform mounts this via envFrom when an agent declares a credential
+  # sourced from konveyor.io/application-identity.
+  GIT_USERNAME: "coolstore-bot"
+  GIT_TOKEN: "not-a-real-token"
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: migration-analyzer
+  namespace: konveyor-agents
+  labels:
+    # Konveyor UIs list only managed agents (hub-shim filters on this).
+    konveyor.io/managed: "true"
+  annotations:
+    # Platform-resolved params (ADR 0005): the platform fills these from
+    # the selected application; the UI hides them from the create form.
+    konveyor.io/param-sources: |
+      {"repository": "konveyor.io/application-repository-url",
+       "branch": "konveyor.io/application-repository-branch"}
+    konveyor.io/credential-sources: |
+      {"git": "konveyor.io/application-identity"}
+spec:
+  # In the real system this is the harness image (goose + toolchains).
+  # The controller simulator substitutes the mock ACP harness image.
+  image: "acp-mock-harness:dev"
+  prompt: |
+    You are a migration analysis agent. Analyze the application source
+    in /workspace and produce findings under .konveyor/.
+  providers:
+    - ref: mock-provider
+  params:
+    - name: repository
+      type: string
+      description: Git URL of the application repository
+      required: true
+    - name: branch
+      type: string
+      description: Branch to analyze
+      default: main
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: analyze-java-ee
+  namespace: konveyor-agents
+spec:
+  displayName: Analyze Java EE application
+  description: Identify Java EE APIs in use and map each to its Jakarta/cloud-native replacement.
+  type: skill
+  version: 0.1.0
+  tags: [java, migration, analysis]
+  # Exactly one of image | source | inline (CEL-enforced). Image refs are
+  # accepted as-is today (Ready=True); the ref is not pulled or validated.
+  image: "quay.io/konveyor/skill-analyze-java-ee:v0.1.0"
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: cloud-readiness-rules
+  namespace: konveyor-agents
+spec:
+  displayName: Cloud readiness ground rules
+  description: Always-loaded constraints the agent must respect while analyzing.
+  type: rule
+  version: 0.1.0
+  tags: [migration, policy]
+  # Inline stays NotReady (InlineNotSupported) until upstream Phase 3 lands.
+  # Kept inline on purpose: sample data should exercise both Ready states.
+  inline: |
+    # Cloud readiness ground rules
+
+    - Never modify application source; analysis is read-only.
+    - Flag any local-filesystem or hardcoded-hostname dependency.
+    - Prefer configuration over code changes in every recommendation.
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCollection
+metadata:
+  name: migration-skills
+  namespace: konveyor-agents
+spec:
+  # Each entry references exactly one of skillCardRef | image | source.
+  skills:
+    - name: analyze-java-ee
+      skillCardRef: analyze-java-ee
+    - name: cloud-readiness-rules
+      skillCardRef: cloud-readiness-rules

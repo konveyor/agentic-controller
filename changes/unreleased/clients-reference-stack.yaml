@@ -1,0 +1,8 @@
+kind: feature
+
+description: >
+  Import the reference client stack under clients/ — isomorphic client
+  core, hub-shim (the proposed Hub passthrough proxy surface), PatternFly
+  browser UI, mock and goose agent harnesses, in-cluster deploy manifests,
+  and the end-to-end demo — plus ADRs 0004 (verified client contract and
+  transports) and 0005 (platform-resolved params).
