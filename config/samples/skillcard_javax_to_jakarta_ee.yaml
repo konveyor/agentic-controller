@@ -1,0 +1,18 @@
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: javax-to-jakarta-ee
+spec:
+  image: quay.io/konveyor/skills:javax-to-jakarta-ee
+  displayName: javax to Jakarta EE Migration
+  version: "1.0.0"
+  description: >
+    Migrates Java EE 8 (javax) applications to Jakarta EE 9/10 (jakarta).
+    Covers dependency changes, package-level renames, XML namespace updates,
+    ServiceLoader file renames, and removed specifications.
+  type: skill
+  tags:
+    - java
+    - javaee
+    - jakarta
+    - migration

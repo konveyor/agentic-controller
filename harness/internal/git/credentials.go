@@ -3,7 +3,6 @@ package git
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 )
@@ -33,7 +32,7 @@ func ReadFromEnv() (*Credentials, error) {
 
 	branch := os.Getenv("GIT_TARGET_BRANCH")
 	if branch == "" {
-		branch = fmt.Sprintf("konveyor-migrate-%s", time.Now().Format("20060102-150405"))
+		return nil, fmt.Errorf("GIT_REPO_URL is set but GIT_TARGET_BRANCH is missing")
 	}
 
 	return &Credentials{

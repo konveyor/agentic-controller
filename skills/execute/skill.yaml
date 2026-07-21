@@ -1,0 +1,15 @@
+apiVersion: skillimage.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: execute
+  namespace: konveyor
+  version: "1.0.0"
+  description: >
+    Reads PLAN.md and executes each migration step sequentially. Applies
+    transformations file by file, consulting domain-specific patterns from
+    loaded migration skills.
+  tags:
+    - migration
+    - execution
+spec:
+  prompt: SKILL.md

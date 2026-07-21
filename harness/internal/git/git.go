@@ -6,16 +6,21 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	gogitcfg "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/konveyor/migration-harness/internal/watcher"
 )
 
 func Clone(ctx context.Context, cred *Credentials, destDir string) (*gogit.Repository, error) {
 	if _, err := os.Stat(destDir); err == nil {
+		if !strings.HasPrefix(destDir, "/workspace") && !strings.HasPrefix(destDir, os.TempDir()) {
+			return nil, fmt.Errorf("refusing to remove %s: not under /workspace or temp", destDir)
+		}
 		os.RemoveAll(destDir)
 	}
 
@@ -73,15 +78,27 @@ func CheckoutBranch(repo *gogit.Repository, branch string) error {
 		return fmt.Errorf("get worktree: %w", err)
 	}
 
-	ref := plumbing.NewBranchReferenceName(branch)
+	localRef := plumbing.NewBranchReferenceName(branch)
+	remoteRef := plumbing.NewRemoteReferenceName("origin", branch)
 
+	// If the remote tracking branch exists, create local branch from it.
+	if hash, err := repo.ResolveRevision(plumbing.Revision(remoteRef)); err == nil {
+		return wt.Checkout(&gogit.CheckoutOptions{
+			Branch: localRef,
+			Hash:   *hash,
+			Create: true,
+		})
+	}
+
+	// Otherwise create a new branch from HEAD.
 	err = wt.Checkout(&gogit.CheckoutOptions{
-		Branch: ref,
+		Branch: localRef,
 		Create: true,
 	})
 	if err != nil {
+		// Branch might already exist locally.
 		err = wt.Checkout(&gogit.CheckoutOptions{
-			Branch: ref,
+			Branch: localRef,
 		})
 		if err != nil {
 			return fmt.Errorf("checkout branch %s: %w", branch, err)
@@ -104,8 +121,13 @@ func CommitAll(repo *gogit.Repository, message string) (plumbing.Hash, error) {
 		return plumbing.ZeroHash, nil
 	}
 
-	if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err != nil {
-		return plumbing.ZeroHash, fmt.Errorf("add all: %w", err)
+	for path, s := range status {
+		if s.Worktree == gogit.Untracked && !watcher.ShouldStageNewFile(path) {
+			continue
+		}
+		if _, err := wt.Add(path); err != nil {
+			return plumbing.ZeroHash, fmt.Errorf("add %s: %w", path, err)
+		}
 	}
 
 	hash, err := wt.Commit(message, &gogit.CommitOptions{
@@ -122,6 +144,10 @@ func CommitAll(repo *gogit.Repository, message string) (plumbing.Hash, error) {
 	return hash, nil
 }
 
+// Push force-pushes the branch. Force is intentional: the watcher's
+// auto-commits may create non-fast-forward histories, and each stage
+// owns its branch exclusively. Concurrent runs on the same branch are
+// not supported.
 func Push(ctx context.Context, cred *Credentials, repo *gogit.Repository, branch string) error {
 	refSpec := gogitcfg.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch))
 

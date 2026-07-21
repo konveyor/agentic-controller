@@ -2,8 +2,6 @@ package goose
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -52,13 +50,7 @@ func StartServe(ctx context.Context, port int, provider, model, apiKey, endpoint
 
 	secretKey := os.Getenv("KONVEYOR_ACP_SECRET_KEY")
 	if secretKey == "" {
-		// REMOVE LATER: local testing only — in production the controller
-		// provides KONVEYOR_ACP_SECRET_KEY via a K8s Secret.
-		secretKey, err = generateLocalSecretKey()
-		if err != nil {
-			return nil, fmt.Errorf("generate secret key: %w", err)
-		}
-		logging.Warn("no KONVEYOR_ACP_SECRET_KEY set, generated local key for testing")
+		return nil, fmt.Errorf("KONVEYOR_ACP_SECRET_KEY is required")
 	}
 
 	cmd := exec.CommandContext(ctx, goosePath, "serve",
@@ -143,16 +135,6 @@ func FindFreePort() (int, error) {
 	port := l.Addr().(*net.TCPAddr).Port
 	l.Close()
 	return port, nil
-}
-
-// REMOVE LATER: local testing only — generates a random secret key
-// when KONVEYOR_ACP_SECRET_KEY is not set.
-func generateLocalSecretKey() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }
 
 // providerEnv returns the current process environment with LLM provider

@@ -1,0 +1,4 @@
+# agent-verify: Verify stage toolchain image. Skill content comes
+# from SkillCards mounted at runtime.
+
+FROM agent-java-base

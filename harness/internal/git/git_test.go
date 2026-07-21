@@ -82,7 +82,7 @@ func TestCommitAllWithChanges(t *testing.T) {
 	seedBareRepo(t, remoteDir)
 	cloneDir, repo := cloneLocal(t, remoteDir)
 
-	os.WriteFile(filepath.Join(cloneDir, "new-file.txt"), []byte("hello\n"), 0644)
+	os.WriteFile(filepath.Join(cloneDir, "new-file.java"), []byte("class Hello {}\n"), 0644)
 
 	hash, err := CommitAll(repo, "add new file")
 	if err != nil {
@@ -116,6 +116,49 @@ func TestCheckoutBranch(t *testing.T) {
 	}
 	if head.Name() != plumbing.NewBranchReferenceName("feature-branch") {
 		t.Errorf("branch = %s, want feature-branch", head.Name())
+	}
+}
+
+func TestCheckoutBranchFromRemote(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+
+	// Push a file to a branch on the remote via a temporary clone.
+	tmpDir := filepath.Join(t.TempDir(), "pusher")
+	pusher, err := gogit.PlainClone(tmpDir, false, &gogit.CloneOptions{URL: remoteDir})
+	if err != nil {
+		t.Fatalf("clone for push: %v", err)
+	}
+	wt, _ := pusher.Worktree()
+	wt.Checkout(&gogit.CheckoutOptions{Branch: plumbing.NewBranchReferenceName("remote-branch"), Create: true})
+	os.WriteFile(filepath.Join(tmpDir, "PLAN.md"), []byte("# Plan\n"), 0644)
+	wt.Add("PLAN.md")
+	wt.Commit("add plan", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+	})
+	pusher.Push(&gogit.PushOptions{
+		RefSpecs: []gogitcfg.RefSpec{"refs/heads/remote-branch:refs/heads/remote-branch"},
+	})
+
+	// Fresh clone (only fetches default branch).
+	cloneDir := filepath.Join(t.TempDir(), "clone2")
+	repo, err := gogit.PlainClone(cloneDir, false, &gogit.CloneOptions{URL: remoteDir})
+	if err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+
+	// CheckoutBranch should resolve the remote tracking branch.
+	if err := CheckoutBranch(repo, "remote-branch"); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+
+	// Verify we got the remote content.
+	data, err := os.ReadFile(filepath.Join(cloneDir, "PLAN.md"))
+	if err != nil {
+		t.Fatalf("PLAN.md not found after checkout: %v", err)
+	}
+	if string(data) != "# Plan\n" {
+		t.Errorf("PLAN.md content = %q, want %q", string(data), "# Plan\n")
 	}
 }
 

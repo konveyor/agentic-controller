@@ -1,0 +1,15 @@
+apiVersion: skillimage.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: plan
+  namespace: konveyor
+  version: "1.0.0"
+  description: >
+    Analyzes a project using graphify, generates a code graph, and produces
+    a structured PLAN.md with migration steps.
+  tags:
+    - migration
+    - planning
+    - graphify
+spec:
+  prompt: SKILL.md

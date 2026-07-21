@@ -1,0 +1,24 @@
+# agent-java-base: Shared base for Java migration stages (execute, verify).
+# Adds JDK 21 and Maven on top of agent-base.
+#
+# Build context must be the repository root:
+#   podman build -t agent-java-base -f images/agent-java-base/Containerfile .
+
+FROM agent-base AS base
+
+USER root
+
+RUN dnf install -y \
+    java-21-openjdk-devel \
+    maven \
+    && dnf clean all
+
+RUN JAVA_HOME_PATH=$(dirname $(dirname $(readlink -f $(which java)))) \
+    && ln -sf "$JAVA_HOME_PATH" /usr/lib/jvm/java-current
+ENV JAVA_HOME=/usr/lib/jvm/java-current
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+USER harness
+
+ENTRYPOINT ["migration-harness"]
+CMD ["run"]

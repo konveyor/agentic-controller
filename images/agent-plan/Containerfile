@@ -1,0 +1,25 @@
+# agent-plan: Plan stage toolchain image. Adds graphify for code graph
+# generation. Skill content comes from SkillCards mounted at runtime.
+
+FROM agent-base AS base
+
+USER root
+
+RUN dnf install -y \
+    python3 \
+    python3-pip \
+    python3-devel \
+    gcc \
+    gcc-c++ \
+    libffi-devel \
+    pkg-config \
+    && dnf clean all
+
+RUN python3 -m pip install --no-cache-dir graphifyy==0.7.17
+
+ENV PYTHONUNBUFFERED=1
+
+USER harness
+
+ENTRYPOINT ["migration-harness"]
+CMD ["run"]

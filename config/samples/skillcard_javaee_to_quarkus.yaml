@@ -1,0 +1,18 @@
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: javaee-to-quarkus
+spec:
+  image: quay.io/konveyor/skills:javaee-to-quarkus
+  displayName: Java EE to Quarkus Migration
+  version: "1.0.0"
+  description: >
+    Migrates Java EE 7/8 applications (WebLogic, JBoss, WildFly) to Quarkus 3.
+    Covers EJB-to-CDI, JMS/MDB-to-SmallRye Reactive Messaging, WAR-to-JAR packaging,
+    persistence.xml-to-application.properties, JNDI removal, and server lifecycle replacement.
+  type: skill
+  tags:
+    - java
+    - javaee
+    - quarkus
+    - migration
