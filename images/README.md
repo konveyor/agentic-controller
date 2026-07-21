@@ -16,12 +16,20 @@ make controller-agent-build                           # build locally
 make controller-agent-push CONTAINER_TOOL=podman      # push to quay
 ```
 
-## Stream 4 placeholders
+## Stage agent images
 
-Placeholder Containerfiles for the production agent image hierarchy.
-These will be implemented as part of Stream 4.
+Production agent image hierarchy for migration stages. Skills are
+mounted at runtime via SkillCards, not baked into images.
 
 ```text
-agent-base-goose       Goose runtime (extends future agent-base)
-agent-java-goose       JDK 21 + Maven (extends agent-base-goose)
+agent-base             UBI 10 + goose CLI + git + harness binary
+├── agent-plan         + Python 3, graphify
+├── agent-java-base    + JDK 21, Maven
+│   ├── agent-execute  (inherits java-base)
+│   └── agent-verify   (inherits java-base)
+```
+
+```bash
+make agent-images-build                              # build all stage images
+make agent-images-push CONTAINER_TOOL=podman          # push to quay
 ```

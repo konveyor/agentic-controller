@@ -1,7 +1,7 @@
 # agent-plan: Plan stage toolchain image. Adds graphify for code graph
 # generation. Skill content comes from SkillCards mounted at runtime.
 
-FROM agent-base AS base
+FROM quay.io/konveyor/agent-base:latest AS base
 
 USER root
 

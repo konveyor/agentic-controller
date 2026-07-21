@@ -4,7 +4,7 @@
 # Build context must be the repository root:
 #   podman build -t agent-java-base -f images/agent-java-base/Containerfile .
 
-FROM agent-base AS base
+FROM quay.io/konveyor/agent-base:latest AS base
 
 USER root
 

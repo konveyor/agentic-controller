@@ -1,0 +1,327 @@
+# ADR 0006: Harness as Thin Single-Stage Runner with SkillCard-Based Skills
+
+**Status:** Accepted
+**Date:** 2026-07-21
+**Authors:** Savitha Raghunathan
+
+## Context
+
+The migration harness was a monolithic Go binary that orchestrated five
+sequential stages (detect, plan, execute, verify, fix-loop) internally.
+Each stage was a Go package that constructed multi-turn ACP prompts from
+YAML recipe files and an embedded skill bundle. The harness owned both
+stage sequencing and migration intelligence.
+
+With the AgentPlaybookRun controller (ADR 0001) handling stage
+sequencing, the harness no longer needs orchestration logic. Meanwhile,
+the SkillCard CRD and OCI-based skill packaging provide a clean
+mechanism for delivering migration knowledge to agent pods at runtime.
+
+The harness needed to become a thin, uniform wrapper — identical in
+every stage image — that handles only git plumbing and goose lifecycle.
+Migration intelligence needed to move from Go code and YAML recipes into
+standalone skills that can be versioned, shared, and composed
+independently.
+
+## Decision
+
+### Thin single-stage runner
+
+The harness binary exposes a single `run` command. It does not know what
+stage it is running, what language is being migrated, or what migration
+patterns to apply. Its responsibilities are:
+
+1. Load configuration from environment variables (`config.LoadFromEnv`)
+2. Clone the git repo, strip credentials from the remote, checkout the
+   target branch
+3. Start `goose serve` with LLM provider credentials
+4. Connect via ACP WebSocket, create a session
+5. Discover skills from `/opt/skills/*/SKILL.md` (glob)
+6. Build a single prompt from four context layers:
+   - `KONVEYOR_PROMPT` — agent-level standing instructions
+   - `KONVEYOR_PLAYBOOK_INSTRUCTIONS` — playbook guide context
+   - Skill content (concatenated from all discovered skills)
+   - `KONVEYOR_INSTRUCTIONS` — stage-specific task
+7. Start a filesystem watcher for incremental commit+push
+8. Send one ACP prompt and block until completion
+9. Stop watcher, read `.konveyor/result.json` for exit status
+10. Final commit+push, exit 0 or 1
+
+No interactive commands, no file-based config, no multi-turn recipe
+execution.
+
+#### Credential isolation
+
+Git credentials are stripped from the cloned repo's remote and cleared
+from the environment before goose starts. This is a deliberate security
+boundary — goose and any skill content it executes cannot access push
+credentials. Only the harness binary pushes to git.
+
+### Two kinds of skills: stage and domain
+
+Skills are classified into two types with distinct responsibilities:
+
+- **Stage skills** define *process* — what to do. They encode the
+  workflow for a stage (plan, execute, verify) without
+  language-specific knowledge. Stage skills reference domain skills
+  with directives like "follow the migration phases from any loaded
+  domain skill."
+
+- **Domain skills** define *knowledge* — how to do it. They provide
+  language-specific migration intelligence: annotation maps,
+  dependency maps, pattern catalogs, phased migration guides.
+  Example: `javaee-to-quarkus`.
+
+An agent loads one stage skill and one or more domain skills. The
+harness concatenates all discovered skills into the prompt. The stage
+skill's process instructions frame the work; the domain skill's
+knowledge fills in the specifics.
+
+Three stage skills encode what was previously spread across Go packages:
+
+| Skill | Replaces | Purpose |
+|-------|----------|---------|
+| `plan` | `detect/`, `plan/`, `recipes/plan.yaml` | Run graphify, analyze project, produce PLAN.md |
+| `execute` | `execute/`, `recipes/execute.yaml` | Read PLAN.md, apply transformations file by file |
+| `verify` | `verify/`, `fixloop/`, `recipes/verify.yaml` | Build, fix errors iteratively, report result |
+
+Skills are packaged as scratch-based OCI images (`FROM scratch; COPY . /`)
+and referenced by SkillCard CRs. The controller mounts them as init
+container volumes at `/opt/skills/<name>/` in the agent pod.
+
+### Skill discovery at runtime (not baked into images)
+
+The original design specified baking exactly one skill into each stage
+image via `COPY skills/plan/ /opt/skills/plan/`. We chose instead to
+keep stage images skill-free and mount skills at runtime via SkillCards.
+
+This means:
+- Stage images contain only toolchain (graphify, JDK, Maven)
+- Skills are versioned and released independently of images
+- The same stage image works with different skill combinations
+- The harness discovers all mounted skills via glob, not exactly one
+
+### Image hierarchy
+
+Five images, two intermediate bases. Image names include the language
+suffix for multi-language support:
+
+```
+agent-base (UBI 10 + goose + git + harness binary)
+├── agent-plan (+ Python 3, graphify — language-agnostic)
+├── agent-java-base (+ JDK 21, Maven)
+│   ├── agent-execute-java
+│   └── agent-verify-java
+```
+
+Graphify is language-agnostic and supports multiple languages, so
+`agent-plan` is shared across all migration types. Execute and verify
+images are language-specific — adding a new language (e.g., Go) means
+new `agent-go-base`, `agent-execute-go`, and `agent-verify-go` images.
+No harness or controller changes required.
+
+Execute and verify share the same language base since both need the
+build toolchain. They are separate images (currently identical) to
+allow future divergence (e.g., verify may add test frameworks or
+coverage tools).
+
+### Filesystem watcher
+
+A background goroutine watches the working directory using fsnotify and
+commits+pushes after a 30-second quiet period (no new file writes).
+This provides the "constant pushing to git" guarantee without goose
+needing git credentials.
+
+The watcher uses targeted staging:
+- `git add -u` for tracked files
+- Selective staging of new files matching known source patterns
+- Respects `.gitignore` for binary/build artifacts
+- Excludes `.goose/`, `__pycache__/`, `graphify-out/`, `node_modules/`
+
+A final commit+push after goose exits catches anything the watcher
+missed, including `.konveyor/` state files.
+
+The 30-second quiet period is a reasonable default for all stages. The
+`WithQuietPeriod()` Go API allows overriding it. If noisy intermediate
+commits become a problem (e.g., during execute where goose may pause
+30+ seconds between file migrations), a `KONVEYOR_WATCHER_QUIET_PERIOD`
+env var can be added to tune it per stage — deferred until there is a
+real complaint.
+
+### Cross-stage state via git
+
+Git is the shared state boundary. Each stage clones the repo and reads
+artifacts left by prior stages:
+
+- Plan writes: `PLAN.md`, `graph.json`, `.konveyor/result.json`
+- Execute reads: `PLAN.md`. Writes: migrated source files
+- Verify reads: migrated source. Writes: fix patches
+
+#### result.json contract
+
+Each skill MUST append to `.konveyor/result.json` as its final action.
+The file is a JSON array — each stage adds an entry:
+
+```json
+[
+  {"stage": "plan", "status": "succeeded"},
+  {"stage": "execute", "status": "failed", "reason": "context exhausted at step 23"}
+]
+```
+
+The harness reads the last entry to determine exit code (0 for
+`"succeeded"`, 1 for anything else). Missing `result.json` is treated
+as failure. This is a hard contract — a skill that completes
+successfully but does not write `result.json` is considered broken.
+
+The controller currently determines stage success from pod exit code
+only. A planned enhancement will have the harness write a one-line
+`reason` field to the AgentRun CR status before exiting, giving
+operators and the UI meaningful failure context without the controller
+needing to parse `result.json` from the git branch.
+
+#### handoff.md (redesign pending)
+
+The harness writes `.konveyor/handoff.md` after each stage. Currently
+formatted for human readers (status summary, skills loaded, plan steps,
+file counts). A redesign is planned to make handoff.md
+machine-readable so that skills can consume prior-stage context
+programmatically. The result.json schema will be revisited alongside
+this redesign.
+
+### Stage timeout
+
+The harness will support a `KONVEYOR_STAGE_TIMEOUT` env var (default:
+60 minutes). When the timeout fires, `SendPrompt` returns via context
+cancellation, the harness writes a failure entry to `result.json`
+("stage timed out"), performs the final commit+push to preserve partial
+work, and exits 1. This provides graceful timeout with artifact
+preservation, versus the Sandbox's `activeDeadlineSeconds` which kills
+the pod hard and loses uncommitted progress.
+
+### Context window scaling
+
+A single prompt per stage means the LLM's context window is the primary
+scaling constraint. On large projects (hundreds of files, 50+ plan
+steps), the combined prompt + skill content + tool call history can
+exceed the context window mid-stage.
+
+The mitigation is skill-level chunking: the execute skill processes N
+steps at a time, committing between chunks, so each chunk fits in
+context. This keeps the complexity in the skill (where domain knowledge
+lives) rather than in the harness. The harness remains a single-prompt
+sender regardless of project size.
+
+## Deleted code
+
+| Deleted | Reason |
+|---------|--------|
+| `internal/detect/`, `internal/plan/`, `internal/execute/`, `internal/verify/`, `internal/fixloop/` | Logic moved to skills |
+| `internal/handoff/`, `internal/metrics/`, `internal/rundir/` | Controller handles lifecycle |
+| `internal/goose/recipe.go`, `internal/goose/acp_runner.go` | Multi-turn recipe execution replaced by single prompt |
+| `harness/recipes/` | Content folded into skills |
+| `harness/skill-bundle/` | Replaced by OCI-packaged SkillCards |
+| `images/agent-base-goose/`, `images/agent-java-goose/` | Superseded by new image hierarchy |
+| `docs/superpowers/` | Replaced by this ADR |
+
+## Alternatives Considered
+
+### Keep skills baked into images
+
+Each stage image copies its skill at build time
+(`COPY skills/plan/ /opt/skills/plan/`). Simpler build, no SkillCard
+dependency.
+
+Rejected because: couples skill content to image releases. Updating a
+skill prompt requires rebuilding and redeploying the image. SkillCard
+mounting allows skill iteration without image changes and enables
+composing multiple skills per stage.
+
+### Keep multi-turn recipe execution
+
+The harness constructs multiple ACP prompts per stage using recipe YAML
+files, sending them sequentially with context management.
+
+Rejected because: the recipe system duplicated orchestration that the
+LLM handles naturally. A single well-composed prompt with skill
+instructions produces equivalent or better results, and the LLM
+manages its own context within the session. The multi-turn approach
+also required complex Go code for recipe parsing, context windowing,
+and turn management.
+
+### Harness as a library, not a binary
+
+Ship the harness as a Go library that custom agent images import and
+call. Each image would have its own `main.go`.
+
+Rejected because: the harness behavior is identical across all stages.
+A single binary with env-var configuration is simpler to maintain,
+test, and debug. Custom behavior belongs in skills, not in the
+harness binary.
+
+### Harness-level session splitting for large projects
+
+The harness sends multiple prompts per stage (e.g., "execute steps
+1-10", then "execute steps 11-20"), re-reading PLAN.md each time.
+
+Rejected because: adds orchestration complexity back into the harness.
+Skill-level chunking (the skill itself decides how to batch work)
+keeps the harness thin and puts the complexity where domain knowledge
+lives.
+
+### Controller reads result.json directly
+
+The controller clones the git branch or reads result.json from the
+pod filesystem to get structured stage results.
+
+Rejected because: adds git or filesystem dependencies to the
+controller. The simpler approach is the harness writing a one-line
+reason to the AgentRun CR status before exiting. The controller
+stays a standard stateless reconciler.
+
+## Consequences
+
+- **Skill quality is critical.** Migration intelligence now lives
+  entirely in markdown skill files, not in deterministic Go code.
+  The LLM interprets skill instructions, which means skill authoring
+  quality directly impacts migration quality. Poor skill instructions
+  produce poor migrations.
+
+- **Single prompt per stage.** The harness sends one prompt. For large
+  projects, skills must implement their own chunking strategy to stay
+  within the context window. The harness has no automatic recovery if
+  the LLM loses context mid-stage.
+
+- **result.json is a hard contract.** Skills must append to
+  `.konveyor/result.json` as their final action. Missing result.json
+  is treated as stage failure. This forces skill authors to explicitly
+  declare success or failure.
+
+- **SkillCard dependency.** Stage images are non-functional without
+  mounted SkillCards. A misconfigured Agent CR (missing skillCards
+  ref) produces a pod that starts, finds no skills, and exits
+  immediately with an error.
+
+- **Image builds require dependency ordering.** CI must build
+  `agent-base` before `agent-plan`, and `agent-java-base` before
+  `agent-execute-java`/`agent-verify-java`. The Makefile encodes
+  these dependencies.
+
+- **Multi-language via image naming.** Image names include the
+  language suffix (`agent-execute-java`, `agent-execute-go`). The
+  plan image is shared across languages since graphify is
+  language-agnostic.
+
+- **Test harness scaffolding.** `hack/harness-test/setup.sh` builds
+  skill OCI images locally, loads them into Kind, and applies
+  SkillCard + Agent + AgentPlaybook + AgentPlaybookRun CRs for
+  end-to-end testing.
+
+## Planned work
+
+| Item | Description |
+|------|-------------|
+| handoff.md + result.json redesign | Make machine-readable for agent consumption |
+| Image rename | `agent-execute` → `agent-execute-java`, `agent-verify` → `agent-verify-java` |
+| Stage timeout | Implement `KONVEYOR_STAGE_TIMEOUT` env var |
+| AgentRun reason field | Harness writes one-line failure reason to CR status |

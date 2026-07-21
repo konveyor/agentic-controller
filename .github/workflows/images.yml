@@ -53,10 +53,10 @@ jobs:
         if: github.event_name != 'pull_request'
         run: make controller-agent-push
 
-  agent-java-goose:
+  agent-images:
     permissions:
       contents: read
-    name: Build Java migration agent image
+    name: Build stage agent images
     runs-on: ubuntu-latest
     steps:
       - name: Clone the code
@@ -64,8 +64,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build image
-        run: make agent-java-goose-build
+      - name: Build images
+        run: make agent-images-build
 
       - name: Log in to Quay.io
         if: github.event_name != 'pull_request'
@@ -75,9 +75,9 @@ jobs:
           username: ${{ vars.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
-      - name: Push image
+      - name: Push images
         if: github.event_name != 'pull_request'
-        run: make agent-java-goose-push
+        run: make agent-images-push
 
   controller:
     permissions:
