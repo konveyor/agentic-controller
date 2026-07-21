@@ -129,6 +129,8 @@ async function getCustom(plural: string, kind: string, name: string): Promise<ob
 /** Resources served read-only as full CRs: list + get by name. */
 const READ_ONLY: Record<string, string> = {
   [PLURALS.Agent]: "Agent",
+  [PLURALS.AgentPlaybook]: "AgentPlaybook",
+  [PLURALS.AgentPlaybookRun]: "AgentPlaybookRun",
   [PLURALS.LLMProvider]: "LLMProvider",
   [PLURALS.SkillCard]: "SkillCard",
   [PLURALS.SkillCollection]: "SkillCollection",

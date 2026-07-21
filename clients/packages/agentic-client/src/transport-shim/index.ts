@@ -15,6 +15,7 @@
  *                                       (the shim injects X-Secret-Key)
  */
 import type {
+  AgentPlaybookRun,
   AgentResource,
   AgentRun,
   Application,
@@ -75,6 +76,14 @@ export class ShimClient implements RunApi {
 
   getRun(name: string): Promise<AgentRun> {
     return this.json<AgentRun>("GET", `/api/agentruns/${encodeURIComponent(name)}`);
+  }
+
+  listPlaybookRuns(): Promise<AgentPlaybookRun[]> {
+    return this.json<AgentPlaybookRun[]>("GET", "/api/agentplaybookruns");
+  }
+
+  getPlaybookRun(name: string): Promise<AgentPlaybookRun> {
+    return this.json<AgentPlaybookRun>("GET", `/api/agentplaybookruns/${encodeURIComponent(name)}`);
   }
 
   async deleteRun(name: string): Promise<void> {

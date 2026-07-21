@@ -8,11 +8,15 @@ import {
   Page,
   PageSection,
   Title,
+  ToggleGroup,
+  ToggleGroupItem,
 } from "@patternfly/react-core";
 import { ShimClient } from "@konveyor/agentic-client/transport-shim";
 import { errorMessage } from "./format";
 import { RunsPage } from "./components/RunsPage";
 import { RunDetailPage } from "./components/RunDetailPage";
+import { PlaybookRunsPage } from "./components/PlaybookRunsPage";
+import { PlaybookRunDetailPage } from "./components/PlaybookRunDetailPage";
 
 // Dev default: the local shim. Production (static build behind nginx):
 // same-origin — nginx proxies /api (HTTP + WebSocket) to the gateway.
@@ -20,7 +24,11 @@ const SHIM_URL =
   import.meta.env.VITE_SHIM_URL ??
   (import.meta.env.DEV ? "http://127.0.0.1:7080" : window.location.origin);
 
-type View = { kind: "list" } | { kind: "detail"; runName: string };
+type View =
+  | { kind: "list" }
+  | { kind: "detail"; runName: string; fromPlaybookRun?: string }
+  | { kind: "playbooks" }
+  | { kind: "playbookDetail"; name: string };
 
 export function App() {
   const [view, setView] = useState<View>({ kind: "list" });
@@ -51,6 +59,8 @@ export function App() {
     </Masthead>
   );
 
+  const onList = view.kind === "list" || view.kind === "playbooks";
+
   return (
     <Page masthead={masthead}>
       {api.error || !api.client ? (
@@ -59,17 +69,60 @@ export function App() {
             {api.error ?? "no client"}
           </Alert>
         </PageSection>
-      ) : view.kind === "list" ? (
-        <RunsPage
-          api={api.client}
-          onOpenRun={(runName) => setView({ kind: "detail", runName })}
-        />
       ) : (
-        <RunDetailPage
-          api={api.client}
-          runName={view.runName}
-          onBack={() => setView({ kind: "list" })}
-        />
+        <>
+          {onList && (
+            <PageSection style={{ paddingBottom: 0 }}>
+              <ToggleGroup aria-label="Run kind">
+                <ToggleGroupItem
+                  text="Agent runs"
+                  buttonId="nav-runs"
+                  isSelected={view.kind === "list"}
+                  onChange={() => setView({ kind: "list" })}
+                />
+                <ToggleGroupItem
+                  text="Playbook runs"
+                  buttonId="nav-playbooks"
+                  isSelected={view.kind === "playbooks"}
+                  onChange={() => setView({ kind: "playbooks" })}
+                />
+              </ToggleGroup>
+            </PageSection>
+          )}
+          {view.kind === "list" ? (
+            <RunsPage
+              api={api.client}
+              onOpenRun={(runName) => setView({ kind: "detail", runName })}
+              onOpenPlaybookRun={(name) => setView({ kind: "playbookDetail", name })}
+            />
+          ) : view.kind === "playbooks" ? (
+            <PlaybookRunsPage
+              api={api.client}
+              onOpenPlaybookRun={(name) => setView({ kind: "playbookDetail", name })}
+            />
+          ) : view.kind === "playbookDetail" ? (
+            <PlaybookRunDetailPage
+              api={api.client}
+              name={view.name}
+              onBack={() => setView({ kind: "playbooks" })}
+              onOpenRun={(runName) =>
+                setView({ kind: "detail", runName, fromPlaybookRun: view.name })
+              }
+            />
+          ) : (
+            <RunDetailPage
+              api={api.client}
+              runName={view.runName}
+              onBack={() =>
+                setView(
+                  view.fromPlaybookRun
+                    ? { kind: "playbookDetail", name: view.fromPlaybookRun }
+                    : { kind: "list" },
+                )
+              }
+            />
+          )}
+        </>
       )}
     </Page>
   );

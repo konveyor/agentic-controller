@@ -93,6 +93,53 @@ export interface AgentRun {
   status?: AgentRunStatus;
 }
 
+// ------------------------------------------------------------- playbooks
+
+/** Label keys the playbook-run controller stamps on stage AgentRuns. */
+export const PLAYBOOK_RUN_LABEL = "konveyor.io/agentplaybookrun";
+export const PLAYBOOK_STAGE_LABEL = "konveyor.io/stage";
+
+/** Per-stage status of an AgentPlaybookRun (status.stages[]). */
+export interface AgentPlaybookRunStage {
+  name: string;
+  /** Reuses the AgentRun phase enum. */
+  phase: AgentRunPhase;
+  /**
+   * Name of the stage's AgentRun once created. Always read this (or the
+   * labels) rather than recomputing "<run>-<stage>" — names are
+   * hash-truncated past 63 chars.
+   */
+  agentRunName?: string;
+}
+
+export interface AgentPlaybookRunStatus {
+  phase?: AgentRunPhase;
+  observedGeneration?: number;
+  /** Stage currently executing (unset once the run is terminal). */
+  currentStage?: string;
+  stages?: AgentPlaybookRunStage[];
+  startTime?: string;
+  completionTime?: string;
+  /**
+   * NOTE: unlike AgentRunStatus there is no duration field — compute it
+   * from startTime/completionTime. Ready=False reason=StageRunning is the
+   * NORMAL healthy state while executing, not an error.
+   */
+  conditions?: Condition[];
+}
+
+export interface AgentPlaybookRun {
+  apiVersion: string;
+  kind: "AgentPlaybookRun";
+  metadata: ObjectMeta;
+  spec: {
+    playbookRef: string;
+    params?: { name: string; value: string }[];
+    models?: { role: string; provider: string; model: string }[];
+  };
+  status?: AgentPlaybookRunStatus;
+}
+
 // ------------------------------------------------------------------- Agent
 
 export type AgentParamType = "string" | "number" | "boolean";
@@ -289,6 +336,8 @@ export interface RunApi {
   /** Platform application inventory (for resolving sourced params). */
   listApplications(): Promise<Application[]>;
   listRuns(): Promise<AgentRun[]>;
+  listPlaybookRuns(): Promise<AgentPlaybookRun[]>;
+  getPlaybookRun(name: string): Promise<AgentPlaybookRun>;
   createRun(input: CreateRunInput): Promise<AgentRun>;
   getRun(name: string): Promise<AgentRun>;
   deleteRun(name: string): Promise<void>;

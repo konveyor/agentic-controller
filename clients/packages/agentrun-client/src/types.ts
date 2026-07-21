@@ -215,6 +215,8 @@ export interface SkillCollection {
 
 export const PLURALS = {
   AgentRun: "agentruns",
+  AgentPlaybook: "agentplaybooks",
+  AgentPlaybookRun: "agentplaybookruns",
   Agent: "agents",
   LLMProvider: "llmproviders",
   SkillCard: "skillcards",

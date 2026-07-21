@@ -12,6 +12,7 @@ import {
   ModalFooter,
   ModalHeader,
   ModalVariant,
+  Label,
   PageSection,
   Spinner,
   Title,
@@ -22,6 +23,7 @@ import {
 import { ActionsColumn, Table, Tbody, Td, Th, Thead, Tr } from "@patternfly/react-table";
 import CubesIcon from "@patternfly/react-icons/dist/esm/icons/cubes-icon";
 import type { AgentRun } from "@konveyor/agentic-client/contract";
+import { PLAYBOOK_RUN_LABEL } from "@konveyor/agentic-client/contract";
 import type { ShimClient } from "@konveyor/agentic-client/transport-shim";
 import { errorMessage, formatAge, formatDuration } from "../format";
 import { PhaseLabel } from "./PhaseLabel";
@@ -32,9 +34,11 @@ const POLL_MS = 2_000;
 interface RunsPageProps {
   api: ShimClient;
   onOpenRun: (runName: string) => void;
+  /** Navigate to the parent playbook run of a stage-owned AgentRun. */
+  onOpenPlaybookRun?: (name: string) => void;
 }
 
-export function RunsPage({ api, onOpenRun }: RunsPageProps) {
+export function RunsPage({ api, onOpenRun, onOpenPlaybookRun }: RunsPageProps) {
   const [runs, setRuns] = useState<AgentRun[] | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [isCreateOpen, setCreateOpen] = useState(false);
@@ -138,6 +142,7 @@ export function RunsPage({ api, onOpenRun }: RunsPageProps) {
             <Tbody>
               {runs.map((run) => {
                 const name = run.metadata.name ?? "";
+                const parentPlaybookRun = run.metadata.labels?.[PLAYBOOK_RUN_LABEL];
                 return (
                   <Tr key={run.metadata.uid ?? name}>
                     <Td dataLabel="Name">
@@ -145,7 +150,26 @@ export function RunsPage({ api, onOpenRun }: RunsPageProps) {
                         {name}
                       </Button>
                     </Td>
-                    <Td dataLabel="Agent">{run.spec.agentRef}</Td>
+                    <Td dataLabel="Agent">
+                      {run.spec.agentRef}
+                      {parentPlaybookRun && (
+                        <>
+                          {" "}
+                          <Label
+                            isCompact
+                            color="purple"
+                            style={{ cursor: onOpenPlaybookRun ? "pointer" : undefined }}
+                            onClick={
+                              onOpenPlaybookRun
+                                ? () => onOpenPlaybookRun(parentPlaybookRun)
+                                : undefined
+                            }
+                          >
+                            stage of {parentPlaybookRun}
+                          </Label>
+                        </>
+                      )}
+                    </Td>
                     <Td dataLabel="Phase">
                       <PhaseLabel phase={run.status?.phase} />
                     </Td>
@@ -156,6 +180,12 @@ export function RunsPage({ api, onOpenRun }: RunsPageProps) {
                         items={[
                           {
                             title: "Delete",
+                            // Deleting a stage-owned run terminally fails its
+                            // parent playbook run (AgentRunDeleted, no retry).
+                            isDisabled: Boolean(parentPlaybookRun),
+                            description: parentPlaybookRun
+                              ? "Owned by a playbook run — delete that instead"
+                              : undefined,
                             onClick: () => {
                               setDeleteError(null);
                               setDeleteTarget(name);
