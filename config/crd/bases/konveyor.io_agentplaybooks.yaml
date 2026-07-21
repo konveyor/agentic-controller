@@ -80,8 +80,14 @@ spec:
                         Composed with the Agent's prompt at execution time.
                       type: string
                     name:
-                      description: Name is the stage name, unique within the playbook.
+                      description: |-
+                        Name is the stage name, unique within the playbook.
+                        Must be a valid Kubernetes label value (lowercase alphanumeric,
+                        hyphens, dots, max 63 chars) since it is used in labels on
+                        child AgentRun resources.
+                      maxLength: 63
                       minLength: 1
+                      pattern: ^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$
                       type: string
                   required:
                   - agentRef

@@ -24,7 +24,12 @@ import (
 // Each stage references an Agent and carries instructions.
 type AgentPlaybookStage struct {
 	// Name is the stage name, unique within the playbook.
+	// Must be a valid Kubernetes label value (lowercase alphanumeric,
+	// hyphens, dots, max 63 chars) since it is used in labels on
+	// child AgentRun resources.
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$`
 	Name string `json:"name"`
 
 	// AgentRef is the name of the Agent CR to execute for this stage.

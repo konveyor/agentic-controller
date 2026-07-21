@@ -1,0 +1,10 @@
+kind: feature
+description: >
+  Add AgentPlaybook and AgentPlaybookRun controllers for sequential
+  multi-stage agent orchestration. AgentPlaybook validates referenced
+  Agents are Ready. AgentPlaybookRun creates AgentRuns per stage
+  sequentially, forwarding params, models, env, and envFrom from
+  the playbook run to each stage. Includes deterministic AgentRun
+  naming, playbook guide passthrough via KONVEYOR_PLAYBOOK_INSTRUCTIONS,
+  and a fix for the Sandbox finished-reason constant (Succeeded →
+  PodSucceeded) to match Agent Sandbox v0.5.0.

@@ -33,6 +33,15 @@ const (
 	// labelAgent identifies resources belonging to an Agent.
 	labelAgent = "konveyor.io/agent"
 
+	// labelAgentPlaybookRun identifies resources belonging to an AgentPlaybookRun.
+	labelAgentPlaybookRun = "konveyor.io/agentplaybookrun"
+
+	// labelStage identifies the playbook stage a resource belongs to.
+	labelStage = "konveyor.io/stage"
+
+	// reasonSucceeded is the condition reason for successful completion.
+	reasonSucceeded = "Succeeded"
+
 	// jobConditionSuccessCriteriaMet is the K8s 1.36+ condition required
 	// alongside JobComplete for valid Job status updates.
 	jobConditionSuccessCriteriaMet = "SuccessCriteriaMet"
