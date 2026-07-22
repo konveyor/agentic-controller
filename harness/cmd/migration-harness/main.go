@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"github.com/konveyor/migration-harness/internal/config"
 	"github.com/konveyor/migration-harness/internal/git"
 	"github.com/konveyor/migration-harness/internal/goose"
+	"github.com/konveyor/migration-harness/internal/hub"
 	"github.com/konveyor/migration-harness/internal/logging"
 	"github.com/konveyor/migration-harness/internal/watcher"
 )
@@ -49,26 +51,30 @@ func runStage(cmd *cobra.Command, args []string) error {
 	// 1. Load config from env
 	cfg := config.LoadFromEnv()
 	if cfg == nil {
-		return fmt.Errorf("KONVEYOR_MODEL_PRIMARY_MODEL and KONVEYOR_MODEL_PRIMARY_PROVIDER are required")
+		return fmt.Errorf("required env vars: KONVEYOR_MODEL_PRIMARY_MODEL, KONVEYOR_MODEL_PRIMARY_PROVIDER, HUB_BASE_URL, APP_ID")
 	}
 
-	// 2. Read git creds
-	creds, err := git.ReadFromEnv()
-	if err != nil {
-		return fmt.Errorf("git credentials: %w", err)
-	}
-	if creds == nil {
-		return fmt.Errorf("GIT_REPO_URL is required")
-	}
-
-	// 3. Clone, strip creds, checkout branch
-	logging.Header("Git Setup")
-	logging.Info("cloning %s...", creds.RepoURL)
-
+	// 2. Resolve app info + git creds from Hub
 	cloneDir := os.Getenv("HARNESS_WORK_DIR")
 	if cloneDir == "" {
 		cloneDir = "/workspace/repo"
 	}
+
+	creds, hubClient, err := resolveFromHub(cfg)
+	if err != nil {
+		return fmt.Errorf("hub resolution: %w", err)
+	}
+
+	// Controller must set the target branch — Hub branch is the source, not the push target.
+	targetBranch := os.Getenv("TARGET_BRANCH")
+	if targetBranch == "" {
+		return fmt.Errorf("TARGET_BRANCH is required")
+	}
+	creds.Branch = targetBranch
+
+	// 3. Clone, strip creds, checkout branch
+	logging.Header("Git Setup")
+	logging.Info("cloning %s...", creds.RepoURL)
 
 	repo, err := git.Clone(ctx, creds, cloneDir)
 	if err != nil {
@@ -78,12 +84,19 @@ func runStage(cmd *cobra.Command, args []string) error {
 	if err := git.StripCredentials(repo); err != nil {
 		return fmt.Errorf("strip credentials: %w", err)
 	}
-	git.ClearEnvCredentials()
+	hub.ClearEnv()
 
 	if err := git.CheckoutBranch(repo, creds.Branch); err != nil {
 		return fmt.Errorf("checkout branch %s: %w", creds.Branch, err)
 	}
 	logging.Ok("cloned to %s, branch %s", cloneDir, creds.Branch)
+
+	// 3b. Write analysis to workspace (if resolved from Hub)
+	if hubClient != nil {
+		if err := fetchAndWriteAnalysis(hubClient, cfg.AppID, cloneDir); err != nil {
+			logging.Warn("analysis fetch: %v", err)
+		}
+	}
 
 	// 4. Start goose serve
 	logging.Header("Goose Setup")
@@ -168,7 +181,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 		logging.Warn("final commit: %v", err)
 	}
 	if err := git.Push(ctx, creds, repo, creds.Branch); err != nil {
-		logging.Warn("final push: %v", err)
+		return fmt.Errorf("final push: %w", err)
 	}
 
 	// 13. Exit
@@ -276,6 +289,73 @@ func writeHandoff(workDir string, skills []string, status string, repo *gogit.Re
 	}
 
 	logging.Ok("wrote %s", handoffPath)
+	return nil
+}
+
+func resolveFromHub(cfg *config.Config) (*git.Credentials, *hub.Client, error) {
+	logging.Header("Hub Resolution")
+
+	appID, err := hub.ParseAppID(cfg.AppID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid APP_ID %q: %w", cfg.AppID, err)
+	}
+
+	hubClient := hub.NewClient(cfg.HubBaseURL, cfg.HubToken)
+
+	app, err := hubClient.FetchApp(appID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetch app: %w", err)
+	}
+	logging.Ok("app: %s (id=%d), repo: %s", app.Name, app.ID, app.Repository.URL)
+
+	identity, err := hubClient.FetchGitCreds(appID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetch git creds: %w", err)
+	}
+
+	creds := &git.Credentials{
+		RepoURL: app.Repository.URL,
+		Branch:  app.Repository.Branch,
+	}
+	if identity != nil {
+		creds.Username = identity.User
+		creds.Token = identity.Password
+		if creds.Username == "" {
+			creds.Username = "x-access-token"
+		}
+		logging.Ok("git identity: %s", identity.Name)
+	}
+
+	return creds, hubClient, nil
+}
+
+func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir string) error {
+	appID, _ := hub.ParseAppID(appIDStr)
+	insights, err := hubClient.FetchAnalysis(appID)
+	if err != nil {
+		return err
+	}
+	if len(insights) == 0 {
+		logging.Info("no analysis results for app %s", appIDStr)
+		return nil
+	}
+
+	analysisDir := filepath.Join(workDir, ".konveyor")
+	if err := os.MkdirAll(analysisDir, 0o755); err != nil {
+		return fmt.Errorf("create .konveyor dir: %w", err)
+	}
+
+	data, err := json.MarshalIndent(insights, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal analysis: %w", err)
+	}
+
+	analysisPath := filepath.Join(analysisDir, "analysis.json")
+	if err := os.WriteFile(analysisPath, data, 0o644); err != nil {
+		return fmt.Errorf("write analysis: %w", err)
+	}
+
+	logging.Ok("wrote %d analysis insights to %s", len(insights), analysisPath)
 	return nil
 }
 

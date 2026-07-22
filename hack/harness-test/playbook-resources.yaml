@@ -3,7 +3,7 @@
 #
 # Prerequisites:
 #   - LLMProvider "gcp-vertex-ai" from resources.yaml
-#   - git-credentials Secret from setup.sh
+#   - Hub running with app + identity configured
 #
 # Usage:
 #   kubectl apply -f hack/harness-test/resources.yaml
@@ -158,15 +158,14 @@ spec:
       provider: gcp-vertex-ai
       model: claude-sonnet-4-5
   env:
-    - name: GIT_REPO_URL
-      value: "https://github.com/savitharaghunathan/coolstore.git"
-    - name: GIT_TOKEN
-      valueFrom:
-        secretKeyRef:
-          name: git-credentials
-          key: token
-    - name: GIT_TARGET_BRANCH
-      value: "konveyor/playbook-__TIMESTAMP__"
+    - name: HUB_BASE_URL
+      value: "http://host.containers.internal:8080"
+    - name: HUB_TOKEN
+      value: "__HUB_TOKEN__"
+    - name: APP_ID
+      value: "1"
+    - name: TARGET_BRANCH
+      value: "konveyor/migration-__TIMESTAMP__"
     - name: GCP_PROJECT_ID
       value: "__GCP_PROJECT_ID__"
     - name: GCP_LOCATION

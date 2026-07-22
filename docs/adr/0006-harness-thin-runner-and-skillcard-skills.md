@@ -32,29 +32,37 @@ stage it is running, what language is being migrated, or what migration
 patterns to apply. Its responsibilities are:
 
 1. Load configuration from environment variables (`config.LoadFromEnv`)
-2. Clone the git repo, strip credentials from the remote, checkout the
-   target branch
-3. Start `goose serve` with LLM provider credentials
-4. Connect via ACP WebSocket, create a session
-5. Discover skills from `/opt/skills/*/SKILL.md` (glob)
-6. Build a single prompt from four context layers:
+2. Resolve application metadata, git credentials, and analysis results
+   from the Konveyor Hub API (`HUB_BASE_URL`, `HUB_TOKEN`, `APP_ID`)
+3. Clone the git repo using Hub-provided credentials, strip credentials
+   from the remote, checkout the controller-provided target branch
+   (`TARGET_BRANCH`)
+4. Write analysis insights to `.konveyor/analysis.json` (if available)
+5. Clear Hub credentials from the environment
+6. Start `goose serve` with LLM provider credentials
+7. Connect via ACP WebSocket, create a session
+8. Discover skills from `/opt/skills/*/SKILL.md` (glob)
+9. Build a single prompt from four context layers:
    - `KONVEYOR_PROMPT` — agent-level standing instructions
    - `KONVEYOR_PLAYBOOK_INSTRUCTIONS` — playbook guide context
    - Skill content (concatenated from all discovered skills)
    - `KONVEYOR_INSTRUCTIONS` — stage-specific task
-7. Start a filesystem watcher for incremental commit+push
-8. Send one ACP prompt and block until completion
-9. Stop watcher, determine exit status from ACP completion (error = failure, clean return = success)
-10. Final commit+push, exit 0 or 1
+10. Start a filesystem watcher for incremental commit+push
+11. Send one ACP prompt and block until completion
+12. Stop watcher, determine exit status from ACP completion (error =
+    failure, clean return = success)
+13. Final commit+push — push failure is fatal (exit 1)
 
 No interactive commands, no file-based config, no multi-turn recipe
 execution.
 
 #### Credential isolation
 
-Git credentials are stripped from the cloned repo's remote and cleared
-from the environment before goose starts. This is a deliberate security
-boundary — goose and any skill content it executes cannot access push
+Hub credentials (`HUB_BASE_URL`, `HUB_TOKEN`, `APP_ID`) are cleared
+from the environment after resolution via `hub.ClearEnv()`. Git
+credentials are stripped from the cloned repo's remote. Both happen
+before goose starts. This is a deliberate security boundary — goose
+and any skill content it executes cannot access Hub or push
 credentials. Only the harness binary pushes to git.
 
 ### Two kinds of skills: stage and domain
@@ -161,10 +169,12 @@ artifacts left by prior stages:
 
 The harness determines success or failure from ACP/goose signals:
 `SendPrompt` returning without error and goose still alive = success
-(exit 0). Any error or goose crash = failure (exit 1). The harness
-does not read any skill-written status file — git commits are the
-primary cross-stage context. Quality assessment is the eval stage's
-responsibility, not the harness's.
+(exit 0). Any error, goose crash, or final push failure = failure
+(exit 1). Push failure is fatal because the next stage clones the
+branch — if the push didn't land, the next stage has no artifacts to
+work with. The harness does not read any skill-written status file —
+git commits are the primary cross-stage context. Quality assessment
+is the eval stage's responsibility, not the harness's.
 
 #### handoff.md
 

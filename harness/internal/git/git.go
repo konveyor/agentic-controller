@@ -73,12 +73,18 @@ func StripCredentials(repo *gogit.Repository) error {
 }
 
 func CheckoutBranch(repo *gogit.Repository, branch string) error {
+	localRef := plumbing.NewBranchReferenceName(branch)
+
+	// Already on the requested branch — nothing to do.
+	if head, err := repo.Head(); err == nil && head.Name() == localRef {
+		return nil
+	}
+
 	wt, err := repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("get worktree: %w", err)
 	}
 
-	localRef := plumbing.NewBranchReferenceName(branch)
 	remoteRef := plumbing.NewRemoteReferenceName("origin", branch)
 
 	// If the remote tracking branch exists, create local branch from it.
@@ -96,7 +102,6 @@ func CheckoutBranch(repo *gogit.Repository, branch string) error {
 		Create: true,
 	})
 	if err != nil {
-		// Branch might already exist locally.
 		err = wt.Checkout(&gogit.CheckoutOptions{
 			Branch: localRef,
 		})

@@ -17,6 +17,10 @@ type Config struct {
 	APIKey           string
 	MaxTurns         int
 	MaxFixIterations int
+
+	HubBaseURL string
+	HubToken   string
+	AppID      string
 }
 
 func LoadFromEnv() *Config {
@@ -40,6 +44,16 @@ func LoadFromEnv() *Config {
 	}
 	if n, err := strconv.Atoi(os.Getenv("KONVEYOR_PARAM_MAX_FIX_ITERATIONS")); err == nil && n > 0 {
 		cfg.MaxFixIterations = n
+	}
+
+	cfg.HubBaseURL = os.Getenv("HUB_BASE_URL")
+	if cfg.HubBaseURL == "" {
+		return nil
+	}
+	cfg.HubToken = os.Getenv("HUB_TOKEN")
+	cfg.AppID = os.Getenv("APP_ID")
+	if cfg.AppID == "" {
+		return nil
 	}
 
 	return cfg

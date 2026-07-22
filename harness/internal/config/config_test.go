@@ -14,15 +14,25 @@ func clearKonveyorEnv(t *testing.T) {
 		"KONVEYOR_MODEL_PRIMARY_API_KEY",
 		"KONVEYOR_PARAM_MAX_TURNS",
 		"KONVEYOR_PARAM_MAX_FIX_ITERATIONS",
+		"HUB_BASE_URL",
+		"HUB_TOKEN",
+		"APP_ID",
 	} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
 	}
 }
 
+func setHubEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("HUB_BASE_URL", "https://hub.example.com")
+	t.Setenv("APP_ID", "42")
+}
+
 func TestLoadFromEnv(t *testing.T) {
 	t.Run("returns config from env", func(t *testing.T) {
 		clearKonveyorEnv(t)
+		setHubEnv(t)
 		t.Setenv("KONVEYOR_MODEL_PRIMARY_MODEL", "claude-sonnet-4-5")
 		t.Setenv("KONVEYOR_MODEL_PRIMARY_PROVIDER", "anthropic")
 		t.Setenv("KONVEYOR_MODEL_PRIMARY_ENDPOINT", "https://api.anthropic.com")
@@ -59,6 +69,7 @@ func TestLoadFromEnv(t *testing.T) {
 	})
 
 	t.Run("reads optional param overrides", func(t *testing.T) {
+		setHubEnv(t)
 		t.Setenv("KONVEYOR_MODEL_PRIMARY_MODEL", "gemini-2.5-pro")
 		t.Setenv("KONVEYOR_MODEL_PRIMARY_PROVIDER", "gcp_vertex_ai")
 		t.Setenv("KONVEYOR_PARAM_MAX_TURNS", "500")

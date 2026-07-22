@@ -29,16 +29,14 @@ kubectl create secret generic vertex-credentials \
     --dry-run=client -o yaml | kubectl apply -f -
 echo "  vertex-credentials created"
 
-# Git token from gh CLI
-GIT_TOKEN=$(gh auth token 2>/dev/null || echo "")
-if [ -z "$GIT_TOKEN" ]; then
-    echo "ERROR: Could not get GitHub token. Run: gh auth login"
-    exit 1
-fi
-kubectl create secret generic git-credentials \
-    --from-literal=token="$GIT_TOKEN" \
-    --dry-run=client -o yaml | kubectl apply -f -
-echo "  git-credentials created"
+# Hub token (JWT signed with default key "tackle")
+HUB_KEY="${HUB_KEY:-tackle}"
+EXP=$(( $(date +%s) + 86400 ))
+HEADER_B64=$(printf '{"typ":"JWT","alg":"HS512"}' | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+PAYLOAD_B64=$(printf '{"sub":"admin","scope":"*:*","exp":%d}' "$EXP" | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+SIGNATURE=$(printf '%s.%s' "$HEADER_B64" "$PAYLOAD_B64" | openssl dgst -sha512 -hmac "$HUB_KEY" -binary | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+HUB_TOKEN="${HEADER_B64}.${PAYLOAD_B64}.${SIGNATURE}"
+echo "  hub token generated (expires in 24h)"
 
 echo ""
 echo "=== Building agent images ==="
@@ -105,9 +103,11 @@ fi
 echo "  GCP project: (set)"
 sed "s/__GCP_PROJECT_ID__/$GCP_PROJECT_ID/" "$SCRIPT_DIR/resources.yaml" | kubectl apply -f -
 TIMESTAMP=$(date +%s)
-sed -e "s/__GCP_PROJECT_ID__/$GCP_PROJECT_ID/g" -e "s/__TIMESTAMP__/$TIMESTAMP/g" "$SCRIPT_DIR/playbook-resources.yaml" | kubectl apply -f -
+sed -e "s/__GCP_PROJECT_ID__/$GCP_PROJECT_ID/g" \
+    -e "s/__TIMESTAMP__/$TIMESTAMP/g" \
+    -e "s|__HUB_TOKEN__|$HUB_TOKEN|g" \
+    "$SCRIPT_DIR/playbook-resources.yaml" | kubectl apply -f -
 echo "  AgentPlaybookRun: coolstore-migration-$TIMESTAMP"
-echo "  Branch: konveyor/playbook-$TIMESTAMP"
 
 echo ""
 echo "=== Done ==="
