@@ -2,13 +2,10 @@ package main
 
 import (
 	"context"
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -152,11 +149,16 @@ func runStage(cmd *cobra.Command, args []string) error {
 	// 10. Stop watcher
 	w.Stop()
 
-	// 11. Read results.json for exit status
-	result, exitCode := readResultStatus(cloneDir)
+	// 11. Determine exit status from ACP/goose signals
+	stageFailed := err != nil || !srv.Alive()
+
+	status := "succeeded"
+	if stageFailed {
+		status = "failed"
+	}
 
 	// 11b. Write handoff.md for next stage
-	if err := writeHandoff(cloneDir, skillPaths, result, repo); err != nil {
+	if err := writeHandoff(cloneDir, skillPaths, status, repo); err != nil {
 		logging.Warn("handoff: %v", err)
 	}
 
@@ -170,8 +172,8 @@ func runStage(cmd *cobra.Command, args []string) error {
 	}
 
 	// 13. Exit
-	if exitCode != 0 {
-		logging.Err("stage failed (results.json)")
+	if stageFailed {
+		logging.Err("stage failed")
 		os.Exit(1)
 	}
 	logging.Ok("stage succeeded")
@@ -238,46 +240,11 @@ func buildPrompt(skillContent string) string {
 	return b.String()
 }
 
-type stageResult struct {
-	Stage   string `json:"stage"`
-	Status  string `json:"status"`
-	Reason  string `json:"reason,omitempty"`
-	Summary string `json:"summary,omitempty"`
-}
-
-func readResultStatus(workDir string) (stageResult, int) {
-	path := filepath.Join(workDir, ".konveyor", "results.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		logging.Warn("no results.json found — treating as failure")
-		return stageResult{Stage: "unknown", Status: "failed", Reason: "no results.json"}, 1
-	}
-
-	var results []stageResult
-	if err := json.Unmarshal(data, &results); err != nil {
-		logging.Warn("invalid results.json: %v", err)
-		return stageResult{Stage: "unknown", Status: "failed", Reason: "invalid results.json"}, 1
-	}
-
-	if len(results) == 0 {
-		logging.Warn("results.json is empty — treating as failure")
-		return stageResult{Stage: "unknown", Status: "failed", Reason: "empty results.json"}, 1
-	}
-
-	last := results[len(results)-1]
-	if last.Status == "succeeded" {
-		return last, 0
-	}
-
-	logging.Err("stage %s failed: %s", last.Stage, last.Reason)
-	return last, 1
-}
-
 func skillName(path string) string {
 	return filepath.Base(filepath.Dir(path))
 }
 
-func writeHandoff(workDir string, skills []string, result stageResult, repo *gogit.Repository) error {
+func writeHandoff(workDir string, skills []string, status string, repo *gogit.Repository) error {
 	handoffPath := filepath.Join(workDir, ".konveyor", "handoff.md")
 	if err := os.MkdirAll(filepath.Dir(handoffPath), 0o755); err != nil {
 		return fmt.Errorf("create .konveyor dir: %w", err)
@@ -292,31 +259,12 @@ func writeHandoff(workDir string, skills []string, result stageResult, repo *gog
 		b.WriteString("\n---\n\n")
 	}
 
-	fmt.Fprintf(&b, "## Stage: %s\n\n", result.Stage)
-	fmt.Fprintf(&b, "**Status:** %s  \n", result.Status)
+	fmt.Fprintf(&b, "**Status:** %s  \n", status)
 	fmt.Fprintf(&b, "**Completed:** %s\n", time.Now().UTC().Format(time.RFC3339))
-	if result.Reason != "" {
-		fmt.Fprintf(&b, "**Reason:** %s\n", result.Reason)
-	}
-
-	if result.Summary != "" {
-		b.WriteString("\n### Summary\n\n")
-		b.WriteString(result.Summary)
-		b.WriteString("\n")
-	}
 
 	b.WriteString("\n### Skills\n\n")
 	for _, s := range skills {
 		fmt.Fprintf(&b, "- %s\n", skillName(s))
-	}
-
-	if result.Stage == "plan" {
-		if steps := planSteps(workDir); len(steps) > 0 {
-			b.WriteString("\n### Migration Steps (from PLAN.md)\n\n")
-			for _, s := range steps {
-				fmt.Fprintf(&b, "- %s\n", s)
-			}
-		}
 	}
 
 	if n := changedFileCount(repo); n > 0 {
@@ -358,22 +306,3 @@ func changedFileCount(repo *gogit.Repository) int {
 	return n
 }
 
-var stepRe = regexp.MustCompile(`^###\s+Step\s+\d+`)
-
-func planSteps(workDir string) []string {
-	f, err := os.Open(filepath.Join(workDir, "PLAN.md"))
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	var steps []string
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := sc.Text()
-		if stepRe.MatchString(line) {
-			title := strings.TrimPrefix(line, "### ")
-			steps = append(steps, title)
-		}
-	}
-	return steps
-}

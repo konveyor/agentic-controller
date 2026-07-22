@@ -16,9 +16,6 @@ import (
 
 // DefaultQuietPeriod is the debounce window: after the last relevant
 // filesystem event, the watcher waits this long before committing.
-// .konveyor/ is excluded from watching (results.json is written once at
-// stage end) but NOT from ShouldStageNewFile, so the final CommitAll
-// in main.go picks it up.
 const DefaultQuietPeriod = 30 * time.Second
 
 type CommitPushFn func() error

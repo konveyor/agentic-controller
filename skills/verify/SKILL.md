@@ -71,27 +71,6 @@ are documented in the result, not fixed here.
 
 ---
 
-## Phase 5 — Write Result
-
-Append your result to `.konveyor/results.json`:
-
-Read the existing file (it should have plan and execute entries),
-parse the JSON array, append your entry, and write it back.
-
-Your entry on success:
-
-```json
-{"stage": "verify", "status": "succeeded", "summary": "<1-2 sentences: build/test results and any fixes applied>"}
-```
-
-On failure:
-
-```json
-{"stage": "verify", "status": "failed", "reason": "build failed after N fix iterations: <remaining errors>", "summary": "<what was tried and what errors remain>"}
-```
-
----
-
 ## Important
 
 - Fixes must be minimal and conservative — do not rewrite working code

@@ -44,7 +44,7 @@ patterns to apply. Its responsibilities are:
    - `KONVEYOR_INSTRUCTIONS` — stage-specific task
 7. Start a filesystem watcher for incremental commit+push
 8. Send one ACP prompt and block until completion
-9. Stop watcher, read `.konveyor/results.json` for exit status
+9. Stop watcher, determine exit status from ACP completion (error = failure, clean return = success)
 10. Final commit+push, exit 0 or 1
 
 No interactive commands, no file-based config, no multi-turn recipe
@@ -153,49 +153,33 @@ real complaint.
 Git is the shared state boundary. Each stage clones the repo and reads
 artifacts left by prior stages:
 
-- Plan writes: `PLAN.md`, `graph.json`, `.konveyor/results.json`
+- Plan writes: `PLAN.md`, `graph.json`
 - Execute reads: `PLAN.md`. Writes: migrated source files
 - Verify reads: migrated source. Writes: fix patches
 
-#### results.json contract
+#### Exit status
 
-Each skill MUST append to `.konveyor/results.json` as its final action.
-The file is a JSON array — each stage adds an entry:
+The harness determines success or failure from ACP/goose signals:
+`SendPrompt` returning without error and goose still alive = success
+(exit 0). Any error or goose crash = failure (exit 1). The harness
+does not read any skill-written status file — git commits are the
+primary cross-stage context. Quality assessment is the eval stage's
+responsibility, not the harness's.
 
-```json
-[
-  {"stage": "plan", "status": "succeeded"},
-  {"stage": "execute", "status": "failed", "reason": "context exhausted at step 23"}
-]
-```
+#### handoff.md
 
-The harness reads the last entry to determine exit code (0 for
-`"succeeded"`, 1 for anything else). Missing `results.json` is treated
-as failure. This is a hard contract — a skill that completes
-successfully but does not write `results.json` is considered broken.
-
-The controller currently determines stage success from pod exit code
-only. A planned enhancement will have the harness write a one-line
-`reason` field to the AgentRun CR status before exiting, giving
-operators and the UI meaningful failure context without the controller
-needing to parse `results.json` from the git branch.
-
-#### handoff.md (redesign pending)
-
-The harness writes `.konveyor/handoff.md` after each stage. Currently
-formatted for human readers (status summary, skills loaded, plan steps,
-file counts). A redesign is planned to make handoff.md
-machine-readable so that skills can consume prior-stage context
-programmatically. The results.json schema will be revisited alongside
-this redesign.
+The harness writes `.konveyor/handoff.md` after each stage with
+status, skills loaded, and file counts. Git commits are the primary
+cross-stage context — handoff.md supplements them with metadata that
+isn't in the diff. If git commits prove insufficient for agent
+consumption, handoff.md can be redesigned for machine readability.
 
 ### Stage timeout
 
 The harness will support a `KONVEYOR_STAGE_TIMEOUT` env var (default:
 60 minutes). When the timeout fires, `SendPrompt` returns via context
-cancellation, the harness writes a failure entry to `results.json`
-("stage timed out"), performs the final commit+push to preserve partial
-work, and exits 1. This provides graceful timeout with artifact
+cancellation, the harness performs the final commit+push to preserve
+partial work, and exits 1. This provides graceful timeout with artifact
 preservation, versus the Sandbox's `activeDeadlineSeconds` which kills
 the pod hard and loses uncommitted progress.
 
@@ -269,15 +253,15 @@ Skill-level chunking (the skill itself decides how to batch work)
 keeps the harness thin and puts the complexity where domain knowledge
 lives.
 
-### Controller reads results.json directly
+### Controller reads status files from git
 
-The controller clones the git branch or reads results.json from the
+The controller clones the git branch or reads status files from the
 pod filesystem to get structured stage results.
 
 Rejected because: adds git or filesystem dependencies to the
-controller. The simpler approach is the harness writing a one-line
-reason to the AgentRun CR status before exiting. The controller
-stays a standard stateless reconciler.
+controller. The harness exit code (derived from ACP completion
+status) is sufficient. The controller stays a standard stateless
+reconciler that watches pod exit codes.
 
 ## Consequences
 
@@ -292,10 +276,10 @@ stays a standard stateless reconciler.
   within the context window. The harness has no automatic recovery if
   the LLM loses context mid-stage.
 
-- **results.json is a hard contract.** Skills must append to
-  `.konveyor/results.json` as their final action. Missing results.json
-  is treated as stage failure. This forces skill authors to explicitly
-  declare success or failure.
+- **Exit status from ACP, not files.** The harness determines
+  success/failure from the ACP completion signal, not from any
+  skill-written file. Git commits are the cross-stage context.
+  Quality assessment is deferred to the eval stage.
 
 - **SkillCard dependency.** Stage images are non-functional without
   mounted SkillCards. A misconfigured Agent CR (missing skillCards
@@ -321,6 +305,5 @@ stays a standard stateless reconciler.
 
 | Item | Description |
 |------|-------------|
-| handoff.md + results.json redesign | Make machine-readable for agent consumption |
+| handoff.md redesign | Redesign for machine readability if git commits prove insufficient for cross-stage context |
 | Stage timeout | Implement `KONVEYOR_STAGE_TIMEOUT` env var |
-| AgentRun reason field | Harness writes one-line failure reason to CR status |

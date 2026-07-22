@@ -13,7 +13,7 @@ var sourceExts = map[string]bool{
 
 var excludeDirs = map[string]bool{
 	".goose": true, "__pycache__": true, ".git": true,
-	"node_modules": true, "target": true, "graphify-out": true,
+	".konveyor": true, "node_modules": true, "target": true, "graphify-out": true,
 }
 
 var excludeExts = map[string]bool{
@@ -23,7 +23,7 @@ var excludeExts = map[string]bool{
 func ShouldStageNewFile(path string) bool {
 	base := filepath.Base(path)
 
-	if base == "pom.xml" || base == "results.json" {
+	if base == "pom.xml" {
 		return true
 	}
 

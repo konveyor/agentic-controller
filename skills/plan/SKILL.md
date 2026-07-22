@@ -227,31 +227,6 @@ Write `PLAN.md` to the project root with this structure:
 
 ---
 
-## Phase 6 — Write Result
-
-After writing PLAN.md, append your result to `.konveyor/results.json`:
-
-```bash
-mkdir -p .konveyor
-```
-
-If the file exists, read it, parse the JSON array, append your entry,
-and write it back. If it does not exist, create it with a single-entry array.
-
-Your entry:
-
-```json
-{"stage": "plan", "status": "succeeded", "summary": "<1-2 sentences: what you found and what the plan covers>"}
-```
-
-Or on failure:
-
-```json
-{"stage": "plan", "status": "failed", "reason": "<what went wrong>", "summary": "<what was attempted>"}
-```
-
----
-
 ## Important
 
 - Do NOT modify source files — planning only

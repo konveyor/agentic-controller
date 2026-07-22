@@ -54,25 +54,6 @@ For each step in PLAN.md, follow this exact sequence:
 
 ---
 
-## Completion
-
-After executing all steps, append your result to `.konveyor/results.json`:
-
-Read the existing file (it should have the plan stage entry), parse the
-JSON array, append your entry, and write it back.
-
-Your entry:
-
-```json
-{"stage": "execute", "status": "succeeded", "summary": "<1-2 sentences: what was migrated and how many steps completed>"}
-```
-
-Or on failure:
-
-```json
-{"stage": "execute", "status": "failed", "reason": "<what went wrong>", "summary": "<what was completed before failure>"}
-```
-
 ## Important
 
 - Work through ALL items — completeness matters more than perfection
