@@ -97,7 +97,7 @@ kind: Agent
 metadata:
   name: migration-execute-agent
 spec:
-  image: quay.io/konveyor/agent-execute:dev
+  image: quay.io/konveyor/agent-execute-java:dev
   providers:
     - ref: gcp-vertex-ai
   skillCards:
@@ -114,7 +114,7 @@ kind: Agent
 metadata:
   name: migration-verify-agent
 spec:
-  image: quay.io/konveyor/agent-verify:dev
+  image: quay.io/konveyor/agent-verify-java:dev
   providers:
     - ref: gcp-vertex-ai
   skillCards:

@@ -152,7 +152,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 	// 10. Stop watcher
 	w.Stop()
 
-	// 11. Read result.json for exit status
+	// 11. Read results.json for exit status
 	result, exitCode := readResultStatus(cloneDir)
 
 	// 11b. Write handoff.md for next stage
@@ -171,7 +171,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 
 	// 13. Exit
 	if exitCode != 0 {
-		logging.Err("stage failed (result.json)")
+		logging.Err("stage failed (results.json)")
 		os.Exit(1)
 	}
 	logging.Ok("stage succeeded")
@@ -246,22 +246,22 @@ type stageResult struct {
 }
 
 func readResultStatus(workDir string) (stageResult, int) {
-	path := filepath.Join(workDir, ".konveyor", "result.json")
+	path := filepath.Join(workDir, ".konveyor", "results.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		logging.Warn("no result.json found — treating as failure")
-		return stageResult{Stage: "unknown", Status: "failed", Reason: "no result.json"}, 1
+		logging.Warn("no results.json found — treating as failure")
+		return stageResult{Stage: "unknown", Status: "failed", Reason: "no results.json"}, 1
 	}
 
 	var results []stageResult
 	if err := json.Unmarshal(data, &results); err != nil {
-		logging.Warn("invalid result.json: %v", err)
-		return stageResult{Stage: "unknown", Status: "failed", Reason: "invalid result.json"}, 1
+		logging.Warn("invalid results.json: %v", err)
+		return stageResult{Stage: "unknown", Status: "failed", Reason: "invalid results.json"}, 1
 	}
 
 	if len(results) == 0 {
-		logging.Warn("result.json is empty — treating as failure")
-		return stageResult{Stage: "unknown", Status: "failed", Reason: "empty result.json"}, 1
+		logging.Warn("results.json is empty — treating as failure")
+		return stageResult{Stage: "unknown", Status: "failed", Reason: "empty results.json"}, 1
 	}
 
 	last := results[len(results)-1]

@@ -23,7 +23,7 @@ var excludeExts = map[string]bool{
 func ShouldStageNewFile(path string) bool {
 	base := filepath.Base(path)
 
-	if base == "pom.xml" || base == "result.json" {
+	if base == "pom.xml" || base == "results.json" {
 		return true
 	}
 

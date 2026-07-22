@@ -10,7 +10,7 @@ func TestShouldStageNewFile(t *testing.T) {
 		{"src/main/java/com/example/App.java", true},
 		{"pom.xml", true},
 		{"src/main/resources/application.properties", true},
-		{".konveyor/result.json", true},
+		{".konveyor/results.json", true},
 		{"PLAN.md", true},
 		{"graph.json", true},
 		{".goose/cache/foo.txt", false},

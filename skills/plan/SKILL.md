@@ -98,7 +98,11 @@ Read `graph.json` to understand the project architecture:
 
 ### 3b. Match Patterns to Graph
 
-Check which migration patterns exist in the graph:
+Check `/opt/skills/*/references/` for domain-specific migration patterns
+from loaded migration skills. These references contain migration order,
+import mappings, and pattern catalogs for the specific migration type.
+
+Use these patterns to identify which graph nodes need migration:
 
 **Example (if a Java EE migration skill is loaded)**:
 - Look for nodes where `attrs.annotations` contains `@MessageDriven` → Mark as COMPLEX
@@ -225,7 +229,7 @@ Write `PLAN.md` to the project root with this structure:
 
 ## Phase 6 — Write Result
 
-After writing PLAN.md, append your result to `.konveyor/result.json`:
+After writing PLAN.md, append your result to `.konveyor/results.json`:
 
 ```bash
 mkdir -p .konveyor

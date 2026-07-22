@@ -73,7 +73,7 @@ are documented in the result, not fixed here.
 
 ## Phase 5 — Write Result
 
-Append your result to `.konveyor/result.json`:
+Append your result to `.konveyor/results.json`:
 
 Read the existing file (it should have plan and execute entries),
 parse the JSON array, append your entry, and write it back.

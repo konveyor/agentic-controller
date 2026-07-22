@@ -44,7 +44,7 @@ patterns to apply. Its responsibilities are:
    - `KONVEYOR_INSTRUCTIONS` — stage-specific task
 7. Start a filesystem watcher for incremental commit+push
 8. Send one ACP prompt and block until completion
-9. Stop watcher, read `.konveyor/result.json` for exit status
+9. Stop watcher, read `.konveyor/results.json` for exit status
 10. Final commit+push, exit 0 or 1
 
 No interactive commands, no file-based config, no multi-turn recipe
@@ -153,13 +153,13 @@ real complaint.
 Git is the shared state boundary. Each stage clones the repo and reads
 artifacts left by prior stages:
 
-- Plan writes: `PLAN.md`, `graph.json`, `.konveyor/result.json`
+- Plan writes: `PLAN.md`, `graph.json`, `.konveyor/results.json`
 - Execute reads: `PLAN.md`. Writes: migrated source files
 - Verify reads: migrated source. Writes: fix patches
 
-#### result.json contract
+#### results.json contract
 
-Each skill MUST append to `.konveyor/result.json` as its final action.
+Each skill MUST append to `.konveyor/results.json` as its final action.
 The file is a JSON array — each stage adds an entry:
 
 ```json
@@ -170,15 +170,15 @@ The file is a JSON array — each stage adds an entry:
 ```
 
 The harness reads the last entry to determine exit code (0 for
-`"succeeded"`, 1 for anything else). Missing `result.json` is treated
+`"succeeded"`, 1 for anything else). Missing `results.json` is treated
 as failure. This is a hard contract — a skill that completes
-successfully but does not write `result.json` is considered broken.
+successfully but does not write `results.json` is considered broken.
 
 The controller currently determines stage success from pod exit code
 only. A planned enhancement will have the harness write a one-line
 `reason` field to the AgentRun CR status before exiting, giving
 operators and the UI meaningful failure context without the controller
-needing to parse `result.json` from the git branch.
+needing to parse `results.json` from the git branch.
 
 #### handoff.md (redesign pending)
 
@@ -186,14 +186,14 @@ The harness writes `.konveyor/handoff.md` after each stage. Currently
 formatted for human readers (status summary, skills loaded, plan steps,
 file counts). A redesign is planned to make handoff.md
 machine-readable so that skills can consume prior-stage context
-programmatically. The result.json schema will be revisited alongside
+programmatically. The results.json schema will be revisited alongside
 this redesign.
 
 ### Stage timeout
 
 The harness will support a `KONVEYOR_STAGE_TIMEOUT` env var (default:
 60 minutes). When the timeout fires, `SendPrompt` returns via context
-cancellation, the harness writes a failure entry to `result.json`
+cancellation, the harness writes a failure entry to `results.json`
 ("stage timed out"), performs the final commit+push to preserve partial
 work, and exits 1. This provides graceful timeout with artifact
 preservation, versus the Sandbox's `activeDeadlineSeconds` which kills
@@ -269,9 +269,9 @@ Skill-level chunking (the skill itself decides how to batch work)
 keeps the harness thin and puts the complexity where domain knowledge
 lives.
 
-### Controller reads result.json directly
+### Controller reads results.json directly
 
-The controller clones the git branch or reads result.json from the
+The controller clones the git branch or reads results.json from the
 pod filesystem to get structured stage results.
 
 Rejected because: adds git or filesystem dependencies to the
@@ -292,8 +292,8 @@ stays a standard stateless reconciler.
   within the context window. The harness has no automatic recovery if
   the LLM loses context mid-stage.
 
-- **result.json is a hard contract.** Skills must append to
-  `.konveyor/result.json` as their final action. Missing result.json
+- **results.json is a hard contract.** Skills must append to
+  `.konveyor/results.json` as their final action. Missing results.json
   is treated as stage failure. This forces skill authors to explicitly
   declare success or failure.
 
@@ -321,7 +321,6 @@ stays a standard stateless reconciler.
 
 | Item | Description |
 |------|-------------|
-| handoff.md + result.json redesign | Make machine-readable for agent consumption |
-| Image rename | `agent-execute` → `agent-execute-java`, `agent-verify` → `agent-verify-java` |
+| handoff.md + results.json redesign | Make machine-readable for agent consumption |
 | Stage timeout | Implement `KONVEYOR_STAGE_TIMEOUT` env var |
 | AgentRun reason field | Harness writes one-line failure reason to CR status |

@@ -56,7 +56,7 @@ For each step in PLAN.md, follow this exact sequence:
 
 ## Completion
 
-After executing all steps, append your result to `.konveyor/result.json`:
+After executing all steps, append your result to `.konveyor/results.json`:
 
 Read the existing file (it should have the plan stage entry), parse the
 JSON array, append your entry, and write it back.

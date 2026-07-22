@@ -25,8 +25,8 @@ mounted at runtime via SkillCards, not baked into images.
 agent-base             UBI 10 + goose CLI + git + harness binary
 ├── agent-plan         + Python 3, graphify
 ├── agent-java-base    + JDK 21, Maven
-│   ├── agent-execute  (inherits java-base)
-│   └── agent-verify   (inherits java-base)
+│   ├── agent-execute-java  (inherits java-base)
+│   └── agent-verify-java   (inherits java-base)
 ```
 
 ```bash
