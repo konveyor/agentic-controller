@@ -80,7 +80,7 @@ for IMG in "${IMAGES[@]}"; do
 done
 
 for SKILL in "${SKILL_DIRS[@]}"; do
-    if $CONTAINER_TOOL image exists "${SKILL_IMAGE}:${SKILL}" 2>/dev/null; then
+    if $CONTAINER_TOOL image inspect "${SKILL_IMAGE}:${SKILL}" >/dev/null 2>&1; then
         if [ "$CONTAINER_TOOL" = "podman" ]; then
             $CONTAINER_TOOL save "${SKILL_IMAGE}:${SKILL}" -o /tmp/skill-image.tar
             KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/skill-image.tar --name "$KIND_CLUSTER"

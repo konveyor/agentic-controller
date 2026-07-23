@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,12 +17,24 @@ import (
 	"github.com/konveyor/migration-harness/internal/watcher"
 )
 
+func isChildOf(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != "." && !strings.HasPrefix(rel, "..")
+}
+
 func Clone(ctx context.Context, cred *Credentials, destDir string) (*gogit.Repository, error) {
+	destDir, err := filepath.Abs(destDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve destination: %w", err)
+	}
+
 	if _, err := os.Stat(destDir); err == nil {
-		if !strings.HasPrefix(destDir, "/workspace") && !strings.HasPrefix(destDir, os.TempDir()) {
+		if !isChildOf(destDir, "/workspace") && !isChildOf(destDir, os.TempDir()) {
 			return nil, fmt.Errorf("refusing to remove %s: not under /workspace or temp", destDir)
 		}
-		os.RemoveAll(destDir)
+		if err := os.RemoveAll(destDir); err != nil {
+			return nil, fmt.Errorf("remove %s: %w", destDir, err)
+		}
 	}
 
 	repo, err := gogit.PlainCloneContext(ctx, destDir, false, &gogit.CloneOptions{
@@ -126,6 +139,7 @@ func CommitAll(repo *gogit.Repository, message string) (plumbing.Hash, error) {
 		return plumbing.ZeroHash, nil
 	}
 
+	staged := false
 	for path, s := range status {
 		if s.Worktree == gogit.Untracked && !watcher.ShouldStageNewFile(path) {
 			continue
@@ -133,6 +147,10 @@ func CommitAll(repo *gogit.Repository, message string) (plumbing.Hash, error) {
 		if _, err := wt.Add(path); err != nil {
 			return plumbing.ZeroHash, fmt.Errorf("add %s: %w", path, err)
 		}
+		staged = true
+	}
+	if !staged {
+		return plumbing.ZeroHash, nil
 	}
 
 	hash, err := wt.Commit(message, &gogit.CommitOptions{

@@ -50,7 +50,7 @@ func (c *Client) FetchAnalysis(appID uint) ([]api.Insight, error) {
 	selected := c.rich.Application.Select(appID)
 	insights, err := selected.Analysis.ListInsights()
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 	return insights, nil
 }

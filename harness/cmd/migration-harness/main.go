@@ -187,7 +187,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 	// 13. Exit
 	if stageFailed {
 		logging.Err("stage failed")
-		os.Exit(1)
+		return fmt.Errorf("stage failed")
 	}
 	logging.Ok("stage succeeded")
 	return nil

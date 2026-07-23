@@ -8,7 +8,7 @@ import (
 var sourceExts = map[string]bool{
 	".java": true, ".xml": true, ".properties": true,
 	".md": true, ".json": true, ".yaml": true, ".yml": true,
-	".gradle": true, ".kt": true, ".groovy": true,
+	".gradle": true, ".kts": true, ".kt": true, ".groovy": true,
 }
 
 var excludeDirs = map[string]bool{
