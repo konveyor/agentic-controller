@@ -153,8 +153,9 @@ type PromptUsage struct {
 }
 
 // SendPrompt sends a prompt to a session and collects the streaming
-// response. Returns the final result with all collected message chunks.
-func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, content []ContentBlock) (*PromptResult, error) {
+// response. maxTurns limits the number of tool calls before the prompt
+// is terminated. If maxTurns is 0, no limit is enforced.
+func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, content []ContentBlock, maxTurns int) (*PromptResult, error) {
 	req := newRequest("session/prompt", &PromptParams{
 		SessionID: sessionID,
 		Prompt:    content,
@@ -165,6 +166,7 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 	}
 
 	result := &PromptResult{}
+	turnCount := 0
 
 	for {
 		select {
@@ -174,6 +176,13 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 			return nil, fmt.Errorf("websocket connection closed during prompt")
 		case msg := <-c.ws.Recv():
 			if msg.IsNotification() {
+				if isToolCall(msg) {
+					turnCount++
+					if maxTurns > 0 && turnCount >= maxTurns {
+						logging.Warn("max turns reached (%d), terminating", maxTurns)
+						return result, fmt.Errorf("max turns reached (%d)", maxTurns)
+					}
+				}
 				handlePromptNotification(msg, result)
 				continue
 			}
@@ -203,6 +212,21 @@ func extractSessionIDFromNotifications(notifications []*RPCResponse) string {
 		}
 	}
 	return ""
+}
+
+func isToolCall(msg *RPCResponse) bool {
+	if msg.Method != "session/update" {
+		return false
+	}
+	var params struct {
+		Update struct {
+			SessionUpdate string `json:"sessionUpdate"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return false
+	}
+	return params.Update.SessionUpdate == "tool_call"
 }
 
 func handlePromptNotification(msg *RPCResponse, result *PromptResult) {

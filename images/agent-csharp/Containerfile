@@ -1,0 +1,17 @@
+# agent-csharp: C# agent image. Adds .NET SDK on top of agent-base.
+#
+# Build context must be the repository root:
+#   podman build -t agent-csharp -f images/agent-csharp/Containerfile .
+
+FROM quay.io/konveyor/agent-base:latest AS base
+
+USER root
+
+RUN dnf install -y \
+    dotnet-sdk-8.0 \
+    && dnf clean all
+
+USER harness
+
+ENTRYPOINT ["migration-harness"]
+CMD ["run"]

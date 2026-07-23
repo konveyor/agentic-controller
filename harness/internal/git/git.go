@@ -6,17 +6,35 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	gogitcfg "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/konveyor/migration-harness/internal/watcher"
 )
 
+func isChildOf(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != "." && !strings.HasPrefix(rel, "..")
+}
+
 func Clone(ctx context.Context, cred *Credentials, destDir string) (*gogit.Repository, error) {
+	destDir, err := filepath.Abs(destDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve destination: %w", err)
+	}
+
 	if _, err := os.Stat(destDir); err == nil {
-		os.RemoveAll(destDir)
+		if !isChildOf(destDir, "/workspace") && !isChildOf(destDir, os.TempDir()) {
+			return nil, fmt.Errorf("refusing to remove %s: not under /workspace or temp", destDir)
+		}
+		if err := os.RemoveAll(destDir); err != nil {
+			return nil, fmt.Errorf("remove %s: %w", destDir, err)
+		}
 	}
 
 	repo, err := gogit.PlainCloneContext(ctx, destDir, false, &gogit.CloneOptions{
@@ -68,20 +86,37 @@ func StripCredentials(repo *gogit.Repository) error {
 }
 
 func CheckoutBranch(repo *gogit.Repository, branch string) error {
+	localRef := plumbing.NewBranchReferenceName(branch)
+
+	// Already on the requested branch — nothing to do.
+	if head, err := repo.Head(); err == nil && head.Name() == localRef {
+		return nil
+	}
+
 	wt, err := repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("get worktree: %w", err)
 	}
 
-	ref := plumbing.NewBranchReferenceName(branch)
+	remoteRef := plumbing.NewRemoteReferenceName("origin", branch)
 
+	// If the remote tracking branch exists, create local branch from it.
+	if hash, err := repo.ResolveRevision(plumbing.Revision(remoteRef)); err == nil {
+		return wt.Checkout(&gogit.CheckoutOptions{
+			Branch: localRef,
+			Hash:   *hash,
+			Create: true,
+		})
+	}
+
+	// Otherwise create a new branch from HEAD.
 	err = wt.Checkout(&gogit.CheckoutOptions{
-		Branch: ref,
+		Branch: localRef,
 		Create: true,
 	})
 	if err != nil {
 		err = wt.Checkout(&gogit.CheckoutOptions{
-			Branch: ref,
+			Branch: localRef,
 		})
 		if err != nil {
 			return fmt.Errorf("checkout branch %s: %w", branch, err)
@@ -104,8 +139,18 @@ func CommitAll(repo *gogit.Repository, message string) (plumbing.Hash, error) {
 		return plumbing.ZeroHash, nil
 	}
 
-	if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err != nil {
-		return plumbing.ZeroHash, fmt.Errorf("add all: %w", err)
+	staged := false
+	for path, s := range status {
+		if s.Worktree == gogit.Untracked && !watcher.ShouldStageNewFile(path) {
+			continue
+		}
+		if _, err := wt.Add(path); err != nil {
+			return plumbing.ZeroHash, fmt.Errorf("add %s: %w", path, err)
+		}
+		staged = true
+	}
+	if !staged {
+		return plumbing.ZeroHash, nil
 	}
 
 	hash, err := wt.Commit(message, &gogit.CommitOptions{
@@ -122,6 +167,10 @@ func CommitAll(repo *gogit.Repository, message string) (plumbing.Hash, error) {
 	return hash, nil
 }
 
+// Push force-pushes the branch. Force is intentional: the watcher's
+// auto-commits may create non-fast-forward histories, and each stage
+// owns its branch exclusively. Concurrent runs on the same branch are
+// not supported.
 func Push(ctx context.Context, cred *Credentials, repo *gogit.Repository, branch string) error {
 	refSpec := gogitcfg.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/heads/%s", branch, branch))
 

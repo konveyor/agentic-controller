@@ -3,11 +3,15 @@ kind: SkillCollection
 metadata:
   name: java-migration-skills
 spec:
-  version: "1.0.0"
+  version: "2.0.0"
   skills:
+    - name: javax-to-jakarta-ee
+      skillCardRef: javax-to-jakarta-ee
     - name: maven-migration
       skillCardRef: maven-migration
     - name: no-javax-imports
       skillCardRef: no-javax-imports
     - name: ejb-to-cdi
       skillCardRef: ejb-to-cdi
+    - name: javaee-to-quarkus
+      skillCardRef: javaee-to-quarkus

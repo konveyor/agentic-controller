@@ -1,0 +1,14 @@
+apiVersion: skillimage.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: verify
+  namespace: konveyor
+  version: "1.0.0"
+  description: >
+    Runs the project build command, parses compiler errors, applies conservative
+    fixes, and iterates until the build passes or max iterations are reached.
+  tags:
+    - migration
+    - verification
+spec:
+  prompt: SKILL.md

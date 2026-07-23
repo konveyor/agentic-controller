@@ -82,7 +82,7 @@ func TestCommitAllWithChanges(t *testing.T) {
 	seedBareRepo(t, remoteDir)
 	cloneDir, repo := cloneLocal(t, remoteDir)
 
-	os.WriteFile(filepath.Join(cloneDir, "new-file.txt"), []byte("hello\n"), 0644)
+	os.WriteFile(filepath.Join(cloneDir, "new-file.java"), []byte("class Hello {}\n"), 0644)
 
 	hash, err := CommitAll(repo, "add new file")
 	if err != nil {
@@ -116,6 +116,49 @@ func TestCheckoutBranch(t *testing.T) {
 	}
 	if head.Name() != plumbing.NewBranchReferenceName("feature-branch") {
 		t.Errorf("branch = %s, want feature-branch", head.Name())
+	}
+}
+
+func TestCheckoutBranchFromRemote(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+
+	// Push a file to a branch on the remote via a temporary clone.
+	tmpDir := filepath.Join(t.TempDir(), "pusher")
+	pusher, err := gogit.PlainClone(tmpDir, false, &gogit.CloneOptions{URL: remoteDir})
+	if err != nil {
+		t.Fatalf("clone for push: %v", err)
+	}
+	wt, _ := pusher.Worktree()
+	wt.Checkout(&gogit.CheckoutOptions{Branch: plumbing.NewBranchReferenceName("remote-branch"), Create: true})
+	os.WriteFile(filepath.Join(tmpDir, "PLAN.md"), []byte("# Plan\n"), 0644)
+	wt.Add("PLAN.md")
+	wt.Commit("add plan", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+	})
+	pusher.Push(&gogit.PushOptions{
+		RefSpecs: []gogitcfg.RefSpec{"refs/heads/remote-branch:refs/heads/remote-branch"},
+	})
+
+	// Fresh clone (only fetches default branch).
+	cloneDir := filepath.Join(t.TempDir(), "clone2")
+	repo, err := gogit.PlainClone(cloneDir, false, &gogit.CloneOptions{URL: remoteDir})
+	if err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+
+	// CheckoutBranch should resolve the remote tracking branch.
+	if err := CheckoutBranch(repo, "remote-branch"); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+
+	// Verify we got the remote content.
+	data, err := os.ReadFile(filepath.Join(cloneDir, "PLAN.md"))
+	if err != nil {
+		t.Fatalf("PLAN.md not found after checkout: %v", err)
+	}
+	if string(data) != "# Plan\n" {
+		t.Errorf("PLAN.md content = %q, want %q", string(data), "# Plan\n")
 	}
 }
 
@@ -171,73 +214,6 @@ func TestFullLifecycle(t *testing.T) {
 	if ref.Hash() != hash {
 		t.Errorf("remote hash = %s, want %s", ref.Hash(), hash)
 	}
-}
-
-func TestReadFromEnv(t *testing.T) {
-	t.Run("no env returns nil", func(t *testing.T) {
-		os.Unsetenv("GIT_REPO_URL")
-		os.Unsetenv("GIT_TOKEN")
-		os.Unsetenv("GIT_USERNAME")
-		os.Unsetenv("GIT_TARGET_BRANCH")
-
-		cred, err := ReadFromEnv()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cred != nil {
-			t.Error("expected nil credentials when GIT_REPO_URL is unset")
-		}
-	})
-
-	t.Run("repo url without token errors", func(t *testing.T) {
-		t.Setenv("GIT_REPO_URL", "https://github.com/org/repo.git")
-		t.Setenv("GIT_TOKEN", "")
-		os.Unsetenv("GIT_TOKEN")
-
-		_, err := ReadFromEnv()
-		if err == nil {
-			t.Error("expected error when GIT_TOKEN is missing")
-		}
-	})
-
-	t.Run("full env", func(t *testing.T) {
-		t.Setenv("GIT_REPO_URL", "https://github.com/org/repo.git")
-		t.Setenv("GIT_TOKEN", "ghp_test123")
-		t.Setenv("GIT_USERNAME", "myuser")
-		t.Setenv("GIT_TARGET_BRANCH", "my-branch")
-
-		cred, err := ReadFromEnv()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cred.Username != "myuser" {
-			t.Errorf("Username = %q, want myuser", cred.Username)
-		}
-		if cred.Token != "ghp_test123" {
-			t.Errorf("Token = %q, want ghp_test123", cred.Token)
-		}
-		if cred.RepoURL != "https://github.com/org/repo.git" {
-			t.Errorf("RepoURL = %q", cred.RepoURL)
-		}
-		if cred.Branch != "my-branch" {
-			t.Errorf("Branch = %q, want my-branch", cred.Branch)
-		}
-	})
-
-	t.Run("default username", func(t *testing.T) {
-		t.Setenv("GIT_REPO_URL", "https://github.com/org/repo.git")
-		t.Setenv("GIT_TOKEN", "ghp_test123")
-		os.Unsetenv("GIT_USERNAME")
-		t.Setenv("GIT_TARGET_BRANCH", "br")
-
-		cred, err := ReadFromEnv()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if cred.Username != "x-access-token" {
-			t.Errorf("Username = %q, want x-access-token", cred.Username)
-		}
-	})
 }
 
 func TestPushWithoutCredsToStrippedRemoteFails(t *testing.T) {

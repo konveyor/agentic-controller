@@ -1,0 +1,63 @@
+# agent-base: Foundation image with goose CLI, git, Python, graphify,
+# and the migration harness binary. All language images extend this.
+#
+# Build context must be the repository root:
+#   podman build -t agent-base -f images/agent-base/Containerfile .
+
+# --- Build stage ---
+FROM golang:1.26 AS builder
+
+WORKDIR /src
+COPY harness/go.mod harness/go.sum ./
+RUN go mod download
+COPY harness/cmd/ cmd/
+COPY harness/internal/ internal/
+RUN CGO_ENABLED=0 go build -o /migration-harness ./cmd/migration-harness/
+
+# --- Runtime stage ---
+FROM registry.access.redhat.com/ubi10/ubi:latest
+
+RUN dnf install -y \
+    curl \
+    git \
+    ca-certificates \
+    bzip2 \
+    tar \
+    python3 \
+    python3-pip \
+    python3-devel \
+    gcc \
+    gcc-c++ \
+    libffi-devel \
+    pkg-config \
+    && dnf clean all
+
+RUN python3 -m pip install --no-cache-dir graphifyy==0.7.17
+
+ENV PYTHONUNBUFFERED=1
+
+# Install Goose (Block's LLM orchestrator)
+RUN ARCH=$(uname -m) \
+    && if [ "$ARCH" = "x86_64" ]; then GOOSE_ARCH="x86_64-unknown-linux-gnu"; \
+       elif [ "$ARCH" = "aarch64" ]; then GOOSE_ARCH="aarch64-unknown-linux-gnu"; \
+       else echo "Unsupported architecture: $ARCH" && exit 1; fi \
+    && curl -fsSL "https://github.com/block/goose/releases/download/stable/goose-${GOOSE_ARCH}.tar.bz2" -o /tmp/goose.tar.bz2 \
+    && tar -xjf /tmp/goose.tar.bz2 -C /tmp \
+    && mv /tmp/goose /usr/local/bin/goose \
+    && chmod +x /usr/local/bin/goose \
+    && rm -f /tmp/goose.tar.bz2
+
+ENV PATH="/opt/migration-harness/bin:${PATH}"
+ENV HARNESS_WORK_DIR=/workspace/repo
+
+COPY --from=builder /migration-harness /opt/migration-harness/bin/migration-harness
+
+RUN mkdir -p /opt/skills /workspace /home/harness/.migration-harness \
+    && useradd -r -d /home/harness -s /sbin/nologin harness \
+    && chown -R harness:harness /home/harness /workspace /tmp
+
+WORKDIR /workspace
+USER harness
+
+ENTRYPOINT ["migration-harness"]
+CMD ["run"]

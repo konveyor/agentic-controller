@@ -1,0 +1,5 @@
+kind: enhancement
+
+description: >
+  Rewrite harness as thin single-stage runner with SkillCard-based skills,
+  filesystem watcher for incremental commits, and per-stage container images.

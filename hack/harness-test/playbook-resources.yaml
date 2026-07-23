@@ -1,0 +1,172 @@
+# Example resources for testing the AgentPlaybook + AgentPlaybookRun flow.
+# Migrates the coolstore Java EE app to Quarkus using 3 stages.
+#
+# Prerequisites:
+#   - LLMProvider "gcp-vertex-ai" from resources.yaml
+#   - Hub running with app + identity configured
+#
+# Usage:
+#   kubectl apply -f hack/harness-test/resources.yaml
+#   kubectl apply -f hack/harness-test/playbook-resources.yaml
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: plan
+spec:
+  image: quay.io/konveyor/skills:plan
+  displayName: Plan Stage
+  version: "1.0.0"
+  description: Reads a project and produces PLAN.md with migration steps.
+  type: skill
+  tags:
+    - migration
+    - planning
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: execute
+spec:
+  image: quay.io/konveyor/skills:execute
+  displayName: Execute Stage
+  version: "1.0.0"
+  description: Reads PLAN.md and executes each migration step sequentially.
+  type: skill
+  tags:
+    - migration
+    - execution
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: verify
+spec:
+  image: quay.io/konveyor/skills:verify
+  displayName: Verify Stage
+  version: "1.0.0"
+  description: Runs the build command, fixes errors, and iterates until the build passes.
+  type: skill
+  tags:
+    - migration
+    - verification
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: javaee-to-quarkus
+spec:
+  image: quay.io/konveyor/skills:javaee-to-quarkus
+  displayName: Java EE to Quarkus Migration
+  version: "1.0.0"
+  description: >
+    Migrates Java EE 7/8 applications (WebLogic, JBoss, WildFly) to Quarkus 3.
+    Covers EJB-to-CDI, JMS/MDB-to-SmallRye, WAR-to-JAR, persistence.xml replacement,
+    JNDI removal, and server lifecycle replacement.
+  type: skill
+  tags:
+    - java
+    - javaee
+    - quarkus
+    - migration
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: migration-plan-agent
+spec:
+  image: quay.io/konveyor/agent-java:dev
+  providers:
+    - ref: gcp-vertex-ai
+  skillCards:
+    - ref: plan
+    - ref: javaee-to-quarkus
+  params:
+    - name: max_turns
+      type: number
+      default: "200"
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: migration-execute-agent
+spec:
+  image: quay.io/konveyor/agent-java:dev
+  providers:
+    - ref: gcp-vertex-ai
+  skillCards:
+    - ref: execute
+    - ref: javaee-to-quarkus
+  params:
+    - name: max_turns
+      type: number
+      default: "200"
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: migration-verify-agent
+spec:
+  image: quay.io/konveyor/agent-java:dev
+  providers:
+    - ref: gcp-vertex-ai
+  skillCards:
+    - ref: verify
+    - ref: javaee-to-quarkus
+  params:
+    - name: max_turns
+      type: number
+      default: "200"
+    - name: max_fix_iterations
+      type: number
+      default: "3"
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: AgentPlaybook
+metadata:
+  name: java-ee-to-quarkus
+spec:
+  guide: "Migrate a Java EE application to Quarkus 3"
+  stages:
+    - name: plan
+      agentRef: migration-plan-agent
+      instructions: "Analyze the project structure using graphify and produce PLAN.md with migration steps"
+    - name: execute
+      agentRef: migration-execute-agent
+      instructions: "Execute each step in PLAN.md to migrate the code from Java EE to Quarkus"
+    - name: verify
+      agentRef: migration-verify-agent
+      instructions: "Run mvn clean compile, fix any compilation errors, then run tests"
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: AgentPlaybookRun
+metadata:
+  name: coolstore-migration-__TIMESTAMP__
+spec:
+  playbookRef: java-ee-to-quarkus
+  models:
+    - role: primary
+      provider: gcp-vertex-ai
+      model: claude-sonnet-4-5
+  env:
+    - name: HUB_BASE_URL
+      value: "http://host.containers.internal:8080"
+    - name: HUB_TOKEN
+      value: "__HUB_TOKEN__"
+    - name: APP_ID
+      value: "1"
+    - name: TARGET_BRANCH
+      value: "konveyor/migration-__TIMESTAMP__"
+    - name: GCP_PROJECT_ID
+      value: "__GCP_PROJECT_ID__"
+    - name: GCP_LOCATION
+      value: "global"

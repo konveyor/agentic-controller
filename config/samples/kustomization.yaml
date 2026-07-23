@@ -2,8 +2,10 @@
 # These provide out-of-the-box migration skills backed by
 # OCI images pushed to quay.io/konveyor/skills/.
 resources:
+  - skillcard_javax_to_jakarta_ee.yaml
   - skillcard_maven_migration.yaml
   - skillcard_no_javax_imports.yaml
   - skillcard_ejb_to_cdi.yaml
+  - skillcard_javaee_to_quarkus.yaml
   - skillcollection_java_migration.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples
