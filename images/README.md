@@ -16,20 +16,20 @@ make controller-agent-build                           # build locally
 make controller-agent-push CONTAINER_TOOL=podman      # push to quay
 ```
 
-## Stage agent images
+## Agent images
 
-Production agent image hierarchy for migration stages. Skills are
-mounted at runtime via SkillCards, not baked into images.
+Production agent image hierarchy. Skills are mounted at runtime via
+SkillCards, not baked into images.
 
 ```text
-agent-base             UBI 10 + goose CLI + git + harness binary
-├── agent-plan         + Python 3, graphify
-├── agent-java-base    + JDK 21, Maven
-│   ├── agent-execute-java  (inherits java-base)
-│   └── agent-verify-java   (inherits java-base)
+agent-base             UBI 10 + goose CLI + git + Python 3 + graphify + harness binary
+├── agent-java         + JDK 21, Maven
+├── agent-go           + Go toolchain
+├── agent-csharp       + .NET SDK
+└── agent-nodejs       + Node.js, npm
 ```
 
 ```bash
-make agent-images-build                              # build all stage images
+make agent-images-build                              # build all agent images
 make agent-images-push CONTAINER_TOOL=podman          # push to quay
 ```

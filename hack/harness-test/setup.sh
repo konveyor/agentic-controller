@@ -63,9 +63,8 @@ echo ""
 echo "=== Loading images into Kind ==="
 
 IMAGES=(
-    "quay.io/konveyor/agent-plan"
-    "quay.io/konveyor/agent-execute-java"
-    "quay.io/konveyor/agent-verify-java"
+    "quay.io/konveyor/agent-base"
+    "quay.io/konveyor/agent-java"
 )
 
 for IMG in "${IMAGES[@]}"; do

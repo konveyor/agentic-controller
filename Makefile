@@ -101,10 +101,10 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 CONTROLLER_AGENT_IMG ?= quay.io/konveyor/agentic-controller-agent:latest
 AGENT_BASE_IMG ?= quay.io/konveyor/agent-base:latest
-AGENT_JAVA_BASE_IMG ?= quay.io/konveyor/agent-java-base:latest
-AGENT_PLAN_IMG ?= quay.io/konveyor/agent-plan:latest
-AGENT_EXECUTE_IMG ?= quay.io/konveyor/agent-execute-java:latest
-AGENT_VERIFY_IMG ?= quay.io/konveyor/agent-verify-java:latest
+AGENT_JAVA_IMG ?= quay.io/konveyor/agent-java:latest
+AGENT_GO_IMG ?= quay.io/konveyor/agent-go:latest
+AGENT_CSHARP_IMG ?= quay.io/konveyor/agent-csharp:latest
+AGENT_NODEJS_IMG ?= quay.io/konveyor/agent-nodejs:latest
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
@@ -119,34 +119,35 @@ controller-agent-push: controller-agent-build ## Build and push the controller's
 	$(CONTAINER_TOOL) push $(CONTROLLER_AGENT_IMG)
 
 .PHONY: agent-base-build
-agent-base-build: ## Build the base agent image (goose + git + harness binary).
+agent-base-build: ## Build the base agent image (goose + git + Python + graphify + harness binary).
 	$(CONTAINER_TOOL) build -t $(AGENT_BASE_IMG) -f images/agent-base/Containerfile .
 
-.PHONY: agent-java-base-build
-agent-java-base-build: agent-base-build ## Build the shared Java base image (JDK 21 + Maven).
-	$(CONTAINER_TOOL) build -t $(AGENT_JAVA_BASE_IMG) -f images/agent-java-base/Containerfile .
+.PHONY: agent-java-build
+agent-java-build: agent-base-build ## Build the Java agent image (JDK 21 + Maven).
+	$(CONTAINER_TOOL) build -t $(AGENT_JAVA_IMG) -f images/agent-java/Containerfile .
 
-.PHONY: agent-plan-build
-agent-plan-build: agent-base-build ## Build the plan stage agent image.
-	$(CONTAINER_TOOL) build -t $(AGENT_PLAN_IMG) -f images/agent-plan/Containerfile .
+.PHONY: agent-go-build
+agent-go-build: agent-base-build ## Build the Go agent image.
+	$(CONTAINER_TOOL) build -t $(AGENT_GO_IMG) -f images/agent-go/Containerfile .
 
-.PHONY: agent-execute-java-build
-agent-execute-java-build: agent-java-base-build ## Build the Java execute stage agent image.
-	$(CONTAINER_TOOL) build -t $(AGENT_EXECUTE_IMG) -f images/agent-execute-java/Containerfile .
+.PHONY: agent-csharp-build
+agent-csharp-build: agent-base-build ## Build the C# agent image (.NET SDK).
+	$(CONTAINER_TOOL) build -t $(AGENT_CSHARP_IMG) -f images/agent-csharp/Containerfile .
 
-.PHONY: agent-verify-java-build
-agent-verify-java-build: agent-java-base-build ## Build the Java verify stage agent image.
-	$(CONTAINER_TOOL) build -t $(AGENT_VERIFY_IMG) -f images/agent-verify-java/Containerfile .
+.PHONY: agent-nodejs-build
+agent-nodejs-build: agent-base-build ## Build the Node.js agent image.
+	$(CONTAINER_TOOL) build -t $(AGENT_NODEJS_IMG) -f images/agent-nodejs/Containerfile .
 
 .PHONY: agent-images-build
-agent-images-build: agent-plan-build agent-execute-java-build agent-verify-java-build ## Build all stage agent images.
+agent-images-build: agent-java-build agent-go-build agent-csharp-build agent-nodejs-build ## Build all agent images.
 
 .PHONY: agent-images-push
-agent-images-push: agent-images-build ## Build and push all stage agent images.
+agent-images-push: agent-images-build ## Build and push all agent images.
 	$(CONTAINER_TOOL) push $(AGENT_BASE_IMG)
-	$(CONTAINER_TOOL) push $(AGENT_PLAN_IMG)
-	$(CONTAINER_TOOL) push $(AGENT_EXECUTE_IMG)
-	$(CONTAINER_TOOL) push $(AGENT_VERIFY_IMG)
+	$(CONTAINER_TOOL) push $(AGENT_JAVA_IMG)
+	$(CONTAINER_TOOL) push $(AGENT_GO_IMG)
+	$(CONTAINER_TOOL) push $(AGENT_CSHARP_IMG)
+	$(CONTAINER_TOOL) push $(AGENT_NODEJS_IMG)
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.

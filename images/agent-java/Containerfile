@@ -1,8 +1,7 @@
-# agent-java-base: Shared base for Java migration stages (execute, verify).
-# Adds JDK 21 and Maven on top of agent-base.
+# agent-java: Java agent image. Adds JDK 21 and Maven on top of agent-base.
 #
 # Build context must be the repository root:
-#   podman build -t agent-java-base -f images/agent-java-base/Containerfile .
+#   podman build -t agent-java -f images/agent-java/Containerfile .
 
 FROM quay.io/konveyor/agent-base:latest AS base
 

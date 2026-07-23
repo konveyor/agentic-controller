@@ -1,4 +1,0 @@
-# agent-execute-java: Java execute stage toolchain image. Skill content comes
-# from SkillCards mounted at runtime.
-
-FROM quay.io/konveyor/agent-java-base:latest
