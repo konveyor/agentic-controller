@@ -31,3 +31,10 @@ go.work
 
 # Local scratch files
 .scratch/
+
+# Local dev cluster state: kubeconfig, profile markers, probe results
+.dev/
+
+# Python bytecode
+__pycache__/
+*.pyc

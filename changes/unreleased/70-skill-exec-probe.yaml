@@ -1,0 +1,7 @@
+kind: enhancement
+
+description: >
+  Add a probe that determines, for a given cluster, whether an agent can stage
+  a script in a writable directory and execute it, and whether that directory
+  is inside the git worktree the harness commits and pushes. Records the
+  resulting staging convention in ADR 0007.

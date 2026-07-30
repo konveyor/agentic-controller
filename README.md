@@ -33,7 +33,7 @@ CI pipeline) resolves application metadata before creating the CR.
 - **Agent Sandbox** is a hard dependency for workload execution
 - **Git credentials** stay in the harness — the agent does not receive
   push credentials
-- **Skills** are OCI artifacts mounted via ImageVolumes (K8s 1.33+)
+- **Skills** are OCI artifacts mounted read-only via ImageVolumes (K8s 1.33+)
 - **Workspaces** are ephemeral — git is the persistence layer
 - **ACP over HTTP** (via `goose serve`) provides real-time observability
   and human-in-the-loop interaction
@@ -56,9 +56,13 @@ agentic-controller/
 
 ## Platform requirements
 
-- Kubernetes 1.33+ (ImageVolume GA)
+- Kubernetes 1.33+ (ImageVolume beta, enabled by default)
 - OpenShift 4.20+
 - Agent Sandbox v0.5.x
+- A container runtime that implements ImageVolume: CRI-O 1.31+ or containerd
+  2.0+. cri-dockerd does not implement it.
+
+For a local cluster to develop against, see [docs/local-development.md](docs/local-development.md).
 
 ## Related projects
 

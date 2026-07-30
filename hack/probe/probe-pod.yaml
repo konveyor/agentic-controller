@@ -1,0 +1,45 @@
+---
+# Standalone probe pod for the staging-directory execution question.
+#
+# Deliberately depends on NOTHING: no CRDs, no controller, no Agent Sandbox, no
+# LLM. It reproduces the shape of a controller-created sandbox pod -- same agent
+# base image, an ImageVolume-mounted skill at /opt/skills/<name>, an emptyDir
+# workspace -- so its mount semantics are directly comparable, while being
+# answerable on a bare cluster in about 30 seconds.
+#
+# The probe itself is NOT baked in. It is piped in at run time:
+#     kubectl exec -i imagevolume-probe -- sh -s < hack/probe/probe.sh
+# so iterating on the probe never requires rebuilding or reloading an image.
+#
+# Image placeholders are substituted by hack/probe/run-probe.sh. Applying this
+# file directly uses the defaults below.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: imagevolume-probe
+  labels:
+    app.kubernetes.io/name: imagevolume-probe
+    app.kubernetes.io/component: diagnostic
+spec:
+  restartPolicy: Never
+  # Override the stub entrypoint: we want a bare long-running process, not the
+  # stub's banner logic, so the probe measures the environment and nothing else.
+  containers:
+    - name: agent
+      image: quay.io/konveyor/agentic-controller-agent:e2e
+      command: ["sleep", "infinity"]
+      volumeMounts:
+        - name: skill
+          mountPath: /opt/skills/probe-skill
+          readOnly: true
+        - name: workspace
+          mountPath: /workspace
+  volumes:
+    # The mount under test. Any skill image works -- we are measuring how the
+    # kubelet/CRI mounts an ImageVolume, not the contents.
+    - name: skill
+      image:
+        reference: quay.io/konveyor/skills:maven-migration
+    # Matches the controller's workspace volume (agentrun_controller.go:332).
+    - name: workspace
+      emptyDir: {}
