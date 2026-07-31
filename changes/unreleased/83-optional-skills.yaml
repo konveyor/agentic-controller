@@ -1,0 +1,4 @@
+kind: bugfix
+description: >
+  Make skills optional in the harness so AgentRun pods no longer crash
+  when the parent Agent CR has no skillCards or skillCollections.
