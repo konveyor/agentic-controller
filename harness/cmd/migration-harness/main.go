@@ -19,6 +19,7 @@ import (
 	"github.com/konveyor/migration-harness/internal/goose"
 	"github.com/konveyor/migration-harness/internal/hub"
 	"github.com/konveyor/migration-harness/internal/logging"
+	"github.com/konveyor/migration-harness/internal/prompt"
 	"github.com/konveyor/migration-harness/internal/watcher"
 )
 
@@ -153,7 +154,12 @@ func runStage(cmd *cobra.Command, args []string) error {
 	}
 
 	// 7. Build prompt from context layers
-	prompt := buildPrompt(skillContent)
+	stagePrompt := prompt.Build(prompt.Layers{
+		Agent:           cfg.Prompt,
+		PlaybookContext: cfg.PlaybookInstructions,
+		Skill:           skillContent,
+		StageTask:       cfg.Instructions,
+	})
 
 	// 8. Start filesystem watcher BEFORE blocking prompt
 	pushFn := func() error {
@@ -172,7 +178,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 	logging.Header("Running Stage")
 	logging.Info("max turns: %d", cfg.MaxTurns)
 	_, err = session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
-		{Type: "text", Text: prompt},
+		{Type: "text", Text: stagePrompt},
 	}, cfg.MaxTurns)
 
 	if err != nil {
@@ -248,37 +254,6 @@ func discoverSkills() (string, []string, error) {
 		combined.Write(content)
 	}
 	return combined.String(), matches, nil
-}
-
-func buildPrompt(skillContent string) string {
-	var b strings.Builder
-
-	if v := os.Getenv("KONVEYOR_PROMPT"); v != "" {
-		b.WriteString(v)
-		b.WriteString("\n\n")
-	}
-
-	if v := os.Getenv("KONVEYOR_PLAYBOOK_INSTRUCTIONS"); v != "" {
-		b.WriteString("## Migration Context\n\n")
-		b.WriteString(v)
-		b.WriteString("\n\n")
-	}
-
-	if skillContent != "" {
-		b.WriteString("## Skill Instructions\n\n")
-		b.WriteString(skillContent)
-		b.WriteString("\n\n")
-	} else {
-		b.WriteString("## Working Guidelines\n\n")
-		b.WriteString("Commit your changes to git with a descriptive message when your work is complete.\n\n")
-	}
-
-	if v := os.Getenv("KONVEYOR_INSTRUCTIONS"); v != "" {
-		b.WriteString("## Stage Task\n\n")
-		b.WriteString(v)
-	}
-
-	return b.String()
 }
 
 func resolveFromHub(cfg *config.Config) (*git.Credentials, *hub.Client, error) {

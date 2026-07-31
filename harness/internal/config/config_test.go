@@ -19,6 +19,9 @@ func clearKonveyorEnv(t *testing.T) {
 		"APP_ID",
 		"KONVEYOR_ACP_SECRET_KEY",
 		"TARGET_BRANCH",
+		"KONVEYOR_PROMPT",
+		"KONVEYOR_PLAYBOOK_INSTRUCTIONS",
+		"KONVEYOR_INSTRUCTIONS",
 	} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
@@ -130,4 +133,26 @@ func TestLoadFromEnv(t *testing.T) {
 			t.Errorf("MaxTurns = %d, want 500", cfg.MaxTurns)
 		}
 	})
+}
+
+func TestLoadFromEnvReadsPromptLayers(t *testing.T) {
+	clearKonveyorEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("KONVEYOR_PROMPT", "AGENT PROMPT")
+	t.Setenv("KONVEYOR_PLAYBOOK_INSTRUCTIONS", "PLAYBOOK CONTEXT")
+	t.Setenv("KONVEYOR_INSTRUCTIONS", "STAGE TASK")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.Prompt != "AGENT PROMPT" {
+		t.Errorf("Prompt = %q", cfg.Prompt)
+	}
+	if cfg.PlaybookInstructions != "PLAYBOOK CONTEXT" {
+		t.Errorf("PlaybookInstructions = %q", cfg.PlaybookInstructions)
+	}
+	if cfg.Instructions != "STAGE TASK" {
+		t.Errorf("Instructions = %q", cfg.Instructions)
+	}
 }

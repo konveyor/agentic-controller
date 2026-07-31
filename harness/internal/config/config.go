@@ -23,6 +23,11 @@ type Config struct {
 	ACPSecretKey string
 
 	TargetBranch string
+
+	// Prompt context layers, composed by internal/prompt.
+	Prompt               string
+	PlaybookInstructions string
+	Instructions         string
 }
 
 func LoadFromEnv() (*Config, error) {
@@ -51,6 +56,10 @@ func LoadFromEnv() (*Config, error) {
 		AppID:        required["APP_ID"],
 		ACPSecretKey: required["KONVEYOR_ACP_SECRET_KEY"],
 		TargetBranch: required["TARGET_BRANCH"],
+
+		Prompt:               os.Getenv("KONVEYOR_PROMPT"),
+		PlaybookInstructions: os.Getenv("KONVEYOR_PLAYBOOK_INSTRUCTIONS"),
+		Instructions:         os.Getenv("KONVEYOR_INSTRUCTIONS"),
 	}
 
 	if n, err := strconv.Atoi(os.Getenv("KONVEYOR_PARAM_MAX_TURNS")); err == nil && n > 0 {

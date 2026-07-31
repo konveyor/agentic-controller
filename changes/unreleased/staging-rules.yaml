@@ -1,0 +1,7 @@
+kind: feature
+
+description: >
+  Tell agents to write ephemeral files (scripts they run, scratch notes,
+  intermediate output) to /tmp rather than into the repository working tree,
+  whose commits the harness pushes to the user's branch. Prompt assembly moves
+  to internal/prompt with an explicit Layers API.

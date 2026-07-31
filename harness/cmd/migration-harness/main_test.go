@@ -69,26 +69,3 @@ func TestDiscoverSkills_EmptySkillFile(t *testing.T) {
 		t.Errorf("expected 1 path (skill is mounted), got: %v", paths)
 	}
 }
-
-func TestBuildPrompt_NoSkills(t *testing.T) {
-	t.Setenv("KONVEYOR_PROMPT", "hello")
-	t.Setenv("KONVEYOR_PLAYBOOK_INSTRUCTIONS", "")
-	t.Setenv("KONVEYOR_INSTRUCTIONS", "do work")
-
-	prompt := buildPrompt("")
-	expected := "hello\n\n## Working Guidelines\n\nCommit your changes to git with a descriptive message when your work is complete.\n\n## Stage Task\n\ndo work"
-	if prompt != expected {
-		t.Errorf("unexpected prompt:\n%s", prompt)
-	}
-}
-
-func TestBuildPrompt_WithSkills(t *testing.T) {
-	t.Setenv("KONVEYOR_PROMPT", "hello")
-	t.Setenv("KONVEYOR_PLAYBOOK_INSTRUCTIONS", "")
-	t.Setenv("KONVEYOR_INSTRUCTIONS", "do work")
-
-	prompt := buildPrompt("skill content here")
-	if got := prompt; got != "hello\n\n## Skill Instructions\n\nskill content here\n\n## Stage Task\n\ndo work" {
-		t.Errorf("unexpected prompt:\n%s", got)
-	}
-}
