@@ -92,35 +92,46 @@ func runStage(cmd *cobra.Command, args []string) error {
 	}
 	logging.Ok("cloned to %s, branch %s", cloneDir, creds.Branch)
 
-	if err := git.EnsureGitignore(cloneDir, []string{
-		"graphify-out/",
-		".goose/",
-		"__pycache__/",
-		"node_modules/",
-		"target/",
-		"*.tmp",
-		"*.swp",
-		"*.bak",
-	}); err != nil {
-		logging.Warn("gitignore: %v", err)
+	// 4. Discover skills early — controls which setup steps run
+	skillContent, _, err := discoverSkills()
+	if err != nil {
+		return fmt.Errorf("discover skills: %w", err)
 	}
+	hasSkills := skillContent != ""
 
-	// 3b. Write analysis to workspace (if resolved from Hub)
-	if hubClient != nil {
-		if err := fetchAndWriteAnalysis(hubClient, cfg.AppID, cloneDir); err != nil {
-			logging.Warn("analysis fetch: %v", err)
+	if hasSkills {
+		if err := git.EnsureGitignore(cloneDir, []string{
+			"graphify-out/",
+			".goose/",
+			"__pycache__/",
+			"node_modules/",
+			"target/",
+			"*.tmp",
+			"*.swp",
+			"*.bak",
+		}); err != nil {
+			logging.Warn("gitignore: %v", err)
 		}
 	}
 
-	// 3c. Commit harness-managed files so they survive on the branch
-	if err := git.CommitFiles(repo, []string{
-		".gitignore",
-		".konveyor/analysis.json",
-	}, "harness: add grounding data"); err != nil {
-		return fmt.Errorf("commit harness files: %w", err)
+	if hasSkills {
+		// 4b. Write analysis to workspace (if resolved from Hub)
+		if hubClient != nil {
+			if err := fetchAndWriteAnalysis(hubClient, cfg.AppID, cloneDir); err != nil {
+				logging.Warn("analysis fetch: %v", err)
+			}
+		}
+
+		// 4c. Commit harness-managed files so they survive on the branch
+		if err := git.CommitFiles(repo, []string{
+			".gitignore",
+			".konveyor/analysis.json",
+		}, "harness: add grounding data"); err != nil {
+			return fmt.Errorf("commit harness files: %w", err)
+		}
 	}
 
-	// 4. Start goose serve
+	// 5. Start goose serve
 	logging.Header("Goose Setup")
 	srv, err := goose.StartServe(ctx, 0, cfg.ACPSecretKey, cfg.Provider, cfg.Model, cfg.APIKey, cfg.Endpoint)
 	if err != nil {
@@ -128,7 +139,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 	}
 	defer srv.Stop()
 
-	// 5. Connect ACP, create session
+	// 6. Connect ACP, create session
 	wsClient, err := acp.WaitReadyDial(ctx, "127.0.0.1", srv.Port(), srv.SecretKey(), 30*time.Second)
 	if err != nil {
 		return fmt.Errorf("connect to goose: %w", err)
@@ -139,12 +150,6 @@ func runStage(cmd *cobra.Command, args []string) error {
 	sessionID, err := session.CreateSession(ctx, cloneDir, nil)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
-	}
-
-	// 6. Discover skills
-	skillContent, _, err := discoverSkills()
-	if err != nil {
-		return fmt.Errorf("discover skills: %w", err)
 	}
 
 	// 7. Build prompt from context layers
@@ -226,7 +231,8 @@ func discoverSkills() (string, []string, error) {
 		return "", nil, err
 	}
 	if len(matches) == 0 {
-		return "", nil, fmt.Errorf("no skills found at %s", pattern)
+		logging.Info("no skills found at %s — proceeding without skills", pattern)
+		return "", nil, nil
 	}
 
 	var combined strings.Builder
@@ -258,9 +264,14 @@ func buildPrompt(skillContent string) string {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString("## Skill Instructions\n\n")
-	b.WriteString(skillContent)
-	b.WriteString("\n\n")
+	if skillContent != "" {
+		b.WriteString("## Skill Instructions\n\n")
+		b.WriteString(skillContent)
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("## Working Guidelines\n\n")
+		b.WriteString("Commit your changes to git with a descriptive message when your work is complete.\n\n")
+	}
 
 	if v := os.Getenv("KONVEYOR_INSTRUCTIONS"); v != "" {
 		b.WriteString("## Stage Task\n\n")
