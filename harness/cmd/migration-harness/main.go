@@ -93,11 +93,11 @@ func runStage(cmd *cobra.Command, args []string) error {
 	logging.Ok("cloned to %s, branch %s", cloneDir, creds.Branch)
 
 	// 4. Discover skills early — controls which setup steps run
-	skillContent, _, err := discoverSkills()
+	skillContent, skillPaths, err := discoverSkills()
 	if err != nil {
 		return fmt.Errorf("discover skills: %w", err)
 	}
-	hasSkills := skillContent != ""
+	hasSkills := len(skillPaths) > 0
 
 	if hasSkills {
 		if err := git.EnsureGitignore(cloneDir, []string{

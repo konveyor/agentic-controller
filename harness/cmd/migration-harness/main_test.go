@@ -46,6 +46,30 @@ func TestDiscoverSkills_WithSkills(t *testing.T) {
 	}
 }
 
+func TestDiscoverSkills_EmptySkillFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HARNESS_SKILLS_DIR", dir)
+
+	skillDir := filepath.Join(dir, "empty-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content, paths, err := discoverSkills()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "" {
+		t.Errorf("expected empty content, got: %q", content)
+	}
+	if len(paths) != 1 {
+		t.Errorf("expected 1 path (skill is mounted), got: %v", paths)
+	}
+}
+
 func TestBuildPrompt_NoSkills(t *testing.T) {
 	t.Setenv("KONVEYOR_PROMPT", "hello")
 	t.Setenv("KONVEYOR_PLAYBOOK_INSTRUCTIONS", "")
