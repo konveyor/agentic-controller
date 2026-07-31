@@ -25,9 +25,9 @@ type Config struct {
 	TargetBranch string
 
 	// Prompt context layers, composed by internal/prompt.
-	Prompt               string
-	PlaybookInstructions string
-	Instructions         string
+	AgentPrompt       string
+	WorkflowGuide     string
+	StageInstructions string
 }
 
 func LoadFromEnv() (*Config, error) {
@@ -57,9 +57,9 @@ func LoadFromEnv() (*Config, error) {
 		ACPSecretKey: required["KONVEYOR_ACP_SECRET_KEY"],
 		TargetBranch: required["TARGET_BRANCH"],
 
-		Prompt:               os.Getenv("KONVEYOR_PROMPT"),
-		PlaybookInstructions: os.Getenv("KONVEYOR_PLAYBOOK_INSTRUCTIONS"),
-		Instructions:         os.Getenv("KONVEYOR_INSTRUCTIONS"),
+		AgentPrompt:       os.Getenv("KONVEYOR_PROMPT"),
+		WorkflowGuide:     workflowGuideFromEnv(),
+		StageInstructions: os.Getenv("KONVEYOR_INSTRUCTIONS"),
 	}
 
 	if n, err := strconv.Atoi(os.Getenv("KONVEYOR_PARAM_MAX_TURNS")); err == nil && n > 0 {
@@ -67,4 +67,16 @@ func LoadFromEnv() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// workflowGuideFromEnv reads the workflow guide the controller injects.
+//
+// konveyor/agentic-controller#80 renames KONVEYOR_PLAYBOOK_INSTRUCTIONS to
+// KONVEYOR_WORKFLOW_GUIDE. Reading both means the harness works either side of
+// that merge; drop the fallback once #80 has landed everywhere.
+func workflowGuideFromEnv() string {
+	if v := os.Getenv("KONVEYOR_WORKFLOW_GUIDE"); v != "" {
+		return v
+	}
+	return os.Getenv("KONVEYOR_PLAYBOOK_INSTRUCTIONS")
 }

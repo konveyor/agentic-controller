@@ -1,7 +1,7 @@
 // Package prompt assembles the prompt sent to the agent for a stage.
 //
 // The prompt is layered: environment rules the harness imposes, then the
-// Agent's standing prompt, then playbook context, then the skill, then the
+// Agent's standing prompt, then the workflow guide, then the skill, then the
 // stage task. Later layers are more specific; the environment rules come first
 // because they constrain everything after them.
 package prompt
@@ -13,8 +13,8 @@ import "strings"
 // there are ambiguous at best, and get swept in if the agent stages broadly.
 const stagingRules = `## Working Environment
 
-Your working directory is a git repository, and you decide what gets committed.
-The harness pushes your commits to the user's branch when the stage ends.
+Your working directory is a git repository. Anything you commit is pushed to the
+user's branch when the stage ends.
 
 Write ephemeral files to /tmp, never into the repository working tree:
   - scripts you need to run: write them to /tmp, make them executable there,
@@ -30,10 +30,10 @@ not say where to put something.
 // Layers are the context layers composed into a stage prompt, ordered from
 // least to most specific. Any of them may be empty except Skill.
 type Layers struct {
-	// Agent is the Agent's standing prompt.
-	Agent string
-	// PlaybookContext is the playbook's ambient guide.
-	PlaybookContext string
+	// AgentPrompt is the Agent's standing prompt.
+	AgentPrompt string
+	// WorkflowGuide is the workflow's ambient guide.
+	WorkflowGuide string
 	// Skill is the content discovered from the mounted SkillCards.
 	Skill string
 	// StageTask is the task for this stage.
@@ -48,14 +48,14 @@ func Build(l Layers) string {
 	b.WriteString(stagingRules)
 	b.WriteString("\n")
 
-	if l.Agent != "" {
-		b.WriteString(l.Agent)
+	if l.AgentPrompt != "" {
+		b.WriteString(l.AgentPrompt)
 		b.WriteString("\n\n")
 	}
 
-	if l.PlaybookContext != "" {
-		b.WriteString("## Migration Context\n\n")
-		b.WriteString(l.PlaybookContext)
+	if l.WorkflowGuide != "" {
+		b.WriteString("## Workflow Guide\n\n")
+		b.WriteString(l.WorkflowGuide)
 		b.WriteString("\n\n")
 	}
 
@@ -75,5 +75,7 @@ func Build(l Layers) string {
 		b.WriteString(l.StageTask)
 	}
 
-	return b.String()
+	// Normalise the ending: sections above end with either "\n\n" or, for
+	// StageTask, no newline at all. Always finish with exactly one.
+	return strings.TrimRight(b.String(), "\n") + "\n"
 }

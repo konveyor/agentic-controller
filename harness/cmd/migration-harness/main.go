@@ -155,10 +155,10 @@ func runStage(cmd *cobra.Command, args []string) error {
 
 	// 7. Build prompt from context layers
 	stagePrompt := prompt.Build(prompt.Layers{
-		Agent:           cfg.Prompt,
-		PlaybookContext: cfg.PlaybookInstructions,
-		Skill:           skillContent,
-		StageTask:       cfg.Instructions,
+		AgentPrompt:   cfg.AgentPrompt,
+		WorkflowGuide: cfg.WorkflowGuide,
+		Skill:         skillContent,
+		StageTask:     cfg.StageInstructions,
 	})
 
 	// 8. Start filesystem watcher BEFORE blocking prompt
