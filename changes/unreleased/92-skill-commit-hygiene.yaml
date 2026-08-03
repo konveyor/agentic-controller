@@ -1,0 +1,5 @@
+kind: bugfix
+description: >
+  Updated plan, execute, and verify skills to use targeted git add
+  instead of git add -A, preventing gitignored artifacts like
+  graphify-out/ from being committed to migration PRs.

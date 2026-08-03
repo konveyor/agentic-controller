@@ -1,0 +1,5 @@
+kind: bugfix
+description: >
+  Mount an EmptyDir volume at /tmp in sandbox pods so tools can write
+  temp files at runtime. Removed stale chmod from Containerfile since
+  containerd overlay FS does not preserve image-layer permissions.
