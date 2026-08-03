@@ -234,4 +234,5 @@ Write `PLAN.md` to the project root with this structure:
 - Do NOT skip graphify — the graph is essential for later stages
 - Read selectively — the graph gives you most of what you need
 - Report which reference you used in the Goal section of PLAN.md
-- When done, run: `git add PLAN.md graph.json && git commit -m "Add migration plan and code graph"`
+- When done, run: `git add PLAN.md && git commit -m "Add migration plan"`
+- Do NOT commit `graphify-out/`, `.goose/`, or other generated artifacts — they are gitignored

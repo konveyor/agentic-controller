@@ -343,6 +343,18 @@ func (r *AgentRunReconciler) createSandbox(
 		MountPath: "/workspace",
 	})
 
+	// Writable /tmp for tools that create temp files at runtime.
+	volumes = append(volumes, corev1.Volume{
+		Name: "tmp",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+	volumeMounts = append(volumeMounts, corev1.VolumeMount{
+		Name:      "tmp",
+		MountPath: "/tmp",
+	})
+
 	// Create the Sandbox CR.
 	serviceEnabled := true
 	sandbox := &sandboxv1beta1.Sandbox{

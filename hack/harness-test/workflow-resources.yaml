@@ -162,6 +162,8 @@ spec:
       value: "http://host.containers.internal:8080"
     - name: HUB_TOKEN
       value: "__HUB_TOKEN__"
+    - name: HUB_TOKEN_ID
+      value: "__HUB_TOKEN_ID__"
     - name: APP_ID
       value: "1"
     - name: TARGET_BRANCH

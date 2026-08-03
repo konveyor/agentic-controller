@@ -41,7 +41,7 @@ For each step in PLAN.md, follow this exact sequence:
 1. Read the target file
 2. Apply transformations per the step's instructions and reference patterns
 3. Write the modified file
-4. Run: git add -A && git commit -m "<describe the migration change>"
+4. Run: git add <modified files> && git commit -m "<describe the migration change>"
 5. Move to the next step immediately
 ```
 

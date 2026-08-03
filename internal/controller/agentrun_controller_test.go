@@ -355,6 +355,37 @@ var _ = Describe("AgentRun Controller", func() {
 			By("verifying restartPolicy is Never so failed stages are observable (#51)")
 			Expect(sandbox.Spec.PodTemplate.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyNever))
 
+			By("verifying /tmp EmptyDir volume is present for writable temp space")
+			spec := sandbox.Spec.PodTemplate.Spec
+			var tmpVolFound bool
+			for _, v := range spec.Volumes {
+				if v.Name == "tmp" {
+					tmpVolFound = true
+					Expect(v.VolumeSource.EmptyDir).NotTo(BeNil())
+				}
+			}
+			Expect(tmpVolFound).To(BeTrue(), "expected a 'tmp' EmptyDir volume")
+
+			var tmpMountFound bool
+			for _, m := range spec.Containers[0].VolumeMounts {
+				if m.Name == "tmp" {
+					tmpMountFound = true
+					Expect(m.MountPath).To(Equal("/tmp"))
+				}
+			}
+			Expect(tmpMountFound).To(BeTrue(), "expected a volume mount for /tmp")
+
+			By("verifying workspace EmptyDir volume is present")
+			var wsVolFound bool
+			for _, v := range spec.Volumes {
+				if v.Name == "workspace" {
+					wsVolFound = true
+					Expect(v.VolumeSource.EmptyDir).NotTo(BeNil())
+					Expect(v.VolumeSource.EmptyDir.SizeLimit).NotTo(BeNil())
+				}
+			}
+			Expect(wsVolFound).To(BeTrue(), "expected a 'workspace' EmptyDir volume")
+
 			By("verifying the single-key provider credential is injected as API_KEY")
 			container := sandbox.Spec.PodTemplate.Spec.Containers[0]
 			var apiKey *corev1.EnvVar

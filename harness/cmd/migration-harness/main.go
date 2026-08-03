@@ -73,13 +73,15 @@ func runStage(cmd *cobra.Command, args []string) error {
 		tokenID, _ := strconv.ParseUint(cfg.HubTokenID, 10, 64)
 		defer func() {
 			if err := hubClient.RevokeToken(uint(tokenID)); err != nil {
-				logging.Warn("hub token revocation: %v", err)
+				logging.Warn("hub token revocation (id=%d): %v", tokenID, err)
 			} else {
-				logging.Ok("hub token revoked")
+				logging.Ok("hub token revoked (id=%d)", tokenID)
 			}
 		}()
 	} else if cfg.HubTokenID == "" && cfg.HubToken != "" {
 		logging.Warn("HUB_TOKEN_ID not set — skipping token revocation (token will expire via TTL)")
+	} else if cfg.WorkflowStage != "" {
+		logging.Info("workflow stage %s/%s — skipping token revocation", cfg.WorkflowStage, cfg.WorkflowStageCount)
 	}
 
 	if cfg.TargetBranch == creds.Branch {

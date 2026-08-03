@@ -31,6 +31,8 @@ if [ "${CONTAINER_TOOL}" = "podman" ]; then
     export KIND_EXPERIMENTAL_PROVIDER=podman
 fi
 
+echo "=== Source: $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)) ==="
+echo ""
 echo "=== Building images ==="
 
 echo "Building controller image: ${IMG}"

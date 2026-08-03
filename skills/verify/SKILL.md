@@ -36,7 +36,7 @@ For each compiler error:
 2. Read the source file
 3. Apply a minimal, conservative fix
 4. Do NOT change code that is not related to the error
-5. Run `git add -A && git commit -m "Fix: <describe what was fixed>"`
+5. Run `git add <fixed files> && git commit -m "Fix: <describe what was fixed>"`
 
 Consult reference files from loaded migration skills at
 `/opt/skills/*/references/` for common error-fix mappings specific to
@@ -72,7 +72,7 @@ to fix failing tests. Test failures are expected after a migration and
 are documented in the result, not fixed here.
 
 After running tests, commit any remaining changes:
-`git add -A && git commit -m "Verify: build and test results"`
+`git add <changed files> && git commit -m "Verify: build and test results"`
 
 ---
 
