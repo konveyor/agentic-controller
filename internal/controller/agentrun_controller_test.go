@@ -359,7 +359,7 @@ var _ = Describe("AgentRun Controller", func() {
 			spec := sandbox.Spec.PodTemplate.Spec
 			var tmpVolFound bool
 			for _, v := range spec.Volumes {
-				if v.Name == "tmp" {
+				if v.Name == tmpVolumeName {
 					tmpVolFound = true
 					Expect(v.VolumeSource.EmptyDir).NotTo(BeNil())
 				}
@@ -368,7 +368,7 @@ var _ = Describe("AgentRun Controller", func() {
 
 			var tmpMountFound bool
 			for _, m := range spec.Containers[0].VolumeMounts {
-				if m.Name == "tmp" {
+				if m.Name == tmpVolumeName {
 					tmpMountFound = true
 					Expect(m.MountPath).To(Equal("/tmp"))
 				}

@@ -50,6 +50,8 @@ const (
 	// workspaceVolumeName is the name of the EmptyDir volume for the agent workspace.
 	workspaceVolumeName = "workspace"
 
+	tmpVolumeName = "tmp"
+
 	// sandboxFinishedReasonSucceeded is the Sandbox condition reason for
 	// success. Must match Agent Sandbox's SandboxReasonPodSucceeded constant.
 	sandboxFinishedReasonSucceeded = "PodSucceeded"
@@ -345,13 +347,13 @@ func (r *AgentRunReconciler) createSandbox(
 
 	// Writable /tmp for tools that create temp files at runtime.
 	volumes = append(volumes, corev1.Volume{
-		Name: "tmp",
+		Name: tmpVolumeName,
 		VolumeSource: corev1.VolumeSource{
 			EmptyDir: &corev1.EmptyDirVolumeSource{},
 		},
 	})
 	volumeMounts = append(volumeMounts, corev1.VolumeMount{
-		Name:      "tmp",
+		Name:      tmpVolumeName,
 		MountPath: "/tmp",
 	})
 
