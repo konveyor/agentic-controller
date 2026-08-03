@@ -23,6 +23,9 @@ func clearKonveyorEnv(t *testing.T) {
 		"KONVEYOR_PLAYBOOK_INSTRUCTIONS",
 		"KONVEYOR_WORKFLOW_GUIDE",
 		"KONVEYOR_INSTRUCTIONS",
+		"KONVEYOR_WORKFLOW_STAGE",
+		"KONVEYOR_WORKFLOW_STAGE_COUNT",
+		"HUB_TOKEN_ID",
 	} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
@@ -186,5 +189,46 @@ func TestLoadFromEnvPrefersWorkflowGuide(t *testing.T) {
 	}
 	if cfg.WorkflowGuide != "NEW NAME" {
 		t.Errorf("WorkflowGuide = %q, want the KONVEYOR_WORKFLOW_GUIDE value", cfg.WorkflowGuide)
+	}
+}
+
+func TestLoadFromEnvReadsWorkflowStageMetadata(t *testing.T) {
+	clearKonveyorEnv(t)
+	setRequiredEnv(t)
+	t.Setenv("KONVEYOR_WORKFLOW_STAGE", "2")
+	t.Setenv("KONVEYOR_WORKFLOW_STAGE_COUNT", "3")
+	t.Setenv("HUB_TOKEN_ID", "99")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.WorkflowStage != "2" {
+		t.Errorf("WorkflowStage = %q, want %q", cfg.WorkflowStage, "2")
+	}
+	if cfg.WorkflowStageCount != "3" {
+		t.Errorf("WorkflowStageCount = %q, want %q", cfg.WorkflowStageCount, "3")
+	}
+	if cfg.HubTokenID != "99" {
+		t.Errorf("HubTokenID = %q, want %q", cfg.HubTokenID, "99")
+	}
+}
+
+func TestLoadFromEnvWorkflowStageFieldsOptional(t *testing.T) {
+	clearKonveyorEnv(t)
+	setRequiredEnv(t)
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.WorkflowStage != "" {
+		t.Errorf("WorkflowStage should be empty for standalone runs, got %q", cfg.WorkflowStage)
+	}
+	if cfg.WorkflowStageCount != "" {
+		t.Errorf("WorkflowStageCount should be empty for standalone runs, got %q", cfg.WorkflowStageCount)
+	}
+	if cfg.HubTokenID != "" {
+		t.Errorf("HubTokenID should be empty when not set, got %q", cfg.HubTokenID)
 	}
 }

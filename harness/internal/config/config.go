@@ -19,10 +19,16 @@ type Config struct {
 
 	HubBaseURL   string
 	HubToken     string
+	HubTokenID   string
 	AppID        string
 	ACPSecretKey string
 
 	TargetBranch string
+
+	// Workflow stage metadata, injected by the controller for
+	// AgentWorkflowRun stages. Both empty for standalone AgentRuns.
+	WorkflowStage      string
+	WorkflowStageCount string
 
 	// Prompt context layers, composed by internal/prompt.
 	AgentPrompt       string
@@ -53,9 +59,13 @@ func LoadFromEnv() (*Config, error) {
 		MaxTurns:     DefaultMaxTurns,
 		HubBaseURL:   required["HUB_BASE_URL"],
 		HubToken:     os.Getenv("HUB_TOKEN"),
+		HubTokenID:   os.Getenv("HUB_TOKEN_ID"),
 		AppID:        required["APP_ID"],
 		ACPSecretKey: required["KONVEYOR_ACP_SECRET_KEY"],
 		TargetBranch: required["TARGET_BRANCH"],
+
+		WorkflowStage:      os.Getenv("KONVEYOR_WORKFLOW_STAGE"),
+		WorkflowStageCount: os.Getenv("KONVEYOR_WORKFLOW_STAGE_COUNT"),
 
 		AgentPrompt:       os.Getenv("KONVEYOR_PROMPT"),
 		WorkflowGuide:     workflowGuideFromEnv(),

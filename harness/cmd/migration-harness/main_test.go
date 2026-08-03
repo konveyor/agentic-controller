@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/konveyor/migration-harness/internal/config"
 )
 
 func TestDiscoverSkills_NoSkills(t *testing.T) {
@@ -67,5 +69,107 @@ func TestDiscoverSkills_EmptySkillFile(t *testing.T) {
 	}
 	if len(paths) != 1 {
 		t.Errorf("expected 1 path (skill is mounted), got: %v", paths)
+	}
+}
+
+func TestShouldRevokeToken(t *testing.T) {
+	tests := []struct {
+		name               string
+		hubTokenID         string
+		workflowStage      string
+		workflowStageCount string
+		want               bool
+	}{
+		{
+			name: "no token ID — skip revocation",
+			want: false,
+		},
+		{
+			name:       "standalone run — revoke",
+			hubTokenID: "1",
+			want:       true,
+		},
+		{
+			name:               "last workflow stage — revoke",
+			hubTokenID:         "1",
+			workflowStage:      "3",
+			workflowStageCount: "3",
+			want:               true,
+		},
+		{
+			name:               "intermediate workflow stage — skip",
+			hubTokenID:         "1",
+			workflowStage:      "1",
+			workflowStageCount: "3",
+			want:               false,
+		},
+		{
+			name:               "second of two stages — skip",
+			hubTokenID:         "1",
+			workflowStage:      "1",
+			workflowStageCount: "2",
+			want:               false,
+		},
+		{
+			name:               "single-stage workflow — revoke",
+			hubTokenID:         "1",
+			workflowStage:      "1",
+			workflowStageCount: "1",
+			want:               true,
+		},
+		{
+			name:               "stage set but count missing — skip",
+			hubTokenID:         "1",
+			workflowStage:      "1",
+			workflowStageCount: "",
+			want:               false,
+		},
+		{
+			name:               "count set but stage missing — standalone",
+			hubTokenID:         "1",
+			workflowStage:      "",
+			workflowStageCount: "3",
+			want:               true,
+		},
+		{
+			name:               "stage exceeds count — skip",
+			hubTokenID:         "1",
+			workflowStage:      "5",
+			workflowStageCount: "3",
+			want:               false,
+		},
+		{
+			name:               "non-numeric stage — skip",
+			hubTokenID:         "1",
+			workflowStage:      "abc",
+			workflowStageCount: "3",
+			want:               false,
+		},
+		{
+			name:               "non-numeric count — skip",
+			hubTokenID:         "1",
+			workflowStage:      "1",
+			workflowStageCount: "xyz",
+			want:               false,
+		},
+		{
+			name:               "stage zero — skip",
+			hubTokenID:         "1",
+			workflowStage:      "0",
+			workflowStageCount: "3",
+			want:               false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				HubTokenID:         tt.hubTokenID,
+				WorkflowStage:      tt.workflowStage,
+				WorkflowStageCount: tt.workflowStageCount,
+			}
+			if got := shouldRevokeToken(cfg); got != tt.want {
+				t.Errorf("shouldRevokeToken() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

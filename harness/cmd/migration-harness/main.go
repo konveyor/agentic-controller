@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -63,6 +64,22 @@ func runStage(cmd *cobra.Command, args []string) error {
 	creds, hubClient, err := resolveFromHub(cfg)
 	if err != nil {
 		return fmt.Errorf("hub resolution: %w", err)
+	}
+
+	// Stage-aware token revocation: revoke the Hub API token on exit
+	// for standalone runs and the last workflow stage. Intermediate
+	// stages skip so subsequent stages can reuse the token.
+	if shouldRevokeToken(cfg) {
+		tokenID, _ := strconv.ParseUint(cfg.HubTokenID, 10, 64)
+		defer func() {
+			if err := hubClient.RevokeToken(uint(tokenID)); err != nil {
+				logging.Warn("hub token revocation: %v", err)
+			} else {
+				logging.Ok("hub token revoked")
+			}
+		}()
+	} else if cfg.HubTokenID == "" && cfg.HubToken != "" {
+		logging.Warn("HUB_TOKEN_ID not set — skipping token revocation (token will expire via TTL)")
 	}
 
 	if cfg.TargetBranch == creds.Branch {
@@ -291,6 +308,19 @@ func resolveFromHub(cfg *config.Config) (*git.Credentials, *hub.Client, error) {
 	}
 
 	return creds, hubClient, nil
+}
+
+// shouldRevokeToken decides whether the harness should revoke the Hub API
+// token on exit. Standalone AgentRuns always revoke. Workflow stages
+// revoke only on the last stage so subsequent stages can reuse the token.
+func shouldRevokeToken(cfg *config.Config) bool {
+	if cfg.HubTokenID == "" {
+		return false
+	}
+	if cfg.WorkflowStage == "" {
+		return true
+	}
+	return cfg.WorkflowStage == cfg.WorkflowStageCount
 }
 
 func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir string) error {

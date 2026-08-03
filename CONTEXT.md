@@ -150,8 +150,9 @@ pattern; and (2) a runtime data service that the harness calls (via a
 scoped API token) to fetch application metadata, decrypted git
 credentials, and analysis results — the same role Hub plays for
 addons today. At AgentRun create time, Hub mints a scoped token and
-injects `HUB_BASE_URL`, `HUB_APP_ID`, and the token into the AgentRun's
-env/envFrom, then creates the CR. Hub does not resolve application
+injects `HUB_BASE_URL`, `HUB_APP_ID`, the token (`HUB_TOKEN`), and the
+token's database ID (`HUB_TOKEN_ID`) into the AgentRun's env/envFrom,
+then creates the CR. Hub does not resolve application
 data at create time — the harness resolves at runtime. Hub is
 fire-and-forget; it does not launch or manage agent workloads.
 

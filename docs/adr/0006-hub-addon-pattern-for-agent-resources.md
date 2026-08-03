@@ -34,7 +34,8 @@ env var.
 When Hub receives a create request for an AgentRun or AgentWorkflowRun:
 
 1. Mints a scoped API token with `AddonScopes`
-2. Stores the token in a Kubernetes Secret
+2. Stores the token and its database ID in a Kubernetes Secret
+   (`HUB_TOKEN`, `HUB_TOKEN_ID`)
 3. Adds `HUB_BASE_URL`, `HUB_APP_ID`, and the token Secret to the CR's
    `spec.env` and `spec.envFrom`
 4. Creates the CR via `client.Create()`
