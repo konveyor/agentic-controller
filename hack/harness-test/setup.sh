@@ -29,7 +29,6 @@ kubectl create secret generic vertex-credentials \
     --dry-run=client -o yaml | kubectl apply -f -
 echo "  vertex-credentials created"
 
-# Hub token — from env or hub-local.sh. Hub must be running.
 # Hub token — must be set in environment.
 if [ -z "${HUB_TOKEN:-}" ]; then
     echo "ERROR: HUB_TOKEN must be set. Export HUB_TOKEN from your Hub instance."

@@ -74,8 +74,14 @@ func runStage(cmd *cobra.Command, args []string) error {
 		}()
 	} else if cfg.HubTokenID == "" && cfg.HubToken != "" {
 		logging.Warn("HUB_TOKEN_ID not set — skipping token revocation (token will expire via TTL)")
-	} else if cfg.WorkflowStage != "" {
-		logging.Info("workflow stage %s/%s — skipping token revocation", cfg.WorkflowStage, cfg.WorkflowStageCount)
+	} else if cfg.HubTokenID != "" {
+		stage, sErr := strconv.ParseUint(cfg.WorkflowStage, 10, 64)
+		count, cErr := strconv.ParseUint(cfg.WorkflowStageCount, 10, 64)
+		if sErr == nil && cErr == nil && stage > 0 && count > 0 {
+			logging.Info("workflow stage %d/%d — skipping token revocation", stage, count)
+		} else {
+			logging.Warn("invalid workflow metadata (stage=%q, count=%q) — skipping token revocation", cfg.WorkflowStage, cfg.WorkflowStageCount)
+		}
 	}
 
 	creds, err := resolveFromHub(cfg, hubClient)
@@ -135,10 +141,8 @@ func runStage(cmd *cobra.Command, args []string) error {
 
 	if hasSkills {
 		// 4b. Write analysis to workspace (if resolved from Hub)
-		if hubClient != nil {
-			if err := fetchAndWriteAnalysis(hubClient, cfg.AppID, cloneDir); err != nil {
-				logging.Warn("analysis fetch: %v", err)
-			}
+		if err := fetchAndWriteAnalysis(hubClient, cfg.AppID, cloneDir); err != nil {
+			logging.Warn("analysis fetch: %v", err)
 		}
 
 		// 4c. Commit harness-managed files so they survive on the branch
@@ -332,7 +336,7 @@ func shouldRevokeToken(cfg *config.Config) (uint, bool) {
 	if err != nil || count == 0 {
 		return 0, false
 	}
-	if stage <= count && stage == count {
+	if stage == count {
 		return uint(tokenID), true
 	}
 	return 0, false
