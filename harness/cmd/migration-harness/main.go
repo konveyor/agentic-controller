@@ -177,12 +177,18 @@ func runStage(cmd *cobra.Command, args []string) error {
 	// 9. Send single ACP prompt (blocks until goose finishes or MaxTurns is hit)
 	logging.Header("Running Stage")
 	logging.Info("max turns: %d", cfg.MaxTurns)
-	_, err = session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
+	promptResult, err := session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
 		{Type: "text", Text: stagePrompt},
 	}, cfg.MaxTurns)
 
 	if err != nil {
 		logging.Err("prompt failed: %v", err)
+	}
+
+	if promptResult != nil && promptResult.Usage != nil {
+		logging.Info("token usage: input=%d output=%d total=%d",
+			promptResult.Usage.InputTokens, promptResult.Usage.OutputTokens, promptResult.Usage.TotalTokens)
+		writeTokenUsage(cloneDir, promptResult.Usage)
 	}
 
 	// 10. Check goose health
@@ -324,4 +330,26 @@ func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir strin
 
 	logging.Ok("wrote %d analysis insights to %s", len(insights), analysisPath)
 	return nil
+}
+
+func writeTokenUsage(workDir string, usage *acp.PromptUsage) {
+	konveyorDir := filepath.Join(workDir, ".konveyor")
+	os.MkdirAll(konveyorDir, 0o755)
+
+	usagePath := filepath.Join(konveyorDir, "token-usage.json")
+
+	var existing []map[string]any
+	if data, err := os.ReadFile(usagePath); err == nil {
+		json.Unmarshal(data, &existing)
+	}
+
+	entry := map[string]any{
+		"inputTokens":  usage.InputTokens,
+		"outputTokens": usage.OutputTokens,
+		"totalTokens":  usage.TotalTokens,
+	}
+	existing = append(existing, entry)
+
+	data, _ := json.MarshalIndent(existing, "", "  ")
+	os.WriteFile(usagePath, data, 0o644)
 }

@@ -1,0 +1,80 @@
+# Questionnaire stage test resources.
+# Adds the questionnaire skill and a playbook that runs it as the first stage.
+#
+# Prerequisites:
+#   - LLMProvider "gcp-vertex-ai" from resources.yaml
+#   - Hub running with app + identity configured
+#
+# Usage:
+#   kubectl apply -f hack/harness-test/questionnaire-resources.yaml
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: questionnaire
+spec:
+  image: quay.io/konveyor/skills:questionnaire
+  displayName: Questionnaire Stage
+  version: "0.1.0"
+  description: >
+    Detects the source application's tech stack and gathers migration decisions.
+    Produces .konveyor/questionnaire.json consumed by the plan stage.
+  type: skill
+  tags:
+    - migration
+    - questionnaire
+    - detect
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: questionnaire-agent
+spec:
+  image: quay.io/konveyor/agent-java:dev
+  providers:
+    - ref: gcp-vertex-ai
+  skillCards:
+    - ref: questionnaire
+  params:
+    - name: max_turns
+      type: number
+      default: "50"
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: AgentPlaybook
+metadata:
+  name: questionnaire-test
+spec:
+  guide: "Run the questionnaire stage to detect and gather migration decisions"
+  stages:
+    - name: questionnaire
+      agentRef: questionnaire-agent
+      instructions: "Analyze the source application and produce .konveyor/questionnaire.json with detection results and migration decisions"
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: AgentPlaybookRun
+metadata:
+  name: coolstore-questionnaire-__TIMESTAMP__
+spec:
+  playbookRef: questionnaire-test
+  models:
+    - role: primary
+      provider: gcp-vertex-ai
+      model: claude-sonnet-4-5
+  env:
+    - name: HUB_BASE_URL
+      value: "http://host.containers.internal:9080"
+    - name: HUB_TOKEN
+      value: "__HUB_TOKEN__"
+    - name: APP_ID
+      value: "1"
+    - name: TARGET_BRANCH
+      value: "konveyor/questionnaire-__TIMESTAMP__"
+    - name: GCP_PROJECT_ID
+      value: "__GCP_PROJECT_ID__"
+    - name: GCP_LOCATION
+      value: "global"
