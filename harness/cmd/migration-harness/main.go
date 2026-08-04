@@ -61,14 +61,9 @@ func runStage(cmd *cobra.Command, args []string) error {
 		cloneDir = "/workspace/repo"
 	}
 
-	creds, hubClient, err := resolveFromHub(cfg)
-	if err != nil {
-		return fmt.Errorf("hub resolution: %w", err)
-	}
-
-	// Stage-aware token revocation: revoke the Hub API token on exit
-	// for standalone runs and the last workflow stage. Intermediate
-	// stages skip so subsequent stages can reuse the token.
+	// Stage-aware token revocation: register cleanup before Hub resolution
+	// so the token is revoked even if resolveFromHub fails partway.
+	hubClient := hub.NewClient(cfg.HubBaseURL, cfg.HubToken)
 	if shouldRevokeToken(cfg) {
 		tokenID, _ := strconv.ParseUint(cfg.HubTokenID, 10, 64)
 		defer func() {
@@ -82,6 +77,11 @@ func runStage(cmd *cobra.Command, args []string) error {
 		logging.Warn("HUB_TOKEN_ID not set — skipping token revocation (token will expire via TTL)")
 	} else if cfg.WorkflowStage != "" {
 		logging.Info("workflow stage %s/%s — skipping token revocation", cfg.WorkflowStage, cfg.WorkflowStageCount)
+	}
+
+	creds, err := resolveFromHub(cfg, hubClient)
+	if err != nil {
+		return fmt.Errorf("hub resolution: %w", err)
 	}
 
 	if cfg.TargetBranch == creds.Branch {
@@ -275,25 +275,23 @@ func discoverSkills() (string, []string, error) {
 	return combined.String(), matches, nil
 }
 
-func resolveFromHub(cfg *config.Config) (*git.Credentials, *hub.Client, error) {
+func resolveFromHub(cfg *config.Config, hubClient *hub.Client) (*git.Credentials, error) {
 	logging.Header("Hub Resolution")
 
 	appID, err := hub.ParseAppID(cfg.AppID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("invalid APP_ID %q: %w", cfg.AppID, err)
+		return nil, fmt.Errorf("invalid APP_ID %q: %w", cfg.AppID, err)
 	}
-
-	hubClient := hub.NewClient(cfg.HubBaseURL, cfg.HubToken)
 
 	app, err := hubClient.FetchApp(appID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("fetch app: %w", err)
+		return nil, fmt.Errorf("fetch app: %w", err)
 	}
 	logging.Ok("app: %s (id=%d), repo: %s", app.Name, app.ID, app.Repository.URL)
 
 	identity, err := hubClient.FetchGitCreds(appID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("fetch git creds: %w", err)
+		return nil, fmt.Errorf("fetch git creds: %w", err)
 	}
 
 	creds := &git.Credentials{
@@ -309,7 +307,7 @@ func resolveFromHub(cfg *config.Config) (*git.Credentials, *hub.Client, error) {
 		logging.Ok("git identity: %s", identity.Name)
 	}
 
-	return creds, hubClient, nil
+	return creds, nil
 }
 
 // shouldRevokeToken decides whether the harness should revoke the Hub API
@@ -319,10 +317,21 @@ func shouldRevokeToken(cfg *config.Config) bool {
 	if cfg.HubTokenID == "" {
 		return false
 	}
-	if cfg.WorkflowStage == "" {
+	if _, err := strconv.ParseUint(cfg.HubTokenID, 10, 64); err != nil {
+		return false
+	}
+	if cfg.WorkflowStage == "" && cfg.WorkflowStageCount == "" {
 		return true
 	}
-	return cfg.WorkflowStage == cfg.WorkflowStageCount
+	stage, err := strconv.ParseUint(cfg.WorkflowStage, 10, 64)
+	if err != nil || stage == 0 {
+		return false
+	}
+	count, err := strconv.ParseUint(cfg.WorkflowStageCount, 10, 64)
+	if err != nil || count == 0 {
+		return false
+	}
+	return stage <= count && stage == count
 }
 
 func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir string) error {

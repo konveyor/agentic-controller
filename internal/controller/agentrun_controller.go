@@ -349,7 +349,9 @@ func (r *AgentRunReconciler) createSandbox(
 	volumes = append(volumes, corev1.Volume{
 		Name: tmpVolumeName,
 		VolumeSource: corev1.VolumeSource{
-			EmptyDir: &corev1.EmptyDirVolumeSource{},
+			EmptyDir: &corev1.EmptyDirVolumeSource{
+				SizeLimit: resource.NewQuantity(1*1024*1024*1024, resource.BinarySI), // 1Gi
+			},
 		},
 	})
 	volumeMounts = append(volumeMounts, corev1.VolumeMount{

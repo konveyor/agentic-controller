@@ -125,11 +125,11 @@ func TestShouldRevokeToken(t *testing.T) {
 			want:               false,
 		},
 		{
-			name:               "count set but stage missing — standalone",
+			name:               "count set but stage missing — skip",
 			hubTokenID:         "1",
 			workflowStage:      "",
 			workflowStageCount: "3",
-			want:               true,
+			want:               false,
 		},
 		{
 			name:               "stage exceeds count — skip",
@@ -157,6 +157,27 @@ func TestShouldRevokeToken(t *testing.T) {
 			hubTokenID:         "1",
 			workflowStage:      "0",
 			workflowStageCount: "3",
+			want:               false,
+		},
+		{
+			name:               "equal non-numeric values — skip",
+			hubTokenID:         "1",
+			workflowStage:      "abc",
+			workflowStageCount: "abc",
+			want:               false,
+		},
+		{
+			name:               "equal zero values — skip",
+			hubTokenID:         "1",
+			workflowStage:      "0",
+			workflowStageCount: "0",
+			want:               false,
+		},
+		{
+			name:               "non-numeric token ID — skip",
+			hubTokenID:         "abc",
+			workflowStage:      "",
+			workflowStageCount: "",
 			want:               false,
 		},
 	}

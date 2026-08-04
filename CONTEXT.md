@@ -65,7 +65,7 @@ gateway Service exists, creates a sandbox through the OpenShell
 gateway API, and tracks status to completion. Parameters are
 domain-agnostic — the controller passes them through without
 interpretation. For Konveyor-managed agents, Hub injects connectivity
-info (`HUB_BASE_URL`, `HUB_APP_ID`, scoped API token) into the
+info (`HUB_BASE_URL`, `APP_ID`, scoped API token) into the
 AgentRun's env at create time; the harness resolves application
 metadata from Hub at runtime.
 
@@ -150,7 +150,7 @@ pattern; and (2) a runtime data service that the harness calls (via a
 scoped API token) to fetch application metadata, decrypted git
 credentials, and analysis results — the same role Hub plays for
 addons today. At AgentRun create time, Hub mints a scoped token and
-injects `HUB_BASE_URL`, `HUB_APP_ID`, the token (`HUB_TOKEN`), and the
+injects `HUB_BASE_URL`, `APP_ID`, the token (`HUB_TOKEN`), and the
 token's database ID (`HUB_TOKEN_ID`) into the AgentRun's env/envFrom,
 then creates the CR. Hub does not resolve application
 data at create time — the harness resolves at runtime. Hub is
@@ -158,7 +158,7 @@ fire-and-forget; it does not launch or manage agent workloads.
 
 **Harness** — The Go binary entrypoint in the agent base image,
 analogous to the addon adapter (`shared/addon/adapter`) in Hub. In
-Konveyor-managed mode (`HUB_BASE_URL` + `HUB_APP_ID` set), the harness
+Konveyor-managed mode (`HUB_BASE_URL` + `APP_ID` set), the harness
 acts as a Hub client: resolves the application's git URL, branch,
 and decrypted credentials from Hub, clones the repo, and configures
 the workspace so the agent cannot push (credentials stay in the

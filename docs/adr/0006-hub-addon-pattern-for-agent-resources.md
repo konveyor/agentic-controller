@@ -2,7 +2,7 @@
 
 Hub's integration with the agent platform follows the established addon
 pattern rather than introducing smart resolution endpoints. Hub creates
-AgentRun/AgentWorkflowRun CRs with `HUB_BASE_URL`, `HUB_APP_ID`, and a
+AgentRun/AgentWorkflowRun CRs with `HUB_BASE_URL`, `APP_ID`, and a
 scoped API token injected as env/envFrom — then walks away
 (fire-and-forget). The harness resolves application metadata from Hub at
 runtime, the same way the addon adapter does for addon tasks today.
@@ -36,7 +36,7 @@ When Hub receives a create request for an AgentRun or AgentWorkflowRun:
 1. Mints a scoped API token with `AddonScopes`
 2. Stores the token and its database ID in a Kubernetes Secret
    (`HUB_TOKEN`, `HUB_TOKEN_ID`)
-3. Adds `HUB_BASE_URL`, `HUB_APP_ID`, and the token Secret to the CR's
+3. Adds `HUB_BASE_URL`, `APP_ID`, and the token Secret to the CR's
    `spec.env` and `spec.envFrom`
 4. Creates the CR via `client.Create()`
 
@@ -56,7 +56,7 @@ Other resource types are listed unfiltered.
 ### Harness resolves at runtime
 
 The harness acts as a Hub client (analogous to the addon adapter). In
-managed mode (`HUB_BASE_URL` + `HUB_APP_ID` set), it calls Hub's existing
+managed mode (`HUB_BASE_URL` + `APP_ID` set), it calls Hub's existing
 REST API to resolve the application's git URL, branch, and decrypted
 credentials. In standalone mode, it reads from `KONVEYOR_PARAM_*` env
 vars and mounted Secrets.

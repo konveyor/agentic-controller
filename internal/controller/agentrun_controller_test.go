@@ -362,6 +362,7 @@ var _ = Describe("AgentRun Controller", func() {
 				if v.Name == tmpVolumeName {
 					tmpVolFound = true
 					Expect(v.VolumeSource.EmptyDir).NotTo(BeNil())
+					Expect(v.VolumeSource.EmptyDir.SizeLimit).NotTo(BeNil())
 				}
 			}
 			Expect(tmpVolFound).To(BeTrue(), "expected a 'tmp' EmptyDir volume")
@@ -371,6 +372,7 @@ var _ = Describe("AgentRun Controller", func() {
 				if m.Name == tmpVolumeName {
 					tmpMountFound = true
 					Expect(m.MountPath).To(Equal("/tmp"))
+					Expect(m.ReadOnly).To(BeFalse())
 				}
 			}
 			Expect(tmpMountFound).To(BeTrue(), "expected a volume mount for /tmp")
