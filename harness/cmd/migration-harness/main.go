@@ -64,10 +64,9 @@ func runStage(cmd *cobra.Command, args []string) error {
 	// Stage-aware token revocation: register cleanup before Hub resolution
 	// so the token is revoked even if resolveFromHub fails partway.
 	hubClient := hub.NewClient(cfg.HubBaseURL, cfg.HubToken)
-	if shouldRevokeToken(cfg) {
-		tokenID, _ := strconv.ParseUint(cfg.HubTokenID, 10, 64)
+	if tokenID, revoke := shouldRevokeToken(cfg); revoke {
 		defer func() {
-			if err := hubClient.RevokeToken(uint(tokenID)); err != nil {
+			if err := hubClient.RevokeToken(tokenID); err != nil {
 				logging.Warn("hub token revocation (id=%d): %v", tokenID, err)
 			} else {
 				logging.Ok("hub token revoked (id=%d)", tokenID)
@@ -311,27 +310,32 @@ func resolveFromHub(cfg *config.Config, hubClient *hub.Client) (*git.Credentials
 }
 
 // shouldRevokeToken decides whether the harness should revoke the Hub API
-// token on exit. Standalone AgentRuns always revoke. Workflow stages
-// revoke only on the last stage so subsequent stages can reuse the token.
-func shouldRevokeToken(cfg *config.Config) bool {
+// token on exit and returns the parsed token ID. Standalone AgentRuns
+// always revoke. Workflow stages revoke only on the last stage so
+// subsequent stages can reuse the token.
+func shouldRevokeToken(cfg *config.Config) (uint, bool) {
 	if cfg.HubTokenID == "" {
-		return false
+		return 0, false
 	}
-	if _, err := strconv.ParseUint(cfg.HubTokenID, 10, 64); err != nil {
-		return false
+	tokenID, err := strconv.ParseUint(cfg.HubTokenID, 10, 64)
+	if err != nil {
+		return 0, false
 	}
 	if cfg.WorkflowStage == "" && cfg.WorkflowStageCount == "" {
-		return true
+		return uint(tokenID), true
 	}
 	stage, err := strconv.ParseUint(cfg.WorkflowStage, 10, 64)
 	if err != nil || stage == 0 {
-		return false
+		return 0, false
 	}
 	count, err := strconv.ParseUint(cfg.WorkflowStageCount, 10, 64)
 	if err != nil || count == 0 {
-		return false
+		return 0, false
 	}
-	return stage <= count && stage == count
+	if stage <= count && stage == count {
+		return uint(tokenID), true
+	}
+	return 0, false
 }
 
 func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir string) error {

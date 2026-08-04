@@ -104,7 +104,7 @@ func TestShouldRevokeToken(t *testing.T) {
 			want:               false,
 		},
 		{
-			name:               "second of two stages — skip",
+			name:               "first of two stages — skip",
 			hubTokenID:         "1",
 			workflowStage:      "1",
 			workflowStageCount: "2",
@@ -188,7 +188,8 @@ func TestShouldRevokeToken(t *testing.T) {
 				WorkflowStage:      tt.workflowStage,
 				WorkflowStageCount: tt.workflowStageCount,
 			}
-			if got := shouldRevokeToken(cfg); got != tt.want {
+			_, got := shouldRevokeToken(cfg)
+			if got != tt.want {
 				t.Errorf("shouldRevokeToken() = %v, want %v", got, tt.want)
 			}
 		})
