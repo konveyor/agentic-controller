@@ -143,16 +143,21 @@ func runStage(cmd *cobra.Command, args []string) error {
 
 	if hasSkills {
 		// 4b. Write analysis to workspace (if resolved from Hub)
-		if err := fetchAndWriteAnalysis(hubClient, cfg.AppID, cloneDir); err != nil {
+		wroteAnalysis, err := fetchAndWriteAnalysis(hubClient, cfg.AppID, cloneDir)
+		if err != nil {
 			logging.Warn("analysis fetch: %v", err)
 		}
 
-		// 4c. Commit harness-managed files so they survive on the branch
-		if err := git.CommitFiles(repo, []string{
-			".gitignore",
-			".konveyor/analysis.json",
-		}, "harness: add grounding data"); err != nil {
-			return fmt.Errorf("commit harness files: %w", err)
+		// 4c. Commit harness-managed files so they survive on the branch.
+		// Only commit when there is actual grounding data (analysis.json);
+		// .gitignore patterns take effect locally without a commit.
+		if wroteAnalysis {
+			if err := git.CommitFiles(repo, []string{
+				".gitignore",
+				".konveyor/analysis.json",
+			}, "harness: add grounding data"); err != nil {
+				return fmt.Errorf("commit harness files: %w", err)
+			}
 		}
 	}
 
@@ -460,35 +465,35 @@ func shouldRevokeToken(cfg *config.Config) (uint, bool) {
 	return 0, false
 }
 
-func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir string) error {
+func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir string) (bool, error) {
 	appID, err := hub.ParseAppID(appIDStr)
 	if err != nil {
-		return fmt.Errorf("invalid APP_ID %q: %w", appIDStr, err)
+		return false, fmt.Errorf("invalid APP_ID %q: %w", appIDStr, err)
 	}
 	insights, err := hubClient.FetchAnalysis(appID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(insights) == 0 {
 		logging.Info("no analysis results for app %s", appIDStr)
-		return nil
+		return false, nil
 	}
 
 	analysisDir := filepath.Join(workDir, ".konveyor")
 	if err := os.MkdirAll(analysisDir, 0o755); err != nil {
-		return fmt.Errorf("create .konveyor dir: %w", err)
+		return false, fmt.Errorf("create .konveyor dir: %w", err)
 	}
 
 	data, err := json.MarshalIndent(insights, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal analysis: %w", err)
+		return false, fmt.Errorf("marshal analysis: %w", err)
 	}
 
 	analysisPath := filepath.Join(analysisDir, "analysis.json")
 	if err := os.WriteFile(analysisPath, data, 0o644); err != nil {
-		return fmt.Errorf("write analysis: %w", err)
+		return false, fmt.Errorf("write analysis: %w", err)
 	}
 
 	logging.Ok("wrote %d analysis insights to %s", len(insights), analysisPath)
-	return nil
+	return true, nil
 }
