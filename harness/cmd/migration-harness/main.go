@@ -63,11 +63,23 @@ func runStage(cmd *cobra.Command, args []string) error {
 		cloneDir = "/workspace/repo"
 	}
 
-	// Stage-aware token revocation: register cleanup before Hub resolution
-	// so the token is revoked even if resolveFromHub fails partway.
+	// Fail-closed token revocation: always register cleanup when a valid
+	// token ID exists. The defer decides at exit time whether to actually
+	// revoke — only an intermediate workflow stage that succeeded skips
+	// revocation (the next stage needs the token). Every other exit path
+	// (failure, last stage, standalone run) revokes immediately.
 	hubClient := hub.NewClient(cfg.HubBaseURL, cfg.HubToken)
-	if tokenID, revoke := shouldRevokeToken(cfg); revoke {
+	var stageSucceeded bool
+	if tokenID, ok := parseHubTokenID(cfg); ok {
+		intermediate := isIntermediateWorkflowStage(cfg)
 		defer func() {
+			if intermediate && stageSucceeded {
+				logging.Info("intermediate workflow stage succeeded — deferring token revocation to next stage")
+				return
+			}
+			if intermediate {
+				logging.Warn("intermediate workflow stage failed — revoking token early (no subsequent stage will run)")
+			}
 			if err := hubClient.RevokeToken(tokenID); err != nil {
 				logging.Warn("hub token revocation (id=%d): %v", tokenID, err)
 			} else {
@@ -77,13 +89,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 	} else if cfg.HubTokenID == "" && cfg.HubToken != "" {
 		logging.Warn("HUB_TOKEN_ID not set — skipping token revocation (token will expire via TTL)")
 	} else if cfg.HubTokenID != "" {
-		stage, sErr := strconv.ParseUint(cfg.WorkflowStage, 10, 64)
-		count, cErr := strconv.ParseUint(cfg.WorkflowStageCount, 10, 64)
-		if sErr == nil && cErr == nil && stage > 0 && count > 0 {
-			logging.Info("workflow stage %d/%d — skipping token revocation", stage, count)
-		} else {
-			logging.Warn("invalid workflow metadata (stage=%q, count=%q) — skipping token revocation", cfg.WorkflowStage, cfg.WorkflowStageCount)
-		}
+		logging.Warn("HUB_TOKEN_ID %q is not a valid numeric ID — skipping token revocation", cfg.HubTokenID)
 	}
 
 	creds, err := resolveFromHub(cfg, hubClient)
@@ -361,6 +367,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 		logging.Err("stage failed")
 		return fmt.Errorf("stage failed")
 	}
+	stageSucceeded = true
 	emitNotice("stage succeeded — results pushed to branch %s", creds.Branch)
 	logging.Ok("stage succeeded")
 	return nil
@@ -436,11 +443,9 @@ func resolveFromHub(cfg *config.Config, hubClient *hub.Client) (*git.Credentials
 	return creds, nil
 }
 
-// shouldRevokeToken decides whether the harness should revoke the Hub API
-// token on exit and returns the parsed token ID. Standalone AgentRuns
-// always revoke. Workflow stages revoke only on the last stage so
-// subsequent stages can reuse the token.
-func shouldRevokeToken(cfg *config.Config) (uint, bool) {
+// parseHubTokenID extracts the Hub API token ID from config.
+// Returns (0, false) when no valid token ID is available.
+func parseHubTokenID(cfg *config.Config) (uint, bool) {
 	if cfg.HubTokenID == "" {
 		return 0, false
 	}
@@ -448,21 +453,25 @@ func shouldRevokeToken(cfg *config.Config) (uint, bool) {
 	if err != nil {
 		return 0, false
 	}
-	if cfg.WorkflowStage == "" && cfg.WorkflowStageCount == "" {
-		return uint(tokenID), true
+	return uint(tokenID), true
+}
+
+// isIntermediateWorkflowStage reports whether the harness is running an
+// intermediate (not last) stage of a multi-stage workflow. Returns false
+// for standalone runs, last stages, and invalid metadata.
+func isIntermediateWorkflowStage(cfg *config.Config) bool {
+	if cfg.WorkflowStage == "" || cfg.WorkflowStageCount == "" {
+		return false
 	}
 	stage, err := strconv.ParseUint(cfg.WorkflowStage, 10, 64)
 	if err != nil || stage == 0 {
-		return 0, false
+		return false
 	}
 	count, err := strconv.ParseUint(cfg.WorkflowStageCount, 10, 64)
 	if err != nil || count == 0 {
-		return 0, false
+		return false
 	}
-	if stage == count {
-		return uint(tokenID), true
-	}
-	return 0, false
+	return stage < count
 }
 
 func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir string) (bool, error) {

@@ -72,114 +72,81 @@ func TestDiscoverSkills_EmptySkillFile(t *testing.T) {
 	}
 }
 
-func TestShouldRevokeToken(t *testing.T) {
+func TestParseHubTokenID(t *testing.T) {
+	tests := []struct {
+		name       string
+		hubTokenID string
+		wantID     uint
+		wantOK     bool
+	}{
+		{"empty", "", 0, false},
+		{"valid", "42", 42, true},
+		{"non-numeric", "abc", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{HubTokenID: tt.hubTokenID}
+			id, ok := parseHubTokenID(cfg)
+			if id != tt.wantID || ok != tt.wantOK {
+				t.Errorf("parseHubTokenID() = (%d, %v), want (%d, %v)", id, ok, tt.wantID, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestIsIntermediateWorkflowStage(t *testing.T) {
+	tests := []struct {
+		name               string
+		workflowStage      string
+		workflowStageCount string
+		want               bool
+	}{
+		{"standalone run", "", "", false},
+		{"last stage 3/3", "3", "3", false},
+		{"intermediate 1/3", "1", "3", true},
+		{"intermediate 1/2", "1", "2", true},
+		{"intermediate 2/3", "2", "3", true},
+		{"single stage 1/1", "1", "1", false},
+		{"stage only", "1", "", false},
+		{"count only", "", "3", false},
+		{"stage zero", "0", "3", false},
+		{"count zero", "1", "0", false},
+		{"non-numeric stage", "abc", "3", false},
+		{"non-numeric count", "1", "xyz", false},
+		{"stage exceeds count", "5", "3", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				WorkflowStage:      tt.workflowStage,
+				WorkflowStageCount: tt.workflowStageCount,
+			}
+			if got := isIntermediateWorkflowStage(cfg); got != tt.want {
+				t.Errorf("isIntermediateWorkflowStage() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTokenRevocationDecision(t *testing.T) {
 	tests := []struct {
 		name               string
 		hubTokenID         string
 		workflowStage      string
 		workflowStageCount string
-		want               bool
+		stageSucceeded     bool
+		wantRevoke         bool
 	}{
-		{
-			name: "no token ID — skip revocation",
-			want: false,
-		},
-		{
-			name:       "standalone run — revoke",
-			hubTokenID: "1",
-			want:       true,
-		},
-		{
-			name:               "last workflow stage — revoke",
-			hubTokenID:         "1",
-			workflowStage:      "3",
-			workflowStageCount: "3",
-			want:               true,
-		},
-		{
-			name:               "intermediate workflow stage — skip",
-			hubTokenID:         "1",
-			workflowStage:      "1",
-			workflowStageCount: "3",
-			want:               false,
-		},
-		{
-			name:               "first of two stages — skip",
-			hubTokenID:         "1",
-			workflowStage:      "1",
-			workflowStageCount: "2",
-			want:               false,
-		},
-		{
-			name:               "single-stage workflow — revoke",
-			hubTokenID:         "1",
-			workflowStage:      "1",
-			workflowStageCount: "1",
-			want:               true,
-		},
-		{
-			name:               "stage set but count missing — skip",
-			hubTokenID:         "1",
-			workflowStage:      "1",
-			workflowStageCount: "",
-			want:               false,
-		},
-		{
-			name:               "count set but stage missing — skip",
-			hubTokenID:         "1",
-			workflowStage:      "",
-			workflowStageCount: "3",
-			want:               false,
-		},
-		{
-			name:               "stage exceeds count — skip",
-			hubTokenID:         "1",
-			workflowStage:      "5",
-			workflowStageCount: "3",
-			want:               false,
-		},
-		{
-			name:               "non-numeric stage — skip",
-			hubTokenID:         "1",
-			workflowStage:      "abc",
-			workflowStageCount: "3",
-			want:               false,
-		},
-		{
-			name:               "non-numeric count — skip",
-			hubTokenID:         "1",
-			workflowStage:      "1",
-			workflowStageCount: "xyz",
-			want:               false,
-		},
-		{
-			name:               "stage zero — skip",
-			hubTokenID:         "1",
-			workflowStage:      "0",
-			workflowStageCount: "3",
-			want:               false,
-		},
-		{
-			name:               "equal non-numeric values — skip",
-			hubTokenID:         "1",
-			workflowStage:      "abc",
-			workflowStageCount: "abc",
-			want:               false,
-		},
-		{
-			name:               "equal zero values — skip",
-			hubTokenID:         "1",
-			workflowStage:      "0",
-			workflowStageCount: "0",
-			want:               false,
-		},
-		{
-			name:               "non-numeric token ID — skip",
-			hubTokenID:         "abc",
-			workflowStage:      "",
-			workflowStageCount: "",
-			want:               false,
-		},
+		{"no token ID", "", "", "", false, false},
+		{"standalone success", "1", "", "", true, true},
+		{"standalone failure", "1", "", "", false, true},
+		{"last stage success", "1", "3", "3", true, true},
+		{"last stage failure", "1", "3", "3", false, true},
+		{"intermediate success — defer to next stage", "1", "1", "3", true, false},
+		{"intermediate failure — revoke (#109)", "1", "1", "3", false, true},
+		{"single-stage success", "1", "1", "1", true, true},
+		{"single-stage failure", "1", "1", "1", false, true},
+		{"non-numeric token ID", "abc", "", "", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -188,9 +155,18 @@ func TestShouldRevokeToken(t *testing.T) {
 				WorkflowStage:      tt.workflowStage,
 				WorkflowStageCount: tt.workflowStageCount,
 			}
-			_, got := shouldRevokeToken(cfg)
-			if got != tt.want {
-				t.Errorf("shouldRevokeToken() = %v, want %v", got, tt.want)
+			_, hasToken := parseHubTokenID(cfg)
+			if !hasToken {
+				if tt.wantRevoke {
+					t.Error("expected revocation but no token ID available")
+				}
+				return
+			}
+			intermediate := isIntermediateWorkflowStage(cfg)
+			shouldRevoke := !(intermediate && tt.stageSucceeded)
+			if shouldRevoke != tt.wantRevoke {
+				t.Errorf("revocation decision = %v, want %v (intermediate=%v, stageSucceeded=%v)",
+					shouldRevoke, tt.wantRevoke, intermediate, tt.stageSucceeded)
 			}
 		})
 	}
