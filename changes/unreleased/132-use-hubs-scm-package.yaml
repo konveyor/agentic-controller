@@ -1,0 +1,7 @@
+kind: enhancement
+description: >
+  Harness git operations (clone, branch, commit, push) now go through
+  Hub's shared scm package instead of the go-git library, reducing
+  duplicate git plumbing across the two codebases. Branch creation stays
+  local-only until a push is warranted, and Push still skips branches
+  with no new commits, preserving the empty-branch litter fix from #114.

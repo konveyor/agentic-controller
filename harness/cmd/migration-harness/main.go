@@ -14,6 +14,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/konveyor/tackle2-hub/shared/scm"
+
 	"github.com/konveyor/migration-harness/internal/acp"
 	"github.com/konveyor/migration-harness/internal/config"
 	"github.com/konveyor/migration-harness/internal/git"
@@ -91,43 +93,41 @@ func runStage(cmd *cobra.Command, args []string) error {
 		logging.Warn("HUB_TOKEN_ID %q is not a valid numeric ID — skipping token revocation", cfg.HubTokenID)
 	}
 
-	creds, err := resolveFromHub(cfg, hubClient)
+	remote, sourceBranch, err := resolveFromHub(cfg, hubClient)
 	if err != nil {
 		return fmt.Errorf("hub resolution: %w", err)
 	}
 
-	if cfg.TargetBranch == creds.Branch {
+	if cfg.TargetBranch == sourceBranch {
 		return fmt.Errorf("TARGET_BRANCH %q must differ from source branch", cfg.TargetBranch)
 	}
-	creds.Branch = cfg.TargetBranch
 
-	// 3. Clone, strip creds, checkout branch
+	// 3. Clone, configure author, checkout branch
 	logging.Header("Git Setup")
-	logging.Info("cloning %s...", creds.RepoURL)
+	logging.Info("cloning %s...", remote.URL)
 
-	repo, err := git.Clone(ctx, creds, cloneDir)
-	if err != nil {
+	scmHome := filepath.Join(os.TempDir(), "scm-home")
+	repo := git.NewRepository(remote, cloneDir, scmHome)
+
+	if err := repo.Fetch(); err != nil {
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	if err := git.ConfigureAuthor(repo); err != nil {
+	if err := repo.ConfigureAuthor("migration-agent", "migration-agent@konveyor.io"); err != nil {
 		return fmt.Errorf("configure git author: %w", err)
 	}
 
-	if err := git.StripCredentials(repo); err != nil {
-		return fmt.Errorf("strip credentials: %w", err)
-	}
 	hub.ClearEnv()
 
-	if err := git.CheckoutBranch(repo, creds.Branch); err != nil {
-		return fmt.Errorf("checkout branch %s: %w", creds.Branch, err)
+	if err := repo.Branch(cfg.TargetBranch); err != nil {
+		return fmt.Errorf("checkout branch %s: %w", cfg.TargetBranch, err)
 	}
-	logging.Ok("cloned to %s, branch %s", cloneDir, creds.Branch)
+	logging.Ok("cloned to %s, branch %s", cloneDir, cfg.TargetBranch)
 
 	// Base of this stage run: everything past this commit is work the run
 	// produced. Push compares HEAD against it so runs that produce no
 	// commits do not create empty remote branches.
-	baseSHA, err := git.HeadSHA(repo)
+	baseSHA, err := repo.HeadSHA()
 	if err != nil {
 		// Fail open — an unknown base must never block a push of real work.
 		logging.Warn("resolve base commit: %v", err)
@@ -175,7 +175,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 		// Only commit when there is actual grounding data (analysis.json);
 		// .gitignore patterns take effect locally without a commit.
 		if wroteAnalysis {
-			if err := git.CommitFiles(repo, []string{
+			if err := repo.CommitAndPush([]string{
 				".gitignore",
 				".konveyor/analysis.json",
 			}, "harness: add grounding data"); err != nil {
@@ -259,7 +259,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 			"entries": []map[string]any{
 				entry("Prepare workspace: clone, branch, grounding data", prep),
 				entry("Agent works the stage task", agentRun),
-				entry(fmt.Sprintf("Push results to branch %s", creds.Branch), finish),
+				entry(fmt.Sprintf("Push results to branch %s", cfg.TargetBranch), finish),
 			},
 		})
 	}
@@ -304,7 +304,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 	// 8. Start filesystem watcher BEFORE blocking prompt
 	pushFn := func() error {
 		_, err := emitPush("git push (auto-commit watcher)", func() (bool, error) {
-			return git.Push(ctx, creds, repo, creds.Branch, baseSHA)
+			return repo.Push(ctx, baseSHA)
 		})
 		return err
 	}
@@ -348,10 +348,8 @@ func runStage(cmd *cobra.Command, args []string) error {
 	}
 
 	// 11. Check for uncommitted work
-	if wt, err := repo.Worktree(); err == nil {
-		if st, err := wt.Status(); err == nil && !st.IsClean() {
-			logging.Warn("worktree dirty at stage end — agent left %d uncommitted paths", len(st))
-		}
+	if dirty, count, err := repo.IsDirty(); err == nil && dirty {
+		logging.Warn("worktree dirty at stage end — agent left %d uncommitted paths", count)
 	}
 
 	// 12. Stop watcher before final push
@@ -366,7 +364,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 	pushCtx, pushCancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer pushCancel()
 	pushed, err := emitPush("git push (final)", func() (bool, error) {
-		return git.Push(pushCtx, creds, repo, creds.Branch, baseSHA)
+		return repo.Push(pushCtx, baseSHA)
 	})
 	if err != nil {
 		emitNotice("stage failed — final push error: %v", err)
@@ -379,11 +377,11 @@ func runStage(cmd *cobra.Command, args []string) error {
 	if stageFailed {
 		switch {
 		case cancelled && pushed:
-			emitNotice("run cancelled by viewer — partial work pushed to branch %s", creds.Branch)
+			emitNotice("run cancelled by viewer — partial work pushed to branch %s", cfg.TargetBranch)
 		case cancelled:
 			emitNotice("run cancelled by viewer — no commits to push")
 		case pushed:
-			emitNotice("stage failed — partial work pushed to branch %s", creds.Branch)
+			emitNotice("stage failed — partial work pushed to branch %s", cfg.TargetBranch)
 		default:
 			emitNotice("stage failed — no commits to push")
 		}
@@ -392,7 +390,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 	}
 	stageSucceeded = true
 	if pushed {
-		emitNotice("stage succeeded — results pushed to branch %s", creds.Branch)
+		emitNotice("stage succeeded — results pushed to branch %s", cfg.TargetBranch)
 	} else {
 		emitNotice("stage succeeded — no changes to push")
 	}
@@ -454,39 +452,45 @@ func discoverSkills() ([]string, error) {
 	return matches, nil
 }
 
-func resolveFromHub(cfg *config.Config, hubClient *hub.Client) (*git.Credentials, error) {
+func resolveFromHub(cfg *config.Config, hubClient *hub.Client) (scm.Remote, string, error) {
 	logging.Header("Hub Resolution")
 
 	appID, err := hub.ParseAppID(cfg.AppID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid APP_ID %q: %w", cfg.AppID, err)
+		return scm.Remote{}, "", fmt.Errorf("invalid APP_ID %q: %w", cfg.AppID, err)
 	}
 
 	app, err := hubClient.FetchApp(appID)
 	if err != nil {
-		return nil, fmt.Errorf("fetch app: %w", err)
+		return scm.Remote{}, "", fmt.Errorf("fetch app: %w", err)
 	}
 	logging.Ok("app: %s (id=%d), repo: %s", app.Name, app.ID, app.Repository.URL)
 
 	identity, err := hubClient.FetchGitCreds(appID)
 	if err != nil {
-		return nil, fmt.Errorf("fetch git creds: %w", err)
+		return scm.Remote{}, "", fmt.Errorf("fetch git creds: %w", err)
 	}
 
-	creds := &git.Credentials{
-		RepoURL: app.Repository.URL,
-		Branch:  app.Repository.Branch,
+	remote := scm.Remote{
+		URL:    app.Repository.URL,
+		Branch: app.Repository.Branch,
 	}
+	sourceBranch := app.Repository.Branch
+
 	if identity != nil {
-		creds.Username = identity.User
-		creds.Token = identity.Password
-		if creds.Username == "" {
-			creds.Username = "x-access-token"
+		user := identity.User
+		if user == "" {
+			user = "x-access-token"
+		}
+		remote.Identity = &scm.Identity{
+			Name:     identity.Name,
+			User:     user,
+			Password: identity.Password,
 		}
 		logging.Ok("git identity: %s", identity.Name)
 	}
 
-	return creds, nil
+	return remote, sourceBranch, nil
 }
 
 // parseHubTokenID extracts the Hub API token ID from config.
