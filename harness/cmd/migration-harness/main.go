@@ -371,11 +371,22 @@ func runStage(cmd *cobra.Command, args []string) error {
 }
 
 func symlinkSkillsDir(cloneDir, skillsSrc string) error {
-	link := filepath.Join(cloneDir, ".agents", "skills")
-	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+	skillsSrc, err := filepath.Abs(skillsSrc)
+	if err != nil {
+		return fmt.Errorf("resolve skills source: %w", err)
+	}
+
+	agentsDir := filepath.Join(cloneDir, ".agents")
+	if info, err := os.Lstat(agentsDir); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink (repo-controlled) — refusing to follow", agentsDir)
+		}
+	}
+
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 		return err
 	}
-	return os.Symlink(skillsSrc, link)
+	return os.Symlink(skillsSrc, filepath.Join(agentsDir, "skills"))
 }
 
 const defaultSkillsDir = "/opt/skills"

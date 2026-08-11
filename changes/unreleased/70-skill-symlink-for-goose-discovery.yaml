@@ -1,6 +1,7 @@
 kind: feature
 description: >
-  Symlink .agents/skills to /opt/skills after clone so goose discovers
+  Symlink .agents/skills to the skills directory (default /opt/skills,
+  configurable via HARNESS_SKILLS_DIR) after clone so goose discovers
   mounted SkillCard content via its native skill platform. Skills are no
   longer injected into the prompt; the agent runtime handles progressive
   disclosure.

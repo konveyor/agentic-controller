@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/konveyor/migration-harness/internal/config"
@@ -92,6 +93,60 @@ func TestSymlinkSkillsDir_AlreadyExists(t *testing.T) {
 	err := symlinkSkillsDir(cloneDir, skillsSrc)
 	if err == nil {
 		t.Fatal("expected error when .agents/skills already exists")
+	}
+}
+
+func TestSymlinkSkillsDir_RejectsSymlinkedAgentsDir(t *testing.T) {
+	cloneDir := t.TempDir()
+	outside := t.TempDir()
+	skillsSrc := t.TempDir()
+
+	if err := os.Symlink(outside, filepath.Join(cloneDir, ".agents")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := symlinkSkillsDir(cloneDir, skillsSrc)
+	if err == nil {
+		t.Fatal("expected error when .agents is a symlink")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("error should mention symlink, got: %v", err)
+	}
+}
+
+func TestSymlinkSkillsDir_ResolvesRelativePath(t *testing.T) {
+	parent := t.TempDir()
+	cloneDir := filepath.Join(parent, "repo")
+	skillsSrc := filepath.Join(parent, "skills")
+	if err := os.MkdirAll(cloneDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(skillsSrc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	relPath, err := filepath.Rel(parent, skillsSrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, _ := os.Getwd()
+	if err := os.Chdir(parent); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	if err := symlinkSkillsDir(cloneDir, relPath); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	link := filepath.Join(cloneDir, ".agents", "skills")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("expected symlink at %s: %v", link, err)
+	}
+	if !filepath.IsAbs(target) {
+		t.Errorf("symlink target should be absolute, got %q", target)
 	}
 }
 
