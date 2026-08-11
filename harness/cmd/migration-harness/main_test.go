@@ -12,12 +12,9 @@ func TestDiscoverSkills_NoSkills(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HARNESS_SKILLS_DIR", dir)
 
-	content, paths, err := discoverSkills()
+	paths, err := discoverSkills()
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
-	}
-	if content != "" {
-		t.Errorf("expected empty content, got: %q", content)
 	}
 	if len(paths) != 0 {
 		t.Errorf("expected no paths, got: %v", paths)
@@ -36,12 +33,9 @@ func TestDiscoverSkills_WithSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	content, paths, err := discoverSkills()
+	paths, err := discoverSkills()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if content != "do the thing" {
-		t.Errorf("expected skill content, got: %q", content)
 	}
 	if len(paths) != 1 {
 		t.Errorf("expected 1 path, got: %v", paths)
@@ -60,15 +54,44 @@ func TestDiscoverSkills_EmptySkillFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	content, paths, err := discoverSkills()
+	paths, err := discoverSkills()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if content != "" {
-		t.Errorf("expected empty content, got: %q", content)
-	}
 	if len(paths) != 1 {
 		t.Errorf("expected 1 path (skill is mounted), got: %v", paths)
+	}
+}
+
+func TestSymlinkSkillsDir(t *testing.T) {
+	cloneDir := t.TempDir()
+	skillsSrc := t.TempDir()
+
+	if err := symlinkSkillsDir(cloneDir, skillsSrc); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	link := filepath.Join(cloneDir, ".agents", "skills")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("expected symlink at %s: %v", link, err)
+	}
+	if target != skillsSrc {
+		t.Errorf("symlink target = %q, want %q", target, skillsSrc)
+	}
+}
+
+func TestSymlinkSkillsDir_AlreadyExists(t *testing.T) {
+	cloneDir := t.TempDir()
+	skillsSrc := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(cloneDir, ".agents", "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := symlinkSkillsDir(cloneDir, skillsSrc)
+	if err == nil {
+		t.Fatal("expected error when .agents/skills already exists")
 	}
 }
 

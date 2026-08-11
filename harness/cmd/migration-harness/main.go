@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -120,7 +119,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 	logging.Ok("cloned to %s, branch %s", cloneDir, creds.Branch)
 
 	// 4. Discover skills early — controls which setup steps run
-	skillContent, skillPaths, err := discoverSkills()
+	skillPaths, err := discoverSkills()
 	if err != nil {
 		return fmt.Errorf("discover skills: %w", err)
 	}
@@ -128,6 +127,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 
 	if hasSkills {
 		if err := git.EnsureGitignore(cloneDir, []string{
+			".agents/",
 			"graphify-out/",
 			".goose/",
 			"__pycache__/",
@@ -139,6 +139,11 @@ func runStage(cmd *cobra.Command, args []string) error {
 		}); err != nil {
 			logging.Warn("gitignore: %v", err)
 		}
+
+		if err := symlinkSkillsDir(cloneDir, skillsDir()); err != nil {
+			return fmt.Errorf("skill symlink: %w", err)
+		}
+		logging.Ok("symlinked %s/.agents/skills → %s", cloneDir, skillsDir())
 	}
 
 	if hasSkills {
@@ -275,7 +280,6 @@ func runStage(cmd *cobra.Command, args []string) error {
 	stagePrompt := prompt.Build(prompt.Layers{
 		AgentPrompt:   cfg.AgentPrompt,
 		WorkflowGuide: cfg.WorkflowGuide,
-		Skill:         skillContent,
 		StageTask:     cfg.StageInstructions,
 	})
 
@@ -366,6 +370,14 @@ func runStage(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func symlinkSkillsDir(cloneDir, skillsSrc string) error {
+	link := filepath.Join(cloneDir, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		return err
+	}
+	return os.Symlink(skillsSrc, link)
+}
+
 const defaultSkillsDir = "/opt/skills"
 
 func skillsDir() string {
@@ -375,30 +387,21 @@ func skillsDir() string {
 	return defaultSkillsDir
 }
 
-func discoverSkills() (string, []string, error) {
+func discoverSkills() ([]string, error) {
 	pattern := filepath.Join(skillsDir(), "*/SKILL.md")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if len(matches) == 0 {
 		logging.Info("no skills found at %s — proceeding without skills", pattern)
-		return "", nil, nil
+		return nil, nil
 	}
 
-	var combined strings.Builder
-	for i, m := range matches {
-		content, err := os.ReadFile(m)
-		if err != nil {
-			return "", nil, fmt.Errorf("read skill %s: %w", m, err)
-		}
+	for _, m := range matches {
 		logging.Info("discovered skill: %s", m)
-		if i > 0 {
-			combined.WriteString("\n\n---\n\n")
-		}
-		combined.Write(content)
 	}
-	return combined.String(), matches, nil
+	return matches, nil
 }
 
 func resolveFromHub(cfg *config.Config, hubClient *hub.Client) (*git.Credentials, error) {
