@@ -65,14 +65,14 @@ func TestDiscoverSkills_EmptySkillFile(t *testing.T) {
 }
 
 func TestSymlinkSkillsDir(t *testing.T) {
-	cloneDir := t.TempDir()
+	homeDir := t.TempDir()
 	skillsSrc := t.TempDir()
 
-	if err := symlinkSkillsDir(cloneDir, skillsSrc); err != nil {
+	if err := symlinkSkillsDir(homeDir, skillsSrc); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	link := filepath.Join(cloneDir, ".agents", "skills")
+	link := filepath.Join(homeDir, ".agents", "skills")
 	target, err := os.Readlink(link)
 	if err != nil {
 		t.Fatalf("expected symlink at %s: %v", link, err)
@@ -82,43 +82,71 @@ func TestSymlinkSkillsDir(t *testing.T) {
 	}
 }
 
-func TestSymlinkSkillsDir_AlreadyExists(t *testing.T) {
-	cloneDir := t.TempDir()
+func TestSymlinkSkillsDir_AlreadyExistsDir(t *testing.T) {
+	homeDir := t.TempDir()
 	skillsSrc := t.TempDir()
 
-	if err := os.MkdirAll(filepath.Join(cloneDir, ".agents", "skills"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(homeDir, ".agents", "skills"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	err := symlinkSkillsDir(cloneDir, skillsSrc)
+	err := symlinkSkillsDir(homeDir, skillsSrc)
 	if err == nil {
-		t.Fatal("expected error when .agents/skills already exists")
+		t.Fatal("expected error when .agents/skills already exists as a directory")
+	}
+	if !strings.Contains(err.Error(), "not a symlink") {
+		t.Errorf("error should mention 'not a symlink', got: %v", err)
 	}
 }
 
-func TestSymlinkSkillsDir_RejectsSymlinkedAgentsDir(t *testing.T) {
-	cloneDir := t.TempDir()
-	outside := t.TempDir()
+func TestSymlinkSkillsDir_Idempotent(t *testing.T) {
+	homeDir := t.TempDir()
 	skillsSrc := t.TempDir()
 
-	if err := os.Symlink(outside, filepath.Join(cloneDir, ".agents")); err != nil {
-		t.Fatal(err)
+	if err := symlinkSkillsDir(homeDir, skillsSrc); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := symlinkSkillsDir(homeDir, skillsSrc); err != nil {
+		t.Fatalf("second call (same target) should be idempotent: %v", err)
 	}
 
-	err := symlinkSkillsDir(cloneDir, skillsSrc)
-	if err == nil {
-		t.Fatal("expected error when .agents is a symlink")
+	link := filepath.Join(homeDir, ".agents", "skills")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("expected symlink at %s: %v", link, err)
 	}
-	if !strings.Contains(err.Error(), "symlink") {
-		t.Errorf("error should mention symlink, got: %v", err)
+	if target != skillsSrc {
+		t.Errorf("symlink target = %q, want %q", target, skillsSrc)
+	}
+}
+
+func TestSymlinkSkillsDir_RelinksOnDifferentTarget(t *testing.T) {
+	homeDir := t.TempDir()
+	oldSrc := t.TempDir()
+	newSrc := t.TempDir()
+
+	if err := symlinkSkillsDir(homeDir, oldSrc); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := symlinkSkillsDir(homeDir, newSrc); err != nil {
+		t.Fatalf("second call (different target): %v", err)
+	}
+
+	link := filepath.Join(homeDir, ".agents", "skills")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("expected symlink at %s: %v", link, err)
+	}
+	if target != newSrc {
+		t.Errorf("symlink target = %q, want %q", target, newSrc)
 	}
 }
 
 func TestSymlinkSkillsDir_ResolvesRelativePath(t *testing.T) {
 	parent := t.TempDir()
-	cloneDir := filepath.Join(parent, "repo")
+	homeDir := filepath.Join(parent, "home")
 	skillsSrc := filepath.Join(parent, "skills")
-	if err := os.MkdirAll(cloneDir, 0o755); err != nil {
+	if err := os.MkdirAll(homeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(skillsSrc, 0o755); err != nil {
@@ -136,11 +164,11 @@ func TestSymlinkSkillsDir_ResolvesRelativePath(t *testing.T) {
 	}
 	defer os.Chdir(oldWd)
 
-	if err := symlinkSkillsDir(cloneDir, relPath); err != nil {
+	if err := symlinkSkillsDir(homeDir, relPath); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	link := filepath.Join(cloneDir, ".agents", "skills")
+	link := filepath.Join(homeDir, ".agents", "skills")
 	target, err := os.Readlink(link)
 	if err != nil {
 		t.Fatalf("expected symlink at %s: %v", link, err)

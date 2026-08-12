@@ -127,7 +127,6 @@ func runStage(cmd *cobra.Command, args []string) error {
 
 	if hasSkills {
 		if err := git.EnsureGitignore(cloneDir, []string{
-			".agents/",
 			"graphify-out/",
 			".goose/",
 			"__pycache__/",
@@ -140,10 +139,14 @@ func runStage(cmd *cobra.Command, args []string) error {
 			logging.Warn("gitignore: %v", err)
 		}
 
-		if err := symlinkSkillsDir(cloneDir, skillsDir()); err != nil {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("resolve home dir: %w", err)
+		}
+		if err := symlinkSkillsDir(home, skillsDir()); err != nil {
 			return fmt.Errorf("skill symlink: %w", err)
 		}
-		logging.Ok("symlinked %s/.agents/skills → %s", cloneDir, skillsDir())
+		logging.Ok("symlinked %s/.agents/skills → %s", home, skillsDir())
 	}
 
 	if hasSkills {
@@ -370,23 +373,32 @@ func runStage(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func symlinkSkillsDir(cloneDir, skillsSrc string) error {
+func symlinkSkillsDir(homeDir, skillsSrc string) error {
 	skillsSrc, err := filepath.Abs(skillsSrc)
 	if err != nil {
 		return fmt.Errorf("resolve skills source: %w", err)
 	}
 
-	agentsDir := filepath.Join(cloneDir, ".agents")
-	if info, err := os.Lstat(agentsDir); err == nil {
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%s is a symlink (repo-controlled) — refusing to follow", agentsDir)
-		}
-	}
-
+	agentsDir := filepath.Join(homeDir, ".agents")
 	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 		return err
 	}
-	return os.Symlink(skillsSrc, filepath.Join(agentsDir, "skills"))
+
+	link := filepath.Join(agentsDir, "skills")
+	if info, err := os.Lstat(link); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			if target, err := os.Readlink(link); err == nil && target == skillsSrc {
+				return nil
+			}
+			if err := os.Remove(link); err != nil {
+				return fmt.Errorf("remove stale symlink %s: %w", link, err)
+			}
+		} else {
+			return fmt.Errorf("%s already exists and is not a symlink", link)
+		}
+	}
+
+	return os.Symlink(skillsSrc, link)
 }
 
 const defaultSkillsDir = "/opt/skills"
