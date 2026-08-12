@@ -1,5 +1,5 @@
 # Example resources for testing the AgentWorkflow + AgentWorkflowRun flow.
-# Migrates the coolstore Java EE app to Quarkus using 3 stages.
+# Migrates the coolstore Java EE app to Quarkus using 4 stages.
 #
 # Prerequisites:
 #   - LLMProvider "gcp-vertex-ai" from resources.yaml
@@ -8,6 +8,24 @@
 # Usage:
 #   kubectl apply -f hack/harness-test/resources.yaml
 #   kubectl apply -f hack/harness-test/workflow-resources.yaml
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: questionnaire
+spec:
+  image: quay.io/konveyor/skills:questionnaire
+  displayName: Questionnaire Stage
+  version: "1.0.0"
+  description: >
+    Detects the source application's tech stack and gathers migration decisions.
+    Produces .konveyor/questionnaire.json consumed by the plan stage.
+  type: skill
+  tags:
+    - migration
+    - questionnaire
+    - detect
 
 ---
 apiVersion: konveyor.io/v1alpha1
@@ -78,6 +96,22 @@ spec:
 apiVersion: konveyor.io/v1alpha1
 kind: Agent
 metadata:
+  name: migration-questionnaire-agent
+spec:
+  image: quay.io/konveyor/agent-java:dev
+  providers:
+    - ref: gcp-vertex-ai
+  skillCards:
+    - ref: questionnaire
+  params:
+    - name: max_turns
+      type: number
+      default: "50"
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
   name: migration-plan-agent
 spec:
   image: quay.io/konveyor/agent-java:dev
@@ -124,9 +158,6 @@ spec:
     - name: max_turns
       type: number
       default: "200"
-    - name: max_fix_iterations
-      type: number
-      default: "3"
 
 ---
 apiVersion: konveyor.io/v1alpha1
@@ -136,12 +167,15 @@ metadata:
 spec:
   guide: "Migrate a Java EE application to Quarkus 3"
   stages:
+    - name: questionnaire
+      agentRef: migration-questionnaire-agent
+      instructions: "Analyze the source application and produce .konveyor/questionnaire.json with detection results and migration decisions."
     - name: plan
       agentRef: migration-plan-agent
-      instructions: "Analyze the project structure using graphify and produce PLAN.md with migration steps"
+      instructions: "Read .konveyor/questionnaire.json, run graphify, produce .konveyor/spec.md and .konveyor/implementation.md with migration steps"
     - name: execute
       agentRef: migration-execute-agent
-      instructions: "Execute each step in PLAN.md to migrate the code from Java EE to Quarkus"
+      instructions: "Execute each step in .konveyor/implementation.md to migrate the code from Java EE to Quarkus"
     - name: verify
       agentRef: migration-verify-agent
       instructions: "Run mvn clean compile, fix any compilation errors, then run tests"

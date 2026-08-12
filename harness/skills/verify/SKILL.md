@@ -1,18 +1,8 @@
 ---
 name: verify
-tags: [stage]
 description: >
-  Builds the project, fixes compiler errors conservatively, then runs
-  runtime verification — health check, smoke tests, log scanning, and
-  clean shutdown. Produces a verification report.
-inputs:
-  - .konveyor/implementation.md
-  - .konveyor/execute.json
-  - modified source files
-  - domain skills
-outputs:
-  - fix patches committed to branch
-  - .konveyor/verify.json
+  Builds the project, fixes compiler errors without changing business logic,
+  runs tests and runtime verification. Produces .konveyor/verify.json.
 ---
 
 # Verify Stage
@@ -130,38 +120,8 @@ Stop the application and verify it shuts down without errors.
 
 You MUST complete this step.
 
-Write `.konveyor/verify.json`:
-
-```json
-{
-  "stage": "verify",
-  "status": "passed|failed",
-  "build": {
-    "status": "passed|failed",
-    "fix_iterations": 0,
-    "remaining_errors": []
-  },
-  "tests": {
-    "status": "passed|failed|skipped",
-    "passed": 0,
-    "failed": 0,
-    "total": 0,
-    "failures": []
-  },
-  "runtime": {
-    "status": "passed|failed|skipped",
-    "health_check": "passed|failed|skipped",
-    "startup_time_ms": 0,
-    "smoke_tests": {
-      "passed": 0,
-      "failed": 0
-    },
-    "log_warnings": [],
-    "clean_shutdown": true
-  },
-  "summary": "<one sentence: build status, test results, runtime status>"
-}
-```
+Write `.konveyor/verify.json`. See [templates/verify.md](templates/verify.md)
+for the output format and field definitions.
 
 Top-level `status` is `passed` only if build passes. Test and runtime failures
 are documented but do not block the stage.

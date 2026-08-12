@@ -1,16 +1,8 @@
 ---
 name: execute
-tags: [stage]
 description: >
   Reads the implementation plan and executes migration steps phase by phase.
-  Runs the build gate after each phase, fixes compiler errors before proceeding.
-inputs:
-  - .konveyor/implementation.md
-  - .konveyor/questionnaire.json
-  - domain skills
-outputs:
-  - modified source files
-  - .konveyor/execute.json
+  Commits after each step. Does not build, test, or push — that is the verify stage's job.
 ---
 
 # Execute Stage
@@ -26,9 +18,6 @@ phases. Runs the build gate after each phase and fixes errors before moving on.
 2. Scan `/opt/skills/` for skills with `tags: [domain]` in their frontmatter
 3. Read the domain skill's phases, modules, and references
 4. Read `.konveyor/questionnaire.json` for context on decisions made
-
-If `.konveyor/execute.json` already exists with `status: "aborted"`, this is a
-resume — see the Resume section below.
 
 ---
 
@@ -48,16 +37,11 @@ and run the build after all steps are complete.
 4. Write the modified file
 5. Commit:
    ```bash
-   git add -A && git commit -m "Step <N>: <short description>"
+   git add <path_to_file> && git commit -m "Step <N>: <short description>"
    ```
 6. Record step status as `applied` with the commit hash
 7. If the step cannot be applied (file missing, transformation impossible):
    record step status as `failed` with the error, and continue to the next step
-
-### Resume
-
-If `.konveyor/execute.json` already exists, check for steps already marked
-`applied` — do not re-run them. Continue from the first pending step.
 
 ---
 
@@ -65,23 +49,8 @@ If `.konveyor/execute.json` already exists, check for steps already marked
 
 You MUST complete this step.
 
-Write `.konveyor/execute.json`:
-
-```json
-{
-  "status": "completed",
-  "steps": [
-    {
-      "id": 1,
-      "file": "<path>",
-      "action": "MODIFY|CREATE|DELETE",
-      "status": "applied|failed",
-      "commit": "<hash or null>",
-      "error": "<error message or null>"
-    }
-  ]
-}
-```
+Write `.konveyor/execute.json`. See [templates/execute.md](templates/execute.md)
+for the output format and field definitions.
 
 Commit:
 
