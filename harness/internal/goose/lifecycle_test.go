@@ -27,6 +27,16 @@ func TestProviderEnvGoogle(t *testing.T) {
 	assertEnvNotPresent(t, env, "ANTHROPIC_API_KEY")
 }
 
+func TestProviderEnvAWSBedrock(t *testing.T) {
+	env, _ := providerEnv("aws-bedrock", "anthropic.claude-sonnet-4.5-20250929-v1:0", "unused-key", "https://bedrock-runtime.us-east-1.amazonaws.com")
+	assertEnvContains(t, env, "GOOSE_PROVIDER", "aws_bedrock")
+	assertEnvContains(t, env, "GOOSE_MODEL", "anthropic.claude-sonnet-4.5-20250929-v1:0")
+	assertEnvNotPresent(t, env, "ANTHROPIC_API_KEY")
+	assertEnvNotPresent(t, env, "OPENAI_API_KEY")
+	assertEnvNotPresent(t, env, "ANTHROPIC_HOST")
+	assertEnvNotPresent(t, env, "OPENAI_HOST")
+}
+
 func TestProviderEnvNormalizesHyphens(t *testing.T) {
 	env, _ := providerEnv("gcp-vertex-ai", "", "", "")
 	assertEnvContains(t, env, "GOOSE_PROVIDER", "gcp_vertex_ai")

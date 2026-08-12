@@ -214,6 +214,8 @@ func providerEnv(provider, model, apiKey, endpoint string) (env []string, tempDi
 			env = append(env, "GOOGLE_API_KEY="+apiKey)
 		case "gcp_vertex_ai":
 			// uses ADC credentials, not an API key
+		case "aws_bedrock":
+			// uses AWS SDK credentials, not an API key
 		default:
 			logging.Warn("unmapped provider %q — API key not forwarded to goose", p)
 		}
@@ -241,6 +243,8 @@ func providerEnv(provider, model, apiKey, endpoint string) (env []string, tempDi
 			env = append(env, "OPENAI_HOST="+endpoint)
 		case "gcp_vertex_ai":
 			// endpoint configured via ADC project/region, not env var
+		case "aws_bedrock":
+			// endpoint derived from AWS_REGION by the AWS SDK
 		default:
 			logging.Warn("unmapped provider %q — endpoint not forwarded to goose", p)
 		}
