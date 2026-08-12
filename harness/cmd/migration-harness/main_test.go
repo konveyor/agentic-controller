@@ -178,7 +178,6 @@ func TestSymlinkSkillsDir_ResolvesRelativePath(t *testing.T) {
 	}
 }
 
-func TestShouldRevokeToken(t *testing.T) {
 func TestParseHubTokenID(t *testing.T) {
 	tests := []struct {
 		name       string
