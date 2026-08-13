@@ -1,7 +1,8 @@
 # ADR 0014: Skill Loading and Prompt Assembly
 
-**Status:** proposed — refines the prompt-assembly step of ADR 0007;
-ADR 0007's decisions themselves stand
+**Status:** proposed — refines the prompt-assembly step of ADR 0007, and
+supersedes the runtime-discovery claim in ADR 0001 (its mount-path
+decision stands); ADR 0007's decisions themselves stand
 **Date:** 2026-08-11
 **Authors:** Fabian von Feilitzsch
 
@@ -102,15 +103,21 @@ controller passes their names to the harness in `KONVEYOR_RULES`, and the
 harness concatenates those skills' `SKILL.md` into the prompt, after its
 own staging rules and before the stage task.
 
+`KONVEYOR_RULES` is a comma-separated list of SkillCard names, matching
+the mount directory under `/opt/skills`. Names are Kubernetes object
+names, so no escaping is needed. Unset and empty both mean there are no
+rules — the harness injects nothing.
+
 Rules are therefore both injected and discoverable: unconditionally in
 the prompt, and still under the linked root, so a rule that ships
 supporting files keeps them.
 
-Component skew has a defined direction. With `KONVEYOR_RULES` unset the
-harness injects every discovered skill, which is exactly today's
-behaviour, so a new harness against an old controller degrades to the
-status quo rather than silently dropping rules. An empty value means
-there are none.
+Because unset means no rules, the two changes have a required order: the
+controller must set `KONVEYOR_RULES` before or in the same release as the
+harness stops concatenating everything. A harness that ships first reads
+an unset variable, injects nothing, and every rule silently stops
+reaching the prompt. That is the failure this ADR exists to prevent, so
+it is a sequencing constraint rather than a preference.
 
 Rules are then the only always-loaded content, which is the quantity
 `Gateway.ContextWindow`'s doc comment describes. This ADR does not
@@ -123,6 +130,28 @@ skill that might not be loaded is not a driver, so an Agent whose stage
 depends on one declares it `type: rule`. ADR 0007's stage/domain split
 describes what a skill *is*; `type` describes when it is *loaded*. They
 are different axes, and a stage skill is normally both.
+
+Measured on #136, running the five-stage workflow in Kind against
+`savitharaghunathan/coolstore#17`, this is worse than the ADR first
+assumed. Two distinct failures showed up:
+
+- With generic stage instructions ("Scan the project and gather
+  migration decisions") the agent never called `load_skill` at all and
+  produced a free-form `questionnaire.json` ignoring the skill's schema.
+  Naming the skill in the stage instructions fixed it.
+- The plan stage *did* load its skill and read every reference, and
+  still wrote `PLAN.md` at the repo root instead of the
+  `.konveyor/spec.md` and `.konveyor/implementation.md` the skill
+  mandates — even though the skill says "MUST" and "the stage is NOT
+  complete until both files are written".
+
+So loading is not the only thing at stake: a skill's output contract was
+not reliably followed even once the content was in front of the model.
+Why that is has not been established, and this ADR does not claim a
+mechanism. What it changes is the strength of the recommendation. Naming
+the skill in the stage instructions is the cheap first move and is what
+unblocked the run; `type: rule` is the durable one for anything whose
+output another stage consumes.
 
 Being a rule is also the only defence against a target repository
 shadowing a mounted skill by name, since the harness reads rules from the
@@ -148,7 +177,16 @@ ignores `KONVEYOR_RULES`.
 - Harness. Inject the skills named in `KONVEYOR_RULES` as a rules layer,
   ordered after the staging rules and before the stage task.
 - Controller. Set `KONVEYOR_RULES` from the `type` of each resolved
-  SkillCard. `resolveSkillVolumes` ignores `spec.type` today.
+  SkillCard, comma-separated. `resolveSkillVolumes` ignores `spec.type`
+  today. This has to land before or with the harness change above —
+  unset means no rules, so the reverse order drops every rule silently.
+- Harness. After cloning, log any skill name present in both the clone's
+  discovery roots (`.agents/skills`, `.goose/skills`, `.claude/skills`)
+  and `/opt/skills`. The repo copy wins and that is not going to change,
+  so the point is that the run says so.
+- Stage instructions. Name the skill a stage depends on
+  ("Load the `questionnaire` skill and follow its instructions"). Cheaper
+  than retyping the card and it is what fixed the #136 run.
 - Skills. Replace container-layout globs with relative paths. Six hits
   across four files: `skills/execute/SKILL.md` (17, 24),
   `skills/verify/SKILL.md` (16, 42), `skills/plan/SKILL.md` (101) and
@@ -186,9 +224,18 @@ ignores `KONVEYOR_RULES`.
 - Migration is silent. Existing cards relied on as constraints degrade to
   on-demand with no error, no condition and no spec diff. Retyping them
   is a prerequisite, not a follow-up.
-- A target repository containing `.agents/skills`, `.goose/skills` or
-  `.claude/skills` shadows mounted skills by name, because project roots
-  are scanned first, and nothing reports it.
+- The cloned repository is outside the trust boundary. It is user-owned
+  code the platform did not review, and native discovery gives it a way
+  to influence the run that it did not have while the harness only read
+  `/opt/skills`: a repository containing `.agents/skills`,
+  `.goose/skills` or `.claude/skills` shadows a mounted skill of the same
+  name, because project roots are scanned first. Deliberate or accidental
+  looks identical from inside the pod. For `type: rule` this is closed —
+  the harness reads rules from the mount by name and never through
+  discovery. For `type: skill` it is open by construction, so the harness
+  logs any name that appears in both the clone and the mount, which makes
+  it visible in the run rather than silent. Anything load-bearing belongs
+  in a rule.
 - Discovery paths and the skills extension are goose internals, not a
   stable interface. A goose bump has to re-verify them; the kill switch
   and the CI check are the mitigation.
@@ -356,9 +403,14 @@ fan-out. One sentence of it is not true of goose, at line 106: "The agent
 runtime points at `/opt/skills/` and discovers all skills regardless of
 source." No runtime points there by default, which is the whole reason
 the harness has to link the mount into a root the runtime does scan.
-Nothing else in ADR 0001 is affected — the mount path it decides is the
-one this ADR keeps, and `README.md:23` documents that path rather than
-the discovery claim — so this ADR does not supersede it.
+
+**This ADR supersedes that sentence.** It is a factual correction, not a
+reversal: ADR 0001 is immutable and its text stays as written, but a
+reader arriving at line 106 should follow the Status line here rather
+than build against a discovery behaviour no runtime has. Nothing else in
+ADR 0001 is affected — the mount path it decides is the one this ADR
+keeps, and `README.md:23` documents that path rather than the discovery
+claim.
 
 ADR 0010 (Skill Content Boundary, proposed in #108) rules that a skill
 must not perform "filesystem discovery that depends on container layout
@@ -369,6 +421,6 @@ Injection is *why* those globs exist: the harness injects `SKILL.md` and
 nothing else, so a skill that ships `references/` has no supported way to
 reach them and reaches for `ls`. Native loading removes the motive, so
 skills can use plain relative references and stay ignorant of container
-layout, which is what 0010 is asking for. If both are accepted, 0010's
-"immediate changes" list should read: remove the `/opt/skills` globs in
-favour of relative paths, rather than in favour of harness injection.
+layout, which is what 0010 is asking for. #108 has since updated 0010's
+"immediate changes" list to drop the globs in favour of relative paths
+and to reference this ADR, so the two no longer disagree.
