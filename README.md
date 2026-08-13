@@ -41,6 +41,12 @@ CI pipeline) resolves application metadata before creating the CR.
 
 See `docs/adr/` for the full set of architecture decision records.
 
+## Getting started
+
+See [docs/getting-started.md](docs/getting-started.md) for a
+step-by-step guide to deploying the controller, configuring a Gateway
+with LLM credentials, and creating your first AgentRun.
+
 ## Project structure
 
 ```

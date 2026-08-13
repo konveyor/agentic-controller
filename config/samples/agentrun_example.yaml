@@ -1,0 +1,33 @@
+# Example AgentRun — triggers execution of an Agent.
+#
+# An AgentRun is immutable once created. To change values, delete
+# and recreate the AgentRun.
+#
+# Prerequisites:
+#   - The referenced Agent CR (e.g. agent_example.yaml)
+#   - The Gateway selected here must be in the Agent's gateway list
+apiVersion: konveyor.io/v1alpha1
+kind: AgentRun
+metadata:
+  name: migration-run-001
+spec:
+  # Reference to the Agent to execute.
+  agentRef: migration-agent
+
+  # Select which gateway (provider/model) to use for this run.
+  # Must be one of the gateways declared on the Agent.
+  # Note: Agent uses `gateways: [{ref: name}]` (a list of refs)
+  # because it declares multiple available options. AgentRun uses a
+  # bare string because it selects exactly one.
+  gateway: gcp-vertex-ai
+
+  # Supply values for the Agent's declared parameters.
+  params:
+    - name: source_url
+      value: "https://github.com/konveyor-ecosystem/coolstore.git"
+
+  # Task-specific instructions for this run. Composed with the
+  # Agent's prompt at execution time.
+  instructions: |
+    Focus on the EJB-to-CDI migration first. Run mvn compile after
+    each major change to catch errors early.
