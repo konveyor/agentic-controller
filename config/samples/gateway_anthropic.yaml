@@ -1,0 +1,19 @@
+# Gateway for Anthropic (direct API).
+#
+# Prerequisites — create a Secret with your real API key:
+#   kubectl create secret generic anthropic-credentials \
+#     --from-literal=api-key="<your-anthropic-api-key>"
+apiVersion: konveyor.io/v1alpha1
+kind: Gateway
+metadata:
+  name: anthropic
+spec:
+  provider: anthropic
+  endpoint: "https://api.anthropic.com"
+  credentialRef:
+    secretName: anthropic-credentials
+    key: api-key
+  model:
+    name: claude-sonnet-4-5-20250929
+    contextWindow: 200000
+    tier: premium

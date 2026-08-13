@@ -28,9 +28,9 @@ func TestProviderEnvGoogle(t *testing.T) {
 }
 
 func TestProviderEnvAWSBedrock(t *testing.T) {
-	env, _ := providerEnv("aws-bedrock", "anthropic.claude-sonnet-4.5-20250929-v1:0", "unused-key", "https://bedrock-runtime.us-east-1.amazonaws.com")
+	env, _ := providerEnv("aws-bedrock", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "unused-key", "https://bedrock-runtime.us-east-1.amazonaws.com")
 	assertEnvContains(t, env, "GOOSE_PROVIDER", "aws_bedrock")
-	assertEnvContains(t, env, "GOOSE_MODEL", "anthropic.claude-sonnet-4.5-20250929-v1:0")
+	assertEnvContains(t, env, "GOOSE_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
 	assertEnvNotPresent(t, env, "ANTHROPIC_API_KEY")
 	assertEnvNotPresent(t, env, "OPENAI_API_KEY")
 	assertEnvNotPresent(t, env, "ANTHROPIC_HOST")

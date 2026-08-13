@@ -1,0 +1,19 @@
+# Gateway for OpenAI.
+#
+# Prerequisites — create a Secret with your real API key:
+#   kubectl create secret generic openai-credentials \
+#     --from-literal=api-key="<your-openai-api-key>"
+apiVersion: konveyor.io/v1alpha1
+kind: Gateway
+metadata:
+  name: openai
+spec:
+  provider: openai
+  endpoint: "https://api.openai.com"
+  credentialRef:
+    secretName: openai-credentials
+    key: api-key
+  model:
+    name: gpt-4o
+    contextWindow: 128000
+    tier: premium

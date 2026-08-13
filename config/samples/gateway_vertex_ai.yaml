@@ -1,0 +1,21 @@
+# Gateway for GCP Vertex AI with Claude.
+#
+# Prerequisites:
+#   kubectl create secret generic vertex-credentials \
+#     --from-file=GOOGLE_APPLICATION_CREDENTIALS_JSON="$HOME/.config/gcloud/application_default_credentials.json"
+#
+# The credential Secret uses envFrom (no key field) because Vertex AI
+# requires GOOGLE_APPLICATION_CREDENTIALS_JSON as an env var name.
+apiVersion: konveyor.io/v1alpha1
+kind: Gateway
+metadata:
+  name: gcp-vertex-ai
+spec:
+  provider: gcp-vertex-ai
+  endpoint: "https://global-aiplatform.googleapis.com"
+  credentialRef:
+    secretName: vertex-credentials
+  model:
+    name: claude-sonnet-4-5@20250929
+    contextWindow: 200000
+    tier: premium
