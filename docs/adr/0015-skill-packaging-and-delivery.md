@@ -3,14 +3,13 @@
 **Status:** proposed. Supersedes two parts of ADR 0001, its *Skill and rule
 packaging via skillimage* section and its rejection of runtime git sync, and
 revises where ADR 0014 sources its rules list. ADR 0001's *Skill mounting:
-one directory* stands and is the contract everything here preserves. One
-question is left open: whether a SkillCard may demote a skill that declares
-itself a rule.
+one directory* stands and is the contract everything here preserves. Two
+questions about SkillCollection are left open at the end.
 **Date:** 2026-08-13
 **Authors:** Fabian von Feilitzsch
 
 > Numbering note: 0009 through 0013 merged while this was being written
-> (#106, #108), 0014 is claimed by the open #135, and a second 0007 exists
+> (#106, #108), 0014 is claimed by the open #138, and a second 0007 exists
 > on the unmerged `skill-exec-probe` branch. 0015 is the next free number.
 
 > Implementation note: this ADR lands on its own. A working prototype exists
@@ -67,31 +66,68 @@ the only skill metadata, which is what every shipped skill already had.
 Konflux. Signing, provenance and mirroring come from the same image pipeline
 as everything else we ship.
 
-### 3. One image may carry one skill or many, and the shape is detected
+### 3. An image may hold several skills; a SkillCard still means one
 
-`SKILL.md` at the image root means a single skill. Otherwise every immediate
-subdirectory holding a `SKILL.md` is a skill. No new CRD field, no manifest
-inside the image, no format to version: the layout already says which it is.
+An image is free to contain several skill directories. That is a fact about
+an artifact, not a concept the domain needs a name for, and this ADR
+deliberately does not introduce one. `SKILL.md` at the image root means the
+image is one skill; otherwise every immediate subdirectory holding a
+`SKILL.md` is one. The layout says which, so there is no new CRD field, no
+manifest inside the image and no format to version.
 
-This repo's skills ship as one bundle image, so `skills/` has one
-Containerfile and one CI job. A third party shipping a single-skill image
-works identically.
+A **SkillCard is always one skill.** Against an image holding several, it
+selects with `subPath`, the same field a git source already uses:
 
-A skill is exactly one directory deep, so a directory of directories is not a
-bundle and its contents are not skills. `COPY plan/ /` also copies plan's
-*contents* to the root, so each destination is named explicitly or every skill
-collapses into one.
+```yaml
+spec: {image: quay.io/konveyor/skills:latest, subPath: plan, type: rule}
+spec: {image: quay.io/konveyor/skills:latest, subPath: javaee-to-quarkus}
+```
+
+A card that resolves to more than one skill without a `subPath` is an error
+naming what it found, rather than quietly becoming several skills.
+
+This is what lets us publish one image for all of our skills while still
+referencing them individually, and it is why `type` can stay a per-skill
+field on the CRD (decision 8) instead of moving into skill content.
+
+**Packaging and grouping are independent axes**, which is why an image
+holding several skills is not a SkillCollection by another name:
+
+- **Packaging** is how many skills ride in one artifact. It governs what
+  gets built, signed, mirrored, pulled and versioned, and is owned by
+  whoever builds the image.
+- **Grouping** is which skills an Agent gets from one reference. It is
+  cluster configuration, owned by whoever runs the cluster. This is what
+  `SkillCollection` already means in CONTEXT.md.
+
+They vary independently both ways: a collection can list skills from three
+vendors' images, and an Agent can want one skill out of a four-skill image.
+Merging them would force lockstep versioning on skills that do not need it,
+let a vendor's packaging decide an operator's grouping, make "two of these
+four" impossible without forking the image, and force one load policy across
+a whole source.
+
+Selecting a single layer would be another way in, but is not available:
+`ImageVolumeSource` exposes only `reference` and `pullPolicy`, and mounts the
+flattened filesystem.
+
+Mechanical note: `COPY plan/ /` copies plan's *contents* to the root, so each
+destination is named explicitly or every skill collapses into one.
 
 ### 4. Nothing is built in-cluster at reconcile time
 
-| `spec` | delivery | who builds |
-| --- | --- | --- |
-| `image` | ImageVolume, staged read-only | the author, ahead of time |
-| `inline` | ConfigMap the AgentRun controller creates | nobody, the bytes are in etcd |
-| `source` | the loader clones at pod start | nobody |
+| `spec` | selects with | delivery | who builds |
+| --- | --- | --- | --- |
+| `image` | `subPath` | ImageVolume, staged read-only | the author, ahead of time |
+| `inline` | n/a, one skill | ConfigMap the AgentRun controller creates | nobody, the bytes are in etcd |
+| `source` | `ref`, `subPath` | the loader clones at pod start | nobody |
 
 The controller gains no builder, registry, push credentials or network egress.
-`status.resolvedImage` is meaningful only for `image`.
+
+`status.resolvedImage` is meaningful only for `image`, so a reader cannot tell
+"not resolved yet" from "resolved, just not to an image". `status.deliveryMode`
+carries `image`, `inline` or `source` so the resolved state is observable
+without inferring it from an empty field.
 
 ### 4a. Git resolves at pod start, superseding ADR 0001's rejection
 
@@ -134,10 +170,14 @@ assembly and validation. It is a subcommand of the harness binary already in
 `agent-base`, running the agent's own image, so it adds no image to build,
 version, sign or mirror.
 
+Two cards selecting different skills out of one image share its pull, and
+stage under their own names:
+
 ```yaml
 volumes:
   skills            emptyDir {}                          -> /opt/skills                 (agent, ro)
-  skill-konveyor    image: quay.io/konveyor/skills:latest -> /opt/skills-src/konveyor    (ro)
+  skill-plan        image: quay.io/konveyor/skills:latest -> /opt/skills-src/plan        (ro)
+  skill-javaee      image: quay.io/konveyor/skills:latest -> /opt/skills-src/javaee      (ro)
   skill-house-rules configMap: <run>-skill-house-rules    -> /opt/skills-src/house-rules (ro)
 
 initContainers:
@@ -147,40 +187,44 @@ initContainers:
     env:
       - name: KONVEYOR_SKILL_SOURCES
         value: >
-          [{"name":"konveyor"},
+          [{"name":"plan","subPath":"plan","type":"rule"},
+           {"name":"javaee","subPath":"javaee-to-quarkus"},
            {"name":"house-rules"},
            {"name":"vendor","type":"rule",
-            "git":{"url":"https://example.com/vendor.git","ref":"v2.1.0","subPath":"skills"}}]
+            "git":{"url":"https://example.com/vendor.git","ref":"v2.1.0","subPath":"skills/x"}}]
 ```
+
+That env var is the whole channel from the CRs to the pod: name, `type`, the
+`subPath` selecting one skill, and for git the URL and ref. No skill
+configuration reaches the pod any other way. The loader works from the
+declaration rather than from what it finds staged, so an unexpected directory
+cannot become skills and a promised-but-undelivered source is an error. With
+no declaration it falls back to scanning, which keeps the command usable by
+hand.
 
 Staged sources are visible only to the loader; the agent sees the assembled
-root and nothing else. The inline ConfigMap is named for the run as well as
-the SkillCard and owned by the run, because two runs sharing one would let the
-second rewrite the owner reference and its deletion collect the ConfigMap out
-from under the first.
+root and nothing else. A skill selected from inside an image is flattened, so
+`/opt/skills/{name}/SKILL.md` stays literally true rather than widening to
+`/opt/skills/**/SKILL.md` for a runtime less forgiving than goose, whose
+discovery walks each root recursively. The inline ConfigMap is named for the
+run as well as the SkillCard and owned by the run, because two runs sharing
+one would let the second rewrite the owner reference and its deletion collect
+the ConfigMap out from under the first.
 
-Bundles are flattened during assembly. goose does not need this, since its
-discovery walks each root recursively (ADR 0014's appendix); it keeps
-`/opt/skills/{name}/SKILL.md` literally true rather than quietly widening to
-`/opt/skills/**/SKILL.md` for a less forgiving runtime.
+The loader also writes `/opt/skills/.konveyor-skills.json`, recording each
+skill's name, description, type and source plus the rules list. A dotfile,
+since runtimes discover by looking for `SKILL.md`. It saves the harness a walk
+and gives ADR 0014's repo-shadowing check a record to compare against.
 
-The destination stays `/opt/skills`, which no runtime reads by default. ADR
-0014 does not move the mount to fix that: the harness links `~/.agents/skills`
-at it, and 0014 rejects mounting ImageVolumes at the goose path because it
-"bakes a goose-specific convention into the controller". `/opt/skills` is the
-filesystem contract; teaching a runtime where to find it is harness work, so a
-second runtime is a harness change.
-
-The loader cannot own that link. An init container and the agent container
-share only the volumes both are given, and `$HOME` is in the image:
-
-```
-init:   ln -sfn /opt/skills ~/.agents/skills   ->  skills -> /opt/skills
-agent:  ls ~/.agents/                          ->  No such file or directory
-```
-
-Making it survive needs a shared volume at a goose- and image-specific path,
-handing the controller the runtime knowledge 0014 refused it.
+No runtime reads `/opt/skills` by default, and ADR 0014 does not move the
+mount to fix that: the harness links `~/.agents/skills` at it, and 0014
+rejects mounting ImageVolumes at the goose path because that "bakes a
+goose-specific convention into the controller". The loader cannot own that
+link either, since an init container and the agent container share only the
+volumes both are given and `$HOME` is in the image (measured: the link exists
+in init, and the agent gets "No such file or directory"). So teaching a
+runtime where to find the mount stays harness work, and a second runtime is a
+harness change.
 
 ### 6. Validation lives where the bytes are
 
@@ -196,6 +240,29 @@ that is right and is what happens. For image and git it needs a registry
 client, pull secrets and egress in the reconciler, and even then proves only
 that the ref resolves, not that the skill is usable.
 
+**The rules are the Agent Skills spec's, not ours.** `name` is 1-64
+characters, lowercase alphanumerics and single hyphens, no leading or
+trailing hyphen, and must match its directory name; `description` is 1-1024
+and non-empty. The prototype's validator is looser than that, allowing
+uppercase, `_` and `.`, and will be tightened to match. The directory rule is
+satisfied by construction, since decision 7 assembles each skill under its
+own frontmatter name.
+
+**One implementation, four callers.** The controller, the loader, CI and an
+author checking a skill before publishing all apply the same rules, so they
+belong in a shared package rather than the two copies the prototype has. The
+plumbing is real: `harness/` is a separate Go module, so the package needs a
+home both modules can depend on. That is worth doing rather than deferring,
+because "the looser of the two" drifting is the validation gap ADR 0014
+flags as load-bearing.
+
+The fourth caller is worth naming as intended scope: now that anyone can
+build a skill image with a plain Containerfile, the low barrier to building
+one raises the value of an easy way to check it. A standalone
+`konveyor-skills validate <dir>`, installable with `go install`, gives an
+external author the same answer the loader would give them at pod init,
+before they publish rather than after.
+
 ### 7. A skill's directory is its frontmatter name; collisions are errors
 
 ADR 0014 records "two namespaces for one name": the controller dedupes by
@@ -209,51 +276,47 @@ when those differ. A genuine duplicate then fails the pod, naming both
 origins. This replaces `resolveSkillVolumes`'s `seen[name]` first-wins dedup,
 which silently dropped the loser.
 
-### 8. A skill declares its own `type`; a SkillCard may override it
+### 8. `type` stays on the CRD; skill content never declares it
 
-This revises ADR 0014, where `KONVEYOR_RULES` is "a comma-separated list of
-SkillCard names" set by the controller from `spec.type`. That cannot work for
-a bundle: one card yields several skills named by directories inside the
-image, which the controller never sees.
+An earlier draft moved `type` into `SKILL.md` frontmatter, because a card
+covering a whole multi-skill image could not say which of its skills was a
+rule. Decision 3 removes that pressure: a SkillCard selects one skill with
+`subPath`, so `spec.type` is per-skill again and needs no new home.
 
-So `type` becomes a frontmatter key and the author's answer is the default.
-Frontmatter is extensible; `skills/javaee-to-quarkus/SKILL.md` already carries
-non-standard `license:` and `metadata:` keys.
+Putting it in frontmatter would also have broken the standard this ADR
+adopts. The Agent Skills spec defines a closed set of top-level frontmatter
+fields, and its reference validator treats anything else as an error:
 
-`SkillCardSpec.Type` keeps a job rather than going inert: a load policy the
-operator imposes on every skill that source contributes. That is the tool for
-promoting somebody else's bundle without editing skills you do not own, and it
-works because it never has to name the skills it applies to.
+```python
+# skills-ref/src/skills_ref/validator.py
+extra_fields = set(metadata.keys()) - ALLOWED_FIELDS
+if extra_fields:
+    errors.append(f"Unexpected fields in frontmatter: ...")
+```
 
-For that to mean anything, `+kubebuilder:default=skill` is removed, so "the
-operator chose on-demand" is distinguishable from "the operator said nothing".
-A defaulted field would silently demote every bundle whose frontmatter
-declares a rule, which is the degradation ADR 0014 warns about. The loader
-logs any override that contradicts a skill's own declaration. As implemented
-the override runs both ways; whether it should is left open below.
+`ALLOWED_FIELDS` is `name`, `description`, `license`, `compatibility`,
+`allowed-tools`, `metadata`. A top-level `type:` therefore fails
+`skills-ref validate`, so decision 1 and decision 6 would have contradicted
+each other: we would validate skills against a spec our own skills violate.
+The only compliant home is a key under `metadata`, which every other client
+ignores. Correcting an error in the earlier draft: it cited `license` and
+`metadata` as precedent for non-standard keys, but both are standard fields,
+so there was no precedent.
 
-This also removes a hazard 0014 raises against itself, that a harness shipping
-before the controller reads an unset variable and "every rule silently stops
-reaching the prompt". Loader and harness are one binary in one image, so no
-release ordering remains to get wrong.
+Keeping `type` on the CRD also keeps it validated by the API server,
+observable in `kubectl get skillcards`, and settable without editing content
+somebody else owns. `+kubebuilder:default=skill` stays, since a card is one
+skill and defaulting says nothing surprising.
 
-### 8a. The controller declares the source list
-
-`KONVEYOR_SKILL_SOURCES` carries every source as JSON: name, load-policy
-override, and for git the URL, ref and subPath. It is the whole channel from
-the CRs to the pod; there is no second env var or annotation. The loader works
-from the declaration rather than from what it finds staged, so an unexpected
-directory cannot become skills and a promised-but-undelivered source is an
-error. With no declaration it falls back to scanning, which keeps the command
-usable by hand.
-
-### 9. The loader records what it assembled
-
-`/opt/skills/.konveyor-skills.json` lists every skill with its name,
-description, type and originating source, plus the rules list. A dotfile,
-since runtimes discover by looking for `SKILL.md`. It gives the harness the
-rules list without re-walking, and gives 0014's repo-shadowing check a record
-to compare against rather than a second walk.
+This still revises ADR 0014's `KONVEYOR_RULES`, which is "a comma-separated
+list of SkillCard names, matching the mount directory under `/opt/skills`".
+The mount directory is the skill's frontmatter name (decision 7), and for a
+single-skill image nothing outside the image knows that name, so the
+controller cannot compose the list. It forwards each source's `type` and the
+loader resolves names to it, which also removes a hazard 0014 raises against
+itself: a harness shipping before the controller would read an unset variable
+and "every rule silently stops reaching the prompt". Loader and harness are
+one binary in one image, so no release ordering remains to get wrong.
 
 ## The probe
 
@@ -261,10 +324,9 @@ Measured on minikube, CRI-O 1.35.0, Kubernetes v1.34.0, ImageVolume gate
 enabled: the rig the exec probe used. The prototype ships a script that
 re-answers all four questions on any cluster.
 
-An image bundle of four skills, one inline ConfigMap and one git clone with a
-`subPath`, together. The git source carries `type: rule` and `grill-me`
-declares no type, so this is the source-level override landing on a skill the
-controller never saw:
+A four-skill image, one inline ConfigMap and one git clone with a `subPath`,
+together. The git source's card carries `type: rule`, so its skill is
+always-loaded while the image's are not:
 
 ```
 [ok] grill-me (rule) from acme
@@ -279,19 +341,11 @@ always-loaded rules: [grill-me house-rules]
 The agent container then saw all six at `/opt/skills/{name}/SKILL.md`, exactly
 one level deep, with `javaee-to-quarkus/references/` intact.
 
-Two failure paths, both ending in pod phase `Failed` with the agent container
-never started:
-
-```
-skill assembly failed: 1 unusable skill(s):
-  broken: no YAML frontmatter: file does not start with ---
-
-skill assembly failed: 1 unusable skill(s):
-  duplicate skill name "plan": acme and konveyor/plan
-```
-
-Fourth: an init container's `$HOME` does not reach the agent container, quoted
-under decision 5.
+Both failure paths end in pod phase `Failed` with the agent container never
+started: a skill with no frontmatter, and a name collision, which reports
+`duplicate skill name "plan": acme and konveyor/plan`. The fourth measurement,
+that an init container's `$HOME` does not reach the agent container, is under
+decision 5.
 
 Not measured: a full AgentRun through the controller against a live model. The
 probe drives the pod shape the controller generates and envtest covers the
@@ -299,13 +353,15 @@ controller, but the two have not been run end to end together.
 
 ## Consequences
 
-- **Bundle skill names come from inside the image.** A SkillCard's
+- **A skill's directory comes from its own content.** A SkillCard's
   `metadata.name` labels the staging directory and appears in diagnostics; it
-  no longer decides where skills land.
-- **Bundle versioning is coarse.** Touching one skill reships the image. A
+  does not decide where the skill lands.
+- **Co-packaged skills version together.** Touching one reships the image. A
   skill with its own cadence should be its own image, which is supported.
-- **`SkillCollection` gains a physical form**: one image, one pull, one
-  signature, one mirror entry.
+- **A card must know the layout of the image it points into.** `subPath` is a
+  string the CRD cannot check, so a typo surfaces at pod init rather than at
+  apply time. Auto-enumeration, in the open questions, is what would remove
+  the need to type it.
 - **Inline skills cannot ship supporting files.** A ConfigMap key cannot hold
   a path separator, so inline is a single `SKILL.md`. Anything needing
   `references/` must be an image or a git source.
@@ -334,33 +390,40 @@ controller, but the two have not been run end to end together.
   commits to mirroring. A plain image probably mirrors like any other image,
   but that has not been checked with `oc-mirror`.
 
-## Open question: may a SkillCard demote a rule?
+## Open questions
 
-| frontmatter | `spec.type` | result today |
-| --- | --- | --- |
-| `skill` | unset | on-demand |
-| `rule` | unset | always-loaded |
-| `skill` | `rule` | always-loaded, promoted |
-| `rule` | `skill` | on-demand, **demoted**, logged |
+**Should SkillCollection be the type users write, with SkillCards
+generated?** Today a user authors SkillCards and may group them. The inverse
+may be better: point a collection at a source, and the controller creates one
+SkillCard per skill in it, owned by the collection, so even a single-skill
+source has one authoring path. A card then becomes mostly a generated record
+of one skill, observable and individually referenceable, with hand-written
+cards still valid for taking one skill out of a source without the rest.
 
-Promotion is uncontroversial: always-loading a skill that asked to be
-on-demand costs context budget and nothing else.
+That dissolves a smaller question rather than answering it: collection
+entries today may carry an `image` or `source` inline instead of a
+`skillCardRef`, so the fields defining a skill live in two places. It is
+already the documented intent, and the code disagrees with the docs.
+`CONTEXT.md:21` says the controller "creates SkillCard CRs for git-sourced
+entries"; `skillcollection_controller.go:83` says an image ref in a
+collection is self-contained and needs none.
 
-Against demotion: ADR 0014 rejected native loading for rules because "an
-always-loaded rule would become a suggestion". Demotion reaches that by
-another route, since an operator can turn a constraint the author marked
-mandatory into an optional one, with only an init log line as the trace.
+**Enumerating a source needs no registry client in the controller.** The
+objection is that reading an image means pull secrets and egress in the
+reconciler, which decision 4 rules out. It does not survive contact: the
+kubelet must pull the image to run the skill anyway, so the credentials, the
+ImageVolume gate and the mount semantics have to work regardless. A
+short-lived pod mounting the source exactly as the loader does can enumerate
+it, asking nothing new of the controller process, and the loader already
+knows how to walk a source, so it is another mode of the same binary.
 
-For it: the operator owns their context budget and is accountable for the run.
-A rule wrong for their domain otherwise forces a fork of content they did not
-write.
-
-The narrower option is promote-only, rejecting a card that asserts `skill`
-against frontmatter asserting `rule`. This ADR ships the permissive behaviour
-because it is the reversible one: narrowing later breaks only configurations
-relying on demotion, whereas widening later changes the meaning of a field
-people have started trusting. It should be settled before the field is
-documented for users.
+Deferred. Most of what remains is ordinary: how the pod reports back, not
+re-enumerating every reconcile, deterministic child names, owner references,
+pruning. The one needing a real answer is where per-skill `type` lives, since
+content does not declare it (decision 8) and an edit to a generated card
+would not survive the next reconcile. Naming types on the collection is the
+likely shape, with enumeration supplying the set and the collection the
+policy.
 
 ## Alternatives considered
 
@@ -370,23 +433,20 @@ store go unused, and `install --target goose` does not exist. A Containerfile
 gets the same image with one fewer tool and onboards downstream.
 
 **Require every skill to be an OCI image, building the ones that are not.**
-The stub's intent, and the strongest case for it is uniformity: every skill
-immutable, digest-addressable, signable and mirrorable, with one delivery path
-in the pod. Rejected on cost and on how early it is to pay it. It needs a
+The stub's intent, and uniformity is the strongest case for it: every skill
+immutable, digest-addressable, signable and mirrorable, one delivery path in
+the pod. Rejected on cost and on how early it is to pay it, since it needs a
 registry, push credentials and a build tool, and makes delivery a
-reconcile-time operation that can fail. Most skills are a markdown file. The
-argument is deferred rather than disposed of, and may read differently once
-there is a local-developer story; nothing here blocks adding it, since an
-image source is already the primary path and a build step for the other two is
-additive.
+reconcile-time operation that can fail, all to wrap a markdown file. Deferred
+rather than disposed of, and nothing here blocks it: an image source is
+already the primary path and a build step for the other two is additive.
 
 **Resolve git controller-side into a ConfigMap.** Clone once at reconcile,
-mount like an inline skill. Removes the runtime network dependency and the
-startup latency and works air-gapped after first resolve. Deferred, not
-rejected: it needs egress, a git client and private-repo credentials in the
-reconciler, and a ConfigMap key cannot hold a path separator, so a multi-file
-skill must be tar-packed into `binaryData` under 1 MiB. Adoptable later
-without an API change, per 4a.
+mount like an inline skill. Removes the runtime network dependency and works
+air-gapped after first resolve. Deferred: it needs egress, a git client and
+private-repo credentials in the reconciler, and a ConfigMap key cannot hold a
+path separator, so a multi-file skill must be tar-packed into `binaryData`
+under 1 MiB. Adoptable later without an API change, per 4a.
 
 **Run the loader only when a source needs materializing.** Saves a container
 start on all-image runs, but leaves two pod shapes and no single validation
@@ -394,21 +454,31 @@ point, so the most common runs would be the ones with nothing checking them.
 
 **Mount each ImageVolume at its final path, as today.** Simplest, and what ADR
 0001 describes. Rejected because it forces one image to mean one skill: with
-the path fixed by the controller, a bundle lands a level too deep and
-frontmatter cannot decide a skill's directory.
+the path fixed by the controller, a multi-skill image lands a level too deep
+and frontmatter cannot decide a skill's directory.
 
-**Declare the bundle shape in the CRD.** A field that can disagree with the
-image it describes, for a question the layout already answers.
+**Declare in the CRD whether an image holds one skill or several.** A field
+that can disagree with the image it describes, for a question the layout
+already answers.
 
-**Deprecate `spec.type`.** The obvious tidy-up once frontmatter carries the
-policy, but the field does a job frontmatter cannot: changing how somebody
-else's bundle loads without forking it.
+**Move `type` into `SKILL.md` frontmatter.** An earlier draft did this, so a
+card covering a whole multi-skill image could still say which of its skills
+were rules. Rejected twice over: `subPath` makes a card mean one skill again,
+so the pressure is gone, and the Agent Skills reference validator errors on
+any top-level field outside its allowed set, so our own skills would fail the
+standard decision 1 adopts. See decision 8.
+
+**Fold multi-skill images into SkillCollection.** Raised in review: a
+collection already means "a group of skills", so an image holding several
+could be a collection source with one load policy across it. Rejected as a
+merge of two independent axes (decision 3), and because a uniform per-source
+policy cannot express a mixed set. It is right that "bundle" should not be a
+domain term, which this ADR now avoids, and that resolving one source into
+many skills is a real job for a collection, which the open questions take up.
 
 ## Documentation this invalidates
 
-These state that a skill is always an OCI artifact. They change when the
-implementation lands, not when this ADR does, since until then they describe
-the system as it is:
+These state that a skill is always an OCI artifact:
 
 - `CONTEXT.md:111-115`, defining skillimage and `skillctl` as the packaging
   mechanism.
@@ -418,6 +488,16 @@ the system as it is:
   keep those names deliberately; the skill files are AgentSkills.io.
 - `README.md:23-24,36` repeat the OCI framing and `README.md:71` lists
   redhat-et/skillimage as a dependency.
+
+The CONTEXT.md entries are updated in this PR, since the glossary is meant to
+be the canonical definition and leaving it contradicting an accepted decision
+is worse than it briefly running ahead of the code. The README changes land
+with the implementation, being descriptions of behaviour rather than
+definitions of terms.
+
+One divergence found while writing this is not caused by it and is worth
+recording either way: `CONTEXT.md:21` says the controller "creates SkillCard
+CRs for git-sourced entries", and no controller does. See the open questions.
 
 ## Relationship to other ADRs
 
@@ -434,7 +514,7 @@ prompt. This decides how they are packaged and delivered to that mount. Both
 preserve `/opt/skills/{name}/SKILL.md`. It revises one 0014 decision, the
 source of the rules list (§8), and closes four gaps 0014 defers: frontmatter
 validation, the two-namespace collision, inline cards that resolve empty, and
-a manifest for the repo-shadowing check. **#135 needs updating alongside
+a manifest for the repo-shadowing check. **#138 needs updating alongside
 this.**
 
 **ADR 0007 on `skill-exec-probe`** measured that `noexec` does not reach the

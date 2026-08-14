@@ -2,28 +2,36 @@
 
 ## Core Resources
 
-**SkillCard** — An individual agent capability or behavioral constraint,
-following the skillimage.io/v1alpha1 SkillCard format. A SkillCard with
-`type: skill` (default) is on-demand — only its name and description
-are loaded at startup; the full content activates when the agent
-invokes it. A SkillCard with `type: rule` is always-loaded — its full
-content is injected into every agent turn. A SkillCard CR supports
-three source types: an OCI
-image ref (pre-built artifact), a git source URL (controller clones,
-builds, and pushes the OCI artifact), or inline markdown content
-(controller builds and pushes). All three converge to a resolved OCI
-image ref in status. Examples: "maven-migration" (skill),
-"no-javax-imports" (rule).
+**SkillCard** — Exactly one agent capability or behavioral constraint.
+The skill itself is an AgentSkills.io directory: a `SKILL.md` carrying
+YAML frontmatter, optionally alongside supporting files. A SkillCard
+with `type: skill` (default) is on-demand — only its name and
+description are loaded at startup; the full content activates when the
+agent invokes it. A SkillCard with `type: rule` is always-loaded — its
+full content is injected into every agent turn. `type` lives on the CR,
+never in skill content, which keeps `SKILL.md` valid against the Agent
+Skills spec. A SkillCard names one of three sources: an OCI image ref,
+a git source URL, or inline markdown. Only the image source resolves to
+an artifact; inline is delivered as a ConfigMap and git is cloned at pod
+start, so nothing is built in-cluster. An image or repository holding
+several skills is addressed with `subPath`, since a SkillCard is always
+one skill. Examples: "maven-migration" (skill), "no-javax-imports"
+(rule). See ADR 0015.
 
-**SkillCollection** — A group of skills, following the
-skillimage.io/v1alpha1 SkillCollection format. Each entry references a
-skill by OCI image ref, git source URL, or SkillCard CR name. The
-controller creates SkillCard CRs for git-sourced entries and reports
-readiness when all child SkillCards are resolved. An Agent references
-SkillCollections to gain access to sets of related capabilities.
-Examples: "konveyor-quarkus-skills" (a collection of 15 migration
-skills from a git repo), "enterprise-rules" (a curated set of rules
-as OCI images).
+**SkillCollection** — A named group of skills an Agent can reference in
+one line. Each entry references a skill by SkillCard CR name, or names a
+source directly. Grouping is separate from packaging: a collection may
+gather skills from several images, and one image may hold several skills
+that no collection groups. An Agent references SkillCollections to gain
+access to sets of related capabilities. Examples:
+"konveyor-quarkus-skills" (a collection of 15 migration skills),
+"enterprise-rules" (a curated set of rules).
+
+_Not yet true_: the controller does not create SkillCard CRs for entries
+that name a source directly, though it likely should. Whether a
+collection becomes the primary type users write, resolving a multi-skill
+source into one generated SkillCard per skill, is an open question in
+ADR 0015.
 
 **Gateway** — An LLM service endpoint serving exactly one provider/model
 combination. Each Gateway declares a provider type (e.g. `anthropic`,
@@ -111,13 +119,15 @@ results.
 
 ## Infrastructure
 
-**skillimage** — Red Hat Emerging Technologies project
-(redhat-et/skillimage) providing OCI-based packaging and distribution
-for agent skills and rules. The `skillctl` CLI builds, validates,
-promotes, pushes, pulls, and installs skills. SkillCard and
-SkillCollection are skillimage's YAML metadata formats — our
-Kubernetes CRDs adopt the same shape. Supported install targets:
-claude, cursor, windsurf, opencode, openclaw.
+**Agent Skills** — The open skill format at agentskills.io, originally
+from Anthropic and adopted across agent clients. A skill is a directory
+holding a `SKILL.md` with YAML frontmatter (`name` and `description`
+required, plus `license`, `compatibility`, `metadata` and
+`allowed-tools`), optionally alongside `scripts/`, `references/` and
+`assets/`. The field set is closed, and the `skills-ref` reference
+library validates against it. Our skills are this format, and our
+SkillCard and SkillCollection CRDs keep their names from skillimage
+without adopting its packaging. See ADR 0015.
 
 **Agent Sandbox** — Kubernetes SIG Apps project
 (kubernetes-sigs/agent-sandbox) providing CRDs for isolated, stateful
@@ -250,11 +260,11 @@ it belongs in the harness.
 
 ## Relationships
 
-- A **SkillCard** resolves to an OCI artifact from one of three
-  sources: OCI image ref, git source, or inline content.
-- A **SkillCollection** references skills by OCI image ref, git
-  source, or **SkillCard** CR name. Git-sourced entries produce child
-  **SkillCard** CRs.
+- A **SkillCard** is one skill, from one of three sources: OCI image
+  ref, git source, or inline content. Only the image source resolves to
+  an artifact; the others are delivered without one.
+- A **SkillCollection** groups skills, by **SkillCard** CR name or by
+  naming a source directly.
 - An **Agent** references zero or more **SkillCards** and zero or more
   **SkillCollections**.
 - An **Agent** references one or more **Gateways** — declaring the
