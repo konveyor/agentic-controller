@@ -48,9 +48,13 @@ elevated capability at all.**
 - `agent-base` gains a second unprivileged user (e.g. `useradd -u 1002
   -g 0 -d /home/goose -s /sbin/nologin goose`), mirroring exactly how
   the existing `harness` user (`1001`) is created today.
-- `createSandbox` adds a `goose` container to `Containers[]` alongside
-  `agent` (renamed conceptually to `harness`), each with its own
-  `securityContext.runAsUser`.
+- `createSandbox` adds `goose` as a Kubernetes native sidecar — an
+  `initContainers` entry with `restartPolicy: Always` — alongside
+  `agent` (renamed conceptually to `harness`) in `Containers[]`, each
+  with its own `securityContext.runAsUser`. Native sidecar, not a
+  second regular container: it lets kubelet auto-terminate `goose`
+  once `harness` exits, without which the Pod would never reach
+  `Succeeded` (see Implementation Impact below).
 - `/workspace` (the `EmptyDir` holding the cloned repo) stays shared
   between both containers. It already uses `chown -R 1001:0` +
   `chmod -R g=u` — group `0`, group bits mirroring owner bits — which is
@@ -184,8 +188,8 @@ protocol, the same AgentRun env surface. That's only true because ADR
 0008 already made harness↔goose a network relationship rather than a
 function call. Implementing the sidecar split still requires tearing
 out or relocating several chunks of the harness's current
-implementation, plus resolving one operational problem this ADR does
-not otherwise address: pod termination.
+implementation, plus one operational problem this ADR must resolve
+explicitly: pod termination.
 
 ### What stays the same
 
@@ -236,20 +240,39 @@ not otherwise address: pod termination.
    combined `env`/`envFrom` has to be split correctly — git/Hub
    credentials to harness only, LLM/provider credentials + ACP secret
    key to goose only — not just duplicated onto both.
-5. **Solve pod termination.** `RestartPolicy: Never` is required
-   (comment at `agentrun_controller.go:383-388`, tied to issue #51: a
-   container must reach a terminal phase for the AgentRun to observe
-   failure). With one container, harness exiting is the pod finishing.
-   With two regular containers, a Pod only reaches `Succeeded` once
-   every container has exited — but `goose serve` never exits on its
-   own. If nothing kills it when the harness finishes a stage, every
-   AgentRun hangs `Running` forever even on success. This ADR does not
-   otherwise mention this. The clean fix is Kubernetes' native sidecar
-   feature (an `initContainers` entry with `restartPolicy: Always`,
-   k8s ≥1.29) — kubelet auto-terminates those once regular containers
-   complete — but that is a design decision this ADR needs to make
-   explicitly before implementation, not something it currently
-   specifies.
+5. **Run `goose` as a native sidecar, not a second regular container.**
+   `RestartPolicy: Never` is required at the pod level (comment at
+   `agentrun_controller.go:383-388`, tied to issue #51: a container
+   must reach a terminal phase for the AgentRun to observe failure).
+   Today, harness exiting *is* the pod finishing. If `goose` were added
+   as a second entry in `Containers[]`, the Pod would only reach
+   `Succeeded` once *every* container has exited — but `goose serve`
+   never exits on its own, so every AgentRun would hang `Running`
+   forever even after the harness succeeds.
+
+   The fix: declare `goose` as a Kubernetes **native sidecar** — an
+   `initContainers` entry with `restartPolicy: Always` (stable since
+   k8s 1.29; this project already requires k8s.io/api v0.36.0 and
+   OpenShift 4.20+, both comfortably past that bar, so no version gate
+   applies). Native sidecars start before regular containers, and
+   kubelet does not begin terminating them until every regular
+   container (here, just `harness`) has already exited — then tears
+   them down with `SIGTERM`→`SIGKILL`. Per the upstream docs, a
+   sidecar's exit code on this teardown path is explicitly "normal on
+   Pod termination" and ignored for completion purposes: "the sidecar
+   container in each Pod does not prevent the Job from completing
+   after the main container has finished." That means `goose`'s exit
+   status never factors into the Sandbox's `PodSucceeded` condition
+   that `updatePhaseFromSandbox` (`agentrun_controller.go:613`) already
+   keys off of — no change needed there.
+
+   One consequence to note: `terminationGracePeriodSeconds` is shared
+   pod-wide, not per-container. If `harness`'s own shutdown consumes
+   the full grace period, `goose` gets force-killed with effectively no
+   graceful window — expected and harmless per the semantics above, but
+   worth keeping the grace period generous enough that `harness`'s exit
+   doesn't routinely eat all of it before `goose` gets a chance to stop
+   cleanly.
 6. **Image build.** `images/agent-base/Containerfile` needs a second
    `useradd -u 1002 -g 0 -d /home/goose ... goose`, matching the
    existing `harness` user pattern, plus a decision on whether the
