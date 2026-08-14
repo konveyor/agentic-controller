@@ -176,6 +176,86 @@ if read — single-repo, single-branch scope, short expiry.
   Hub's credential-issuance path, independent of and not blocking this
   ADR's decision.
 
+## Implementation Impact on the Harness
+
+The external contract survives: the same clone → skills → goose ACP
+session → watch/push → final-push sequence, the same ACP-over-loopback
+protocol, the same AgentRun env surface. That's only true because ADR
+0008 already made harness↔goose a network relationship rather than a
+function call. Implementing the sidecar split still requires tearing
+out or relocating several chunks of the harness's current
+implementation, plus resolving one operational problem this ADR does
+not otherwise address: pod termination.
+
+### What stays the same
+
+- `harness/cmd/migration-harness/main.go`'s stage sequence (git
+  clone/strip/checkout, ACP session, prompt, watcher-driven pushes,
+  final push) is unaffected — all of that is harness-container-only
+  logic operating on `/workspace`, which stays shared.
+- ACP wiring (`acp.WaitReadyDial` → `127.0.0.1:port`) needs zero
+  changes — loopback already crosses the container boundary within a
+  pod, which is exactly why ADR 0008's tee design (harness owns
+  `:4000`, goose on `:4001`) makes this split cheap.
+- `git`, `watcher`, `tee`, `prompt` packages: untouched.
+
+### Changes required
+
+1. **Delete goose subprocess management from the harness binary.**
+   `harness/internal/goose/lifecycle.go`'s `StartServe`/`Stop`
+   (`exec.Command`, `cmd.Wait()`, SIGTERM/SIGKILL, `Alive()`) all
+   assume goose is a child process of the harness. Post-split, goose
+   is started by kubelet as its own container's entrypoint (`goose
+   serve --host ... --port ...`), not by Go code. The harness keeps
+   only the ACP client side.
+2. **Relocate provider-credential translation.** `providerEnv()` in
+   the same file — mapping `KONVEYOR_LLM_*`/`GOOSE_*` env, plus the
+   Vertex `GOOGLE_APPLICATION_CREDENTIALS_JSON` → temp-file dance
+   (`writeADCFile`) — currently works only because it mutates
+   `cmd.Env`/writes a file for a process the harness itself is about
+   to spawn. Once goose is a sibling container, the harness can't
+   inject env or files into it. This logic has to move into
+   `createSandbox`'s env-building (`buildEnvVars`) or a small startup
+   step baked into the goose sidecar image.
+3. **Relocate skill symlinking.** `symlinkSkillsDir(home,
+   skillsDir())` in `main.go:161` writes `~/.agents/skills` into the
+   harness process's own `$HOME` — today that's safe only because
+   goose inherits the same `$HOME`/UID/filesystem
+   (`images/agent-base/Containerfile:56`, `ENV HOME=/home/harness`).
+   This ADR gives goose its own `$HOME` in a separate container, so
+   the harness can no longer write there. The skill `ImageVolume`
+   mounts (`resolveSkillVolumes`) and the symlink step both need to
+   move onto the goose container's own startup path — this is the gap
+   the Consequences section already flags: "anything currently
+   assuming the harness's `$HOME` is also goose's `$HOME` needs to be
+   found and fixed."
+4. **Restructure `createSandbox`.** Today it's one `corev1.Container`
+   (`internal/controller/agentrun_controller.go:390-402`) getting all
+   volumes, all env, no `securityContext`. This becomes two containers
+   with per-container `securityContext.runAsUser` (1001/1002), and the
+   combined `env`/`envFrom` has to be split correctly — git/Hub
+   credentials to harness only, LLM/provider credentials + ACP secret
+   key to goose only — not just duplicated onto both.
+5. **Solve pod termination.** `RestartPolicy: Never` is required
+   (comment at `agentrun_controller.go:383-388`, tied to issue #51: a
+   container must reach a terminal phase for the AgentRun to observe
+   failure). With one container, harness exiting is the pod finishing.
+   With two regular containers, a Pod only reaches `Succeeded` once
+   every container has exited — but `goose serve` never exits on its
+   own. If nothing kills it when the harness finishes a stage, every
+   AgentRun hangs `Running` forever even on success. This ADR does not
+   otherwise mention this. The clean fix is Kubernetes' native sidecar
+   feature (an `initContainers` entry with `restartPolicy: Always`,
+   k8s ≥1.29) — kubelet auto-terminates those once regular containers
+   complete — but that is a design decision this ADR needs to make
+   explicitly before implementation, not something it currently
+   specifies.
+6. **Image build.** `images/agent-base/Containerfile` needs a second
+   `useradd -u 1002 -g 0 -d /home/goose ... goose`, matching the
+   existing `harness` user pattern, plus a decision on whether the
+   goose sidecar reuses the same image (different `USER`/command) or
+   gets a dedicated one.
+
 ## Consequences
 
 - `agent-base` (and its language variants) gain a second unprivileged
