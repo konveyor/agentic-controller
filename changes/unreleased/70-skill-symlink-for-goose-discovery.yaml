@@ -1,0 +1,8 @@
+kind: feature
+description: >
+  Symlink $HOME/.agents/skills to the skills directory (default /opt/skills,
+  configurable via HARNESS_SKILLS_DIR) so goose discovers mounted SkillCard
+  content via its native skill platform. The link is placed in the home
+  directory rather than the clone to avoid touching the repo tree. Skills
+  are no longer injected into the prompt; the agent runtime handles
+  progressive disclosure.

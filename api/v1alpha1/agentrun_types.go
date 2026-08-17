@@ -32,26 +32,6 @@ const (
 	AgentRunPhaseFailed    AgentRunPhase = "Failed"
 )
 
-// AgentRunModelSelection selects a specific provider and model for this run.
-type AgentRunModelSelection struct {
-	// Role is the purpose of this model in the run (e.g. "primary", "efficient").
-	// The harness maps roles to runtime-specific configuration.
-	// Must be a valid env var identifier (used in KONVEYOR_MODEL_{ROLE}_*).
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z_][a-zA-Z0-9_]*$`
-	Role string `json:"role"`
-
-	// Provider is the name of an LLMProvider CR. Must be in the Agent's
-	// providers list.
-	// +kubebuilder:validation:MinLength=1
-	Provider string `json:"provider"`
-
-	// Model is the model identifier. Must be declared on the referenced
-	// LLMProvider.
-	// +kubebuilder:validation:MinLength=1
-	Model string `json:"model"`
-}
-
 // AgentRunParam supplies a value for a declared Agent parameter.
 type AgentRunParam struct {
 	// Name is the parameter name, matching an Agent param declaration.
@@ -70,13 +50,11 @@ type AgentRunSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	AgentRef string `json:"agentRef"`
 
-	// Models selects specific provider/model combinations for this run.
-	// Each entry maps a role to a provider and model from the Agent's
-	// available set.
+	// Gateway selects the Gateway (provider/model combination) for this
+	// run. Must be one of the gateways declared on the referenced Agent.
 	// +optional
-	// +listType=map
-	// +listMapKey=role
-	Models []AgentRunModelSelection `json:"models,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	Gateway string `json:"gateway,omitempty"`
 
 	// Params supplies values for the Agent's declared parameters.
 	// Injected as KONVEYOR_PARAM_{NAME} env vars into the Sandbox.
@@ -151,8 +129,8 @@ type AgentRunStatus struct {
 // +kubebuilder:printcolumn:name="Duration",type=integer,JSONPath=`.status.duration`,priority=1
 
 // AgentRun is a request to execute a single Agent with specific selections.
-// It references an Agent, selects providers and models, carries instructions
-// and key-value parameters (injected as env vars into the Sandbox). The
+// It references an Agent, selects a gateway, carries instructions and
+// key-value parameters (injected as env vars into the Sandbox). The
 // controller validates, resolves skills to ImageVolumes, creates a Sandbox,
 // and tracks status to completion.
 type AgentRun struct {

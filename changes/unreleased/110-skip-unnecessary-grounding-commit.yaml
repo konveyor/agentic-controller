@@ -1,0 +1,6 @@
+kind: bugfix
+
+description: >
+  Skip the "harness: add grounding data" commit when Hub returns no
+  analysis insights, avoiding an unnecessary .gitignore-only commit in
+  basic workflows.

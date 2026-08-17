@@ -151,6 +151,11 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatalf("CheckoutBranch: %v", err)
 	}
 
+	baseSHA, err := HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+
 	os.WriteFile(filepath.Join(cloneDir, "migrated.java"), []byte("class Foo {}\n"), 0644)
 	wt, err := repo.Worktree()
 	if err != nil {
@@ -169,8 +174,12 @@ func TestFullLifecycle(t *testing.T) {
 		t.Error("expected commit hash")
 	}
 
-	if err := Push(ctx, cred, repo, cred.Branch); err != nil {
+	pushed, err := Push(ctx, cred, repo, cred.Branch, baseSHA)
+	if err != nil {
 		t.Fatalf("Push: %v", err)
+	}
+	if !pushed {
+		t.Error("Push reported skipped despite new commits")
 	}
 
 	// Verify the branch exists on the remote
@@ -207,6 +216,7 @@ func TestPushWithoutCredsToStrippedRemoteFails(t *testing.T) {
 
 	StripCredentials(repo)
 	CheckoutBranch(repo, cred.Branch)
+	baseSHA, _ := HeadSHA(repo)
 
 	os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("data\n"), 0644)
 	wt, _ := repo.Worktree()
@@ -216,7 +226,7 @@ func TestPushWithoutCredsToStrippedRemoteFails(t *testing.T) {
 	})
 
 	// Push with nil credentials should fail
-	err = Push(ctx, &Credentials{RepoURL: remoteDir, Branch: cred.Branch}, repo, cred.Branch)
+	_, err = Push(ctx, &Credentials{RepoURL: remoteDir, Branch: cred.Branch}, repo, cred.Branch, baseSHA)
 	// For local bare repos, push still works without auth — this test verifies
 	// the function runs without panic. Real auth enforcement is server-side.
 	_ = err
@@ -292,5 +302,185 @@ func TestCommitFilesNoChanges(t *testing.T) {
 	headAfter, _ := repo.Head()
 	if headBefore.Hash() != headAfter.Hash() {
 		t.Error("HEAD changed despite no files to commit")
+	}
+}
+
+func TestPushSkipsWhenNoNewCommits(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+
+	cred := &Credentials{
+		Username: "test",
+		Token:    "token",
+		RepoURL:  remoteDir,
+		Branch:   "migration-noop",
+	}
+
+	ctx := context.Background()
+	cloneDir := filepath.Join(t.TempDir(), "work")
+	repo, err := Clone(ctx, cred, cloneDir)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if err := CheckoutBranch(repo, cred.Branch); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+	baseSHA, err := HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+
+	// No commits beyond the checkout point: the push must be skipped so
+	// no-op runs do not create empty branches on the remote.
+	pushed, err := Push(ctx, cred, repo, cred.Branch, baseSHA)
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if pushed {
+		t.Error("Push reported pushed despite no new commits")
+	}
+
+	remoteRepo, err := gogit.PlainOpen(remoteDir)
+	if err != nil {
+		t.Fatalf("open remote repo: %v", err)
+	}
+	if ref, err := remoteRepo.Reference(plumbing.NewBranchReferenceName(cred.Branch), false); err == nil {
+		t.Errorf("remote branch %s created at %s despite no commits", cred.Branch, ref.Hash())
+	}
+}
+
+func TestPushWithNewCommitsPushes(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+
+	cred := &Credentials{
+		Username: "test",
+		Token:    "token",
+		RepoURL:  remoteDir,
+		Branch:   "migration-work",
+	}
+
+	ctx := context.Background()
+	cloneDir := filepath.Join(t.TempDir(), "work")
+	repo, err := Clone(ctx, cred, cloneDir)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if err := CheckoutBranch(repo, cred.Branch); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+	baseSHA, err := HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+
+	os.WriteFile(filepath.Join(cloneDir, "migrated.java"), []byte("class Foo {}\n"), 0644)
+	wt, _ := repo.Worktree()
+	wt.Add("migrated.java")
+	hash, err := wt.Commit("migrate: Foo.java", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+	})
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	pushed, err := Push(ctx, cred, repo, cred.Branch, baseSHA)
+	if err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if !pushed {
+		t.Error("Push reported skipped despite new commits")
+	}
+
+	remoteRepo, err := gogit.PlainOpen(remoteDir)
+	if err != nil {
+		t.Fatalf("open remote repo: %v", err)
+	}
+	ref, err := remoteRepo.Reference(plumbing.NewBranchReferenceName(cred.Branch), false)
+	if err != nil {
+		t.Fatalf("remote branch not found: %v", err)
+	}
+	if ref.Hash() != hash {
+		t.Errorf("remote hash = %s, want %s", ref.Hash(), hash)
+	}
+}
+
+func TestPushSkipsWhenStageAddsNoNewCommits(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+
+	cred := &Credentials{
+		Username: "test",
+		Token:    "token",
+		RepoURL:  remoteDir,
+		Branch:   "migration-stages",
+	}
+	ctx := context.Background()
+
+	// Stage 1: commit on the branch and push — creates the remote ref.
+	stage1Dir := filepath.Join(t.TempDir(), "stage1")
+	repo1, err := Clone(ctx, cred, stage1Dir)
+	if err != nil {
+		t.Fatalf("stage 1 Clone: %v", err)
+	}
+	if err := CheckoutBranch(repo1, cred.Branch); err != nil {
+		t.Fatalf("stage 1 CheckoutBranch: %v", err)
+	}
+	base1, err := HeadSHA(repo1)
+	if err != nil {
+		t.Fatalf("stage 1 HeadSHA: %v", err)
+	}
+	os.WriteFile(filepath.Join(stage1Dir, "PLAN.md"), []byte("# Plan\n"), 0644)
+	wt, _ := repo1.Worktree()
+	wt.Add("PLAN.md")
+	hash, err := wt.Commit("plan stage", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+	})
+	if err != nil {
+		t.Fatalf("stage 1 commit: %v", err)
+	}
+	pushed1, err := Push(ctx, cred, repo1, cred.Branch, base1)
+	if err != nil {
+		t.Fatalf("stage 1 Push: %v", err)
+	}
+	if !pushed1 {
+		t.Error("stage 1 Push reported skipped despite new commits")
+	}
+
+	// Stage 2: fresh clone, checkout resolves the branch stage 1 pushed,
+	// so this stage's base is that tip. No new commits — skip the push.
+	stage2Dir := filepath.Join(t.TempDir(), "stage2")
+	repo2, err := Clone(ctx, cred, stage2Dir)
+	if err != nil {
+		t.Fatalf("stage 2 Clone: %v", err)
+	}
+	if err := CheckoutBranch(repo2, cred.Branch); err != nil {
+		t.Fatalf("stage 2 CheckoutBranch: %v", err)
+	}
+	base2, err := HeadSHA(repo2)
+	if err != nil {
+		t.Fatalf("stage 2 HeadSHA: %v", err)
+	}
+	if base2 != hash.String() {
+		t.Fatalf("stage 2 base = %s, want stage 1 tip %s", base2, hash)
+	}
+	pushed2, err := Push(ctx, cred, repo2, cred.Branch, base2)
+	if err != nil {
+		t.Fatalf("stage 2 Push: %v", err)
+	}
+	if pushed2 {
+		t.Error("stage 2 Push reported pushed despite no new commits")
+	}
+
+	remoteRepo, err := gogit.PlainOpen(remoteDir)
+	if err != nil {
+		t.Fatalf("open remote repo: %v", err)
+	}
+	ref, err := remoteRepo.Reference(plumbing.NewBranchReferenceName(cred.Branch), false)
+	if err != nil {
+		t.Fatalf("remote branch not found: %v", err)
+	}
+	if ref.Hash() != hash {
+		t.Errorf("remote hash = %s, want stage 1 tip %s", ref.Hash(), hash)
 	}
 }

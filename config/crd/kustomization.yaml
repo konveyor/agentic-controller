@@ -4,7 +4,7 @@
 resources:
 - bases/konveyor.io_skillcards.yaml
 - bases/konveyor.io_skillcollections.yaml
-- bases/konveyor.io_llmproviders.yaml
+- bases/konveyor.io_gateways.yaml
 - bases/konveyor.io_agents.yaml
 - bases/konveyor.io_agentruns.yaml
 - bases/konveyor.io_agentworkflows.yaml

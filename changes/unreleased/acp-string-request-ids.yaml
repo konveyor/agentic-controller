@@ -1,0 +1,6 @@
+kind: bug
+
+description: >
+  Accept string ids on agent-initiated ACP requests. goose sends
+  session/request_permission with string ids; parsing ids as int64
+  dropped the frame and parked the turn forever in approve mode.

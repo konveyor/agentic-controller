@@ -1,0 +1,6 @@
+kind: enhancement
+description: >
+  Harness revokes its Hub API token on exit for standalone AgentRuns and
+  the last stage of an AgentWorkflowRun. Intermediate workflow stages
+  skip revocation so subsequent stages can reuse the shared token. Requires
+  Hub to inject HUB_TOKEN_ID alongside HUB_TOKEN in the run Secret.

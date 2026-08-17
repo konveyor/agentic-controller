@@ -1,6 +1,9 @@
 package hub
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestParseAppID(t *testing.T) {
 	tests := []struct {
@@ -26,5 +29,20 @@ func TestParseAppID(t *testing.T) {
 				t.Errorf("ParseAppID(%q) = %d, want %d", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestClearEnvRemovesAllHubVars(t *testing.T) {
+	vars := []string{"HUB_BASE_URL", "HUB_TOKEN", "HUB_TOKEN_ID", "APP_ID"}
+	for _, k := range vars {
+		t.Setenv(k, "test-value")
+	}
+
+	ClearEnv()
+
+	for _, k := range vars {
+		if v := os.Getenv(k); v != "" {
+			t.Errorf("ClearEnv should unset %s, got %q", k, v)
+		}
 	}
 }

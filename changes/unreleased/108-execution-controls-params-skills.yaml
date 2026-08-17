@@ -1,0 +1,7 @@
+kind: feature
+
+description: >
+  ADRs 0009-0011 proposing parameter delivery via params.json, skill
+  content boundary (knowledge vs execution control), and first-class
+  execution controls (maxTurns, maxCost) and mode (auto/approve) on
+  Agent, AgentRun, and AgentWorkflow CRDs.

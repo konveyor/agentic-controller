@@ -3,7 +3,7 @@
 #
 # The test verifies:
 # 1. SkillCard becomes Ready (image resolved)
-# 2. LLMProvider becomes Ready (verification Job succeeds)
+# 2. Gateway becomes Ready (verification Job succeeds)
 # 3. Agent becomes Ready (all dependencies resolved)
 # 4. AgentRun creates a Sandbox
 # 5. Sandbox pod runs and produces expected output
@@ -43,12 +43,12 @@ else
     fail "SkillCard e2e-skill did not become Ready"
 fi
 
-echo "--- Checking LLMProvider ---"
-if kubectl wait llmprovider/e2e-provider --for=jsonpath='{.status.conditions[0].status}'=True --timeout="${E2E_TIMEOUT}" 2>/dev/null; then
-    pass "LLMProvider e2e-provider is Ready (connectivity verified)"
+echo "--- Checking Gateway ---"
+if kubectl wait gateways.konveyor.io/e2e-gateway --for=jsonpath='{.status.conditions[?(@.type=="Ready")].status}'=True --timeout="${E2E_TIMEOUT}" 2>/dev/null; then
+    pass "Gateway e2e-gateway is Ready (connectivity verified)"
 else
-    fail "LLMProvider e2e-provider did not become Ready"
-    kubectl get llmprovider e2e-provider -o yaml | grep -A10 "status:" || true
+    fail "Gateway e2e-gateway did not become Ready"
+    kubectl get gateways.konveyor.io e2e-gateway -o yaml | grep -A10 "status:" || true
 fi
 
 echo "--- Checking Agent ---"
@@ -136,7 +136,7 @@ if [ "${FAIL}" -gt 0 ]; then
     echo "E2E FAILED"
     echo ""
     echo "--- Debug info ---"
-    kubectl get skillcard,llmprovider,agent,agentrun -o wide 2>/dev/null || true
+    kubectl get skillcard,gateways.konveyor.io,agent,agentrun -o wide 2>/dev/null || true
     echo ""
     kubectl get sandbox,pods -o wide 2>/dev/null || true
     exit 1
@@ -144,6 +144,6 @@ fi
 
 echo "E2E PASSED: Full pipeline verified."
 echo ""
-echo "  Secret -> LLMProvider (verified) -> SkillCard (resolved)"
+echo "  Secret -> Gateway (verified) -> SkillCard (resolved)"
 echo "  -> Agent (all deps ready) -> AgentRun -> Sandbox -> Pod"
 echo "  -> Params injected, skills mounted, instructions passed"

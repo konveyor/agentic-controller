@@ -40,10 +40,10 @@ var _ = Describe("Agent Controller", func() {
 
 	Context("when all dependencies are ready", func() {
 		const (
-			agentName    = "agent-ctrl-all-ready"
-			providerName = "agent-ctrl-provider"
-			secretName   = "agent-ctrl-secret"
-			skillName    = "agent-ctrl-skill"
+			agentName   = "agent-ctrl-all-ready"
+			gatewayName = "agent-ctrl-provider"
+			secretName  = "agent-ctrl-secret"
+			skillName   = "agent-ctrl-skill"
 		)
 
 		It("should report Ready=True", func() {
@@ -57,20 +57,21 @@ var _ = Describe("Agent Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
-			By("creating a Ready LLMProvider")
-			provider := &konveyoriov1alpha1.LLMProvider{
+			By("creating a Ready Gateway")
+			provider := &konveyoriov1alpha1.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      providerName,
+					Name:      gatewayName,
 					Namespace: testNamespace,
 				},
-				Spec: konveyoriov1alpha1.LLMProviderSpec{
+				Spec: konveyoriov1alpha1.GatewaySpec{
+					Provider: testProviderType,
 					Endpoint: testEndpoint,
-					CredentialRef: konveyoriov1alpha1.LLMProviderCredentialRef{
+					CredentialRef: konveyoriov1alpha1.GatewayCredentialRef{
 						SecretName: secretName,
 						Key:        testSecretKey,
 					},
-					Models: []konveyoriov1alpha1.LLMProviderModel{
-						{Name: testLLMModelName, ContextWindow: 100000},
+					Model: konveyoriov1alpha1.GatewayModel{
+						Name: testLLMModelName, ContextWindow: 100000,
 					},
 				},
 			}
@@ -78,7 +79,7 @@ var _ = Describe("Agent Controller", func() {
 
 			// Wait for verification Job, then simulate success.
 			jobKey := types.NamespacedName{
-				Name:      fmt.Sprintf("%s%s-gen1", verificationJobPrefix, providerName),
+				Name:      fmt.Sprintf("%s%s-gen1", verificationJobPrefix, gatewayName),
 				Namespace: testNamespace,
 			}
 			Eventually(func(g Gomega) {
@@ -98,10 +99,10 @@ var _ = Describe("Agent Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
 
 			// Wait for provider to become Ready.
-			provKey := types.NamespacedName{Name: providerName, Namespace: testNamespace}
+			gwKey := types.NamespacedName{Name: gatewayName, Namespace: testNamespace}
 			Eventually(func(g Gomega) {
-				var fetched konveyoriov1alpha1.LLMProvider
-				g.Expect(k8sClient.Get(ctx, provKey, &fetched)).To(Succeed())
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
 				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
 				g.Expect(readyCond).NotTo(BeNil())
 				g.Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
@@ -136,7 +137,7 @@ var _ = Describe("Agent Controller", func() {
 				},
 				Spec: konveyoriov1alpha1.AgentSpec{
 					Image:      testAgentImage,
-					Providers:  []konveyoriov1alpha1.AgentProviderRef{{Ref: providerName}},
+					Gateways:   []konveyoriov1alpha1.AgentGatewayRef{{Ref: gatewayName}},
 					SkillCards: []konveyoriov1alpha1.AgentSkillCardRef{{Ref: skillName}},
 				},
 			}
@@ -161,7 +162,7 @@ var _ = Describe("Agent Controller", func() {
 		})
 	})
 
-	Context("when a referenced LLMProvider does not exist", func() {
+	Context("when a referenced Gateway does not exist", func() {
 		const agentName = "agent-ctrl-missing-provider"
 
 		It("should report Ready=False with DependenciesNotReady", func() {
@@ -171,8 +172,8 @@ var _ = Describe("Agent Controller", func() {
 					Namespace: testNamespace,
 				},
 				Spec: konveyoriov1alpha1.AgentSpec{
-					Image:     testAgentImage,
-					Providers: []konveyoriov1alpha1.AgentProviderRef{{Ref: "nonexistent-provider"}},
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: "nonexistent-provider"}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
@@ -204,8 +205,8 @@ var _ = Describe("Agent Controller", func() {
 				},
 				Spec: konveyoriov1alpha1.AgentSpec{
 					Image: testAgentImage,
-					// Need at least one provider for MinItems=1.
-					Providers:  []konveyoriov1alpha1.AgentProviderRef{{Ref: testProviderName}},
+					// Need at least one gateway for MinItems=1.
+					Gateways:   []konveyoriov1alpha1.AgentGatewayRef{{Ref: testGatewayName}},
 					SkillCards: []konveyoriov1alpha1.AgentSkillCardRef{{Ref: "nonexistent-skill"}},
 				},
 			}

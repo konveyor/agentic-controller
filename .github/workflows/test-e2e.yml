@@ -23,15 +23,19 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install the latest version of kind
+      - name: Install kind
+        env:
+          KIND_VERSION: v0.27.0
         run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
+          curl -fLo ./kind --retry 5 --retry-delay 10 --retry-all-errors \
+            "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-$(go env GOARCH)"
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
 
       - name: Install Helm
         run: |
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          curl -fL --retry 5 --retry-delay 10 --retry-all-errors \
+            https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
       - name: Running e2e
         run: make e2e

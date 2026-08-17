@@ -1,0 +1,7 @@
+kind: enhancement
+
+description: >
+  ACP client: a single demux goroutine owns the socket — responses route
+  to per-request channels by id, notifications fan out to in-flight calls
+  and raw subscribers, agent requests dispatch to a handler, unmatched
+  ids log loudly instead of being silently dropped.

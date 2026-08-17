@@ -49,7 +49,7 @@ rules:
   - agents
   - agentworkflowruns
   - agentworkflows
-  - llmproviders
+  - gateways
   - skillcards
   - skillcollections
   verbs:
@@ -67,7 +67,7 @@ rules:
   - agents/finalizers
   - agentworkflowruns/finalizers
   - agentworkflows/finalizers
-  - llmproviders/finalizers
+  - gateways/finalizers
   - skillcards/finalizers
   - skillcollections/finalizers
   verbs:
@@ -79,7 +79,7 @@ rules:
   - agents/status
   - agentworkflowruns/status
   - agentworkflows/status
-  - llmproviders/status
+  - gateways/status
   - skillcards/status
   - skillcollections/status
   verbs:

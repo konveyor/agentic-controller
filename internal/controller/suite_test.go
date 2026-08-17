@@ -46,9 +46,9 @@ const (
 	testEndpoint      = "https://api.example.com"
 	testSecretKey     = "api-key"
 	testLLMModelName  = "test-model"
-	testProviderName  = "some-provider"
+	testGatewayName   = "some-gateway"
+	testProviderType  = "test-provider"
 	testRepoURL       = "https://github.com/test/repo.git"
-	testRolePrimary   = "primary"
 	testDefaultBranch = "main"
 )
 
@@ -129,7 +129,7 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
-	err = (&LLMProviderReconciler{
+	err = (&GatewayReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
 		VerificationImage: "test-image:latest", // not used in envtest

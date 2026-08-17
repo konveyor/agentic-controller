@@ -50,6 +50,8 @@ const (
 	// workspaceVolumeName is the name of the EmptyDir volume for the agent workspace.
 	workspaceVolumeName = "workspace"
 
+	tmpVolumeName = "tmp"
+
 	// sandboxFinishedReasonSucceeded is the Sandbox condition reason for
 	// success. Must match Agent Sandbox's SandboxReasonPodSucceeded constant.
 	sandboxFinishedReasonSucceeded = "PodSucceeded"
@@ -74,7 +76,7 @@ type AgentRunReconciler struct {
 //
 // The controller:
 // 1. Checks that the referenced Agent exists and is Ready
-// 2. Validates params and model selections against Agent declarations
+// 2. Validates params and gateway selection against Agent declarations
 // 3. Resolves skills to OCI image refs (fails if any are unresolvable)
 // 4. Creates a Sandbox CR with the agent image, skills, env, and workspace
 // 5. Watches the Sandbox to completion and updates AgentRun status
@@ -141,14 +143,14 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.patchRunStatus(ctx, &run, original)
 	}
 
-	// Validate model selections against Agent's available providers.
-	if err := r.validateModels(ctx, &run, &agent); err != nil {
+	// Validate gateway selection against Agent's available gateways.
+	if err := r.validateGateway(&run, &agent); err != nil {
 		run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
 		meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
 			Type:               ConditionTypeReady,
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: run.Generation,
-			Reason:             "InvalidModels",
+			Reason:             "InvalidGateway",
 			Message:            err.Error(),
 		})
 		return r.patchRunStatus(ctx, &run, original)
@@ -241,40 +243,36 @@ func (r *AgentRunReconciler) validateParams(
 	return nil
 }
 
-// validateModels checks that model selections reference providers in the
-// Agent's available set and that the model exists on the provider.
-func (r *AgentRunReconciler) validateModels(
-	ctx context.Context,
+// validateGateway checks that the selected gateway is in the Agent's
+// available gateway set. The Agent controller already watches Gateway
+// CRs and won't report Ready if a referenced Gateway is missing, so
+// the "Agent not Ready" check upstream catches dangling references.
+// This function validates the AgentRun's selection against the Agent's
+// declared set only — it does not re-verify the Gateway CR exists.
+func (r *AgentRunReconciler) validateGateway(
 	run *konveyoriov1alpha1.AgentRun,
 	agent *konveyoriov1alpha1.Agent,
 ) error {
-	providerSet := make(map[string]bool)
-	for _, p := range agent.Spec.Providers {
-		providerSet[p.Ref] = true
+	if run.Spec.Gateway == "" {
+		// Default to the Agent's only gateway when exactly one is
+		// declared. When multiple are available, require explicit
+		// selection so the run fails fast instead of dying at runtime
+		// on missing KONVEYOR_LLM_MODEL.
+		switch len(agent.Spec.Gateways) {
+		case 1:
+			run.Spec.Gateway = agent.Spec.Gateways[0].Ref
+		default:
+			return fmt.Errorf("agent %q declares %d gateways; select one via spec.gateway",
+				agent.Name, len(agent.Spec.Gateways))
+		}
+		return nil
 	}
-	for _, m := range run.Spec.Models {
-		if !providerSet[m.Provider] {
-			return fmt.Errorf("model selection references provider %q which is not in Agent %q providers",
-				m.Provider, agent.Name)
-		}
-		// Verify the model exists on the LLMProvider.
-		var provider konveyoriov1alpha1.LLMProvider
-		providerKey := types.NamespacedName{Namespace: run.Namespace, Name: m.Provider}
-		if err := r.Get(ctx, providerKey, &provider); err != nil {
-			return fmt.Errorf("looking up LLMProvider %q: %w", m.Provider, err)
-		}
-		modelFound := false
-		for _, pm := range provider.Spec.Models {
-			if pm.Name == m.Model {
-				modelFound = true
-				break
-			}
-		}
-		if !modelFound {
-			return fmt.Errorf("model %q not found on LLMProvider %q", m.Model, m.Provider)
+	for _, g := range agent.Spec.Gateways {
+		if g.Ref == run.Spec.Gateway {
+			return nil
 		}
 	}
-	return nil
+	return fmt.Errorf("gateway %q is not in Agent %q gateways", run.Spec.Gateway, agent.Name)
 }
 
 // createSandbox creates the Sandbox CR, the ACP secret key Secret,
@@ -343,6 +341,20 @@ func (r *AgentRunReconciler) createSandbox(
 		MountPath: "/workspace",
 	})
 
+	// Writable /tmp for tools that create temp files at runtime.
+	volumes = append(volumes, corev1.Volume{
+		Name: tmpVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{
+				SizeLimit: resource.NewQuantity(1*1024*1024*1024, resource.BinarySI), // 1Gi
+			},
+		},
+	})
+	volumeMounts = append(volumeMounts, corev1.VolumeMount{
+		Name:      tmpVolumeName,
+		MountPath: "/tmp",
+	})
+
 	// Create the Sandbox CR.
 	serviceEnabled := true
 	sandbox := &sandboxv1beta1.Sandbox{
@@ -407,8 +419,8 @@ func (r *AgentRunReconciler) createSandbox(
 }
 
 // buildEnvVars constructs the env var list for the Sandbox container, plus
-// envFrom sources for providers whose credential Secret is exposed whole
-// (credentialRef without a key, e.g. AWS SigV4).
+// envFrom sources for the gateway's credential Secret when it is exposed
+// whole (credentialRef without a key, e.g. AWS SigV4).
 func (r *AgentRunReconciler) buildEnvVars(
 	ctx context.Context,
 	run *konveyoriov1alpha1.AgentRun,
@@ -465,42 +477,45 @@ func (r *AgentRunReconciler) buildEnvVars(
 		})
 	}
 
-	// Model selections and LLM credential mounting.
-	credSecretSeen := make(map[string]bool)
-	for _, m := range run.Spec.Models {
-		prefix := "KONVEYOR_MODEL_" + strings.ToUpper(m.Role) + "_"
+	// Gateway credential mounting. One run = one gateway = one model.
+	if run.Spec.Gateway != "" {
+		var gateway konveyoriov1alpha1.Gateway
+		gwKey := types.NamespacedName{Namespace: run.Namespace, Name: run.Spec.Gateway}
+		if err := r.Get(ctx, gwKey, &gateway); err != nil {
+			return nil, nil, fmt.Errorf("looking up Gateway %q: %w", run.Spec.Gateway, err)
+		}
+		// Verify the Gateway is currently Ready. Agent readiness can
+		// be stale if the Gateway becomes unready after the Agent was
+		// last reconciled.
+		gwReady := meta.FindStatusCondition(gateway.Status.Conditions, ConditionTypeReady)
+		if gwReady == nil || gwReady.Status != metav1.ConditionTrue {
+			return nil, nil, fmt.Errorf("gateway %q is not Ready", run.Spec.Gateway)
+		}
 		env = append(env,
-			corev1.EnvVar{Name: prefix + "PROVIDER", Value: m.Provider},
-			corev1.EnvVar{Name: prefix + "MODEL", Value: m.Model},
+			corev1.EnvVar{Name: "KONVEYOR_LLM_PROVIDER", Value: gateway.Spec.Provider},
+			corev1.EnvVar{Name: "KONVEYOR_LLM_ENDPOINT", Value: gateway.Spec.Endpoint},
+			corev1.EnvVar{Name: "KONVEYOR_LLM_MODEL", Value: gateway.Spec.Model.Name},
 		)
 
-		// Mount the LLM provider's credential Secret. A single-key
+		// Mount the gateway's credential Secret. A single-key
 		// credentialRef is a bearer-token-style credential injected as
-		// <prefix>API_KEY; a keyless one spans multiple env vars (e.g.
-		// AWS SigV4) and is exposed whole via envFrom, with the Secret's
-		// keys as the variable names.
-		var provider konveyoriov1alpha1.LLMProvider
-		providerKey := types.NamespacedName{Namespace: run.Namespace, Name: m.Provider}
-		if err := r.Get(ctx, providerKey, &provider); err != nil {
-			return nil, nil, fmt.Errorf("looking up LLMProvider %q for model role %q: %w",
-				m.Provider, m.Role, err)
-		}
-		env = append(env, corev1.EnvVar{Name: prefix + "ENDPOINT", Value: provider.Spec.Endpoint})
-		credSecretName := provider.Spec.CredentialRef.SecretName
-		if provider.Spec.CredentialRef.Key != "" {
+		// KONVEYOR_LLM_API_KEY; a keyless one spans multiple env vars
+		// (e.g. AWS SigV4) and is exposed whole via envFrom, with the
+		// Secret's keys as the variable names.
+		credSecretName := gateway.Spec.CredentialRef.SecretName
+		if gateway.Spec.CredentialRef.Key != "" {
 			env = append(env, corev1.EnvVar{
-				Name: prefix + "API_KEY",
+				Name: "KONVEYOR_LLM_API_KEY",
 				ValueFrom: &corev1.EnvVarSource{
 					SecretKeyRef: &corev1.SecretKeySelector{
 						LocalObjectReference: corev1.LocalObjectReference{
 							Name: credSecretName,
 						},
-						Key: provider.Spec.CredentialRef.Key,
+						Key: gateway.Spec.CredentialRef.Key,
 					},
 				},
 			})
-		} else if !credSecretSeen[credSecretName] {
-			credSecretSeen[credSecretName] = true
+		} else {
 			envFrom = append(envFrom, corev1.EnvFromSource{
 				SecretRef: &corev1.SecretEnvSource{
 					LocalObjectReference: corev1.LocalObjectReference{

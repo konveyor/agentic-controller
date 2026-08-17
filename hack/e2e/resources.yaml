@@ -2,7 +2,7 @@
 # E2E test resources: full chain from credentials to AgentRun.
 #
 # This creates a complete pipeline:
-#   Secret → LLMProvider → SkillCard → Agent → AgentRun → Sandbox
+#   Secret → Gateway → SkillCard → Agent → AgentRun → Sandbox
 #
 # The AgentRun uses the agentic-controller-agent image which logs
 # params/skills/instructions and exits 0, proving the full pipeline.
@@ -15,23 +15,24 @@ metadata:
 stringData:
   api-key: "e2e-test-key-not-real"
 ---
-# LLMProvider pointing at llemulator (mock OpenAI API).
+# Gateway pointing at llemulator (mock OpenAI API).
 # The verification Job checks reachability against the mock server.
 # When the harness is implemented, goose can talk to this for
 # scripted LLM responses without real API credentials.
 apiVersion: konveyor.io/v1alpha1
-kind: LLMProvider
+kind: Gateway
 metadata:
-  name: e2e-provider
+  name: e2e-gateway
 spec:
+  provider: openai
   endpoint: "http://openai-emulator.default.svc"
   credentialRef:
     secretName: e2e-llm-credentials
     key: api-key
-  models:
-    - name: test-model
-      contextWindow: 100000
-      tier: efficient
+  model:
+    name: test-model
+    contextWindow: 100000
+    tier: efficient
 ---
 # SkillCard with an image source.
 apiVersion: konveyor.io/v1alpha1
@@ -45,7 +46,7 @@ spec:
   description: A skill for e2e testing.
   type: skill
 ---
-# Agent referencing the provider and skill.
+# Agent referencing the gateway and skill.
 apiVersion: konveyor.io/v1alpha1
 kind: Agent
 metadata:
@@ -53,8 +54,8 @@ metadata:
 spec:
   image: quay.io/konveyor/agentic-controller-agent:e2e
   prompt: "You are an e2e test agent."
-  providers:
-    - ref: e2e-provider
+  gateways:
+    - ref: e2e-gateway
   skillCards:
     - ref: e2e-skill
   params:
@@ -73,10 +74,7 @@ metadata:
   name: e2e-run
 spec:
   agentRef: e2e-agent
-  models:
-    - role: primary
-      provider: e2e-provider
-      model: test-model
+  gateway: e2e-gateway
   params:
     - name: source_url
       value: "https://github.com/konveyor/example-app.git"

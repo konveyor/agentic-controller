@@ -33,7 +33,7 @@ import (
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 )
 
-var _ = Describe("LLMProvider Controller", func() {
+var _ = Describe("Gateway Controller", func() {
 	const (
 		timeout  = 10 * time.Second
 		interval = 250 * time.Millisecond
@@ -43,27 +43,28 @@ var _ = Describe("LLMProvider Controller", func() {
 		const name = "llm-ctrl-no-secret"
 
 		It("should set Ready=False with CredentialSecretNotFound", func() {
-			provider := &konveyoriov1alpha1.LLMProvider{
+			gateway := &konveyoriov1alpha1.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
 					Namespace: testNamespace,
 				},
-				Spec: konveyoriov1alpha1.LLMProviderSpec{
+				Spec: konveyoriov1alpha1.GatewaySpec{
+					Provider: testProviderType,
 					Endpoint: testEndpoint,
-					CredentialRef: konveyoriov1alpha1.LLMProviderCredentialRef{
+					CredentialRef: konveyoriov1alpha1.GatewayCredentialRef{
 						SecretName: "nonexistent-secret",
 						Key:        testSecretKey,
 					},
-					Models: []konveyoriov1alpha1.LLMProviderModel{
-						{Name: testLLMModelName, ContextWindow: 100000},
+					Model: konveyoriov1alpha1.GatewayModel{
+						Name: testLLMModelName, ContextWindow: 100000,
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
 
 			key := types.NamespacedName{Name: name, Namespace: testNamespace}
 			Eventually(func(g Gomega) {
-				var fetched konveyoriov1alpha1.LLMProvider
+				var fetched konveyoriov1alpha1.Gateway
 				g.Expect(k8sClient.Get(ctx, key, &fetched)).To(Succeed())
 
 				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
@@ -73,7 +74,7 @@ var _ = Describe("LLMProvider Controller", func() {
 				g.Expect(fetched.Status.ConnectionVerified).To(BeFalse())
 			}, timeout, interval).Should(Succeed())
 
-			Expect(k8sClient.Delete(ctx, provider)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
 		})
 	})
 
@@ -95,27 +96,28 @@ var _ = Describe("LLMProvider Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
-			provider := &konveyoriov1alpha1.LLMProvider{
+			gateway := &konveyoriov1alpha1.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
 					Namespace: testNamespace,
 				},
-				Spec: konveyoriov1alpha1.LLMProviderSpec{
+				Spec: konveyoriov1alpha1.GatewaySpec{
+					Provider: testProviderType,
 					Endpoint: testEndpoint,
-					CredentialRef: konveyoriov1alpha1.LLMProviderCredentialRef{
+					CredentialRef: konveyoriov1alpha1.GatewayCredentialRef{
 						SecretName: secretName,
 						Key:        testSecretKey,
 					},
-					Models: []konveyoriov1alpha1.LLMProviderModel{
-						{Name: testLLMModelName, ContextWindow: 100000},
+					Model: konveyoriov1alpha1.GatewayModel{
+						Name: testLLMModelName, ContextWindow: 100000,
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
 
 			key := types.NamespacedName{Name: name, Namespace: testNamespace}
 			Eventually(func(g Gomega) {
-				var fetched konveyoriov1alpha1.LLMProvider
+				var fetched konveyoriov1alpha1.Gateway
 				g.Expect(k8sClient.Get(ctx, key, &fetched)).To(Succeed())
 
 				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
@@ -124,7 +126,7 @@ var _ = Describe("LLMProvider Controller", func() {
 				g.Expect(readyCond.Reason).To(Equal("CredentialKeyNotFound"))
 			}, timeout, interval).Should(Succeed())
 
-			Expect(k8sClient.Delete(ctx, provider)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
 		})
 	})
@@ -147,23 +149,24 @@ var _ = Describe("LLMProvider Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
-			provider := &konveyoriov1alpha1.LLMProvider{
+			gateway := &konveyoriov1alpha1.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
 					Namespace: testNamespace,
 				},
-				Spec: konveyoriov1alpha1.LLMProviderSpec{
+				Spec: konveyoriov1alpha1.GatewaySpec{
+					Provider: testProviderType,
 					Endpoint: testEndpoint,
-					CredentialRef: konveyoriov1alpha1.LLMProviderCredentialRef{
+					CredentialRef: konveyoriov1alpha1.GatewayCredentialRef{
 						SecretName: secretName,
 						Key:        testSecretKey,
 					},
-					Models: []konveyoriov1alpha1.LLMProviderModel{
-						{Name: testLLMModelName, ContextWindow: 100000},
+					Model: konveyoriov1alpha1.GatewayModel{
+						Name: testLLMModelName, ContextWindow: 100000,
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
 
 			By("verifying the controller creates a verification Job")
 			jobKey := types.NamespacedName{
@@ -173,14 +176,14 @@ var _ = Describe("LLMProvider Controller", func() {
 			Eventually(func(g Gomega) {
 				var job batchv1.Job
 				g.Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
-				g.Expect(job.Labels["konveyor.io/llmprovider"]).To(Equal(name))
+				g.Expect(job.Labels["konveyor.io/gateway"]).To(Equal(name))
 			}, timeout, interval).Should(Succeed())
 
-			By("verifying the provider is in Verifying state")
-			provKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			By("verifying the gateway is in Verifying state")
+			gwKey := types.NamespacedName{Name: name, Namespace: testNamespace}
 			Eventually(func(g Gomega) {
-				var fetched konveyoriov1alpha1.LLMProvider
-				g.Expect(k8sClient.Get(ctx, provKey, &fetched)).To(Succeed())
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
 
 				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
 				g.Expect(readyCond).NotTo(BeNil())
@@ -200,13 +203,12 @@ var _ = Describe("LLMProvider Controller", func() {
 			)
 			Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
 
-			By("verifying the provider becomes Ready with connectionVerified")
+			By("verifying the gateway becomes Ready with connectionVerified")
 			Eventually(func(g Gomega) {
-				var fetched konveyoriov1alpha1.LLMProvider
-				g.Expect(k8sClient.Get(ctx, provKey, &fetched)).To(Succeed())
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
 
 				g.Expect(fetched.Status.ConnectionVerified).To(BeTrue())
-				g.Expect(fetched.Status.DiscoveredModels).To(ConsistOf("test-model"))
 
 				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
 				g.Expect(readyCond).NotTo(BeNil())
@@ -221,7 +223,7 @@ var _ = Describe("LLMProvider Controller", func() {
 				g.Expect(client.IgnoreNotFound(err)).To(Succeed())
 			}, timeout, interval).Should(Succeed())
 
-			Expect(k8sClient.Delete(ctx, provider)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
 		})
 	})
@@ -244,23 +246,24 @@ var _ = Describe("LLMProvider Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
-			provider := &konveyoriov1alpha1.LLMProvider{
+			gateway := &konveyoriov1alpha1.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
 					Namespace: testNamespace,
 				},
-				Spec: konveyoriov1alpha1.LLMProviderSpec{
+				Spec: konveyoriov1alpha1.GatewaySpec{
+					Provider: testProviderType,
 					Endpoint: "https://api.unreachable.example.com",
-					CredentialRef: konveyoriov1alpha1.LLMProviderCredentialRef{
+					CredentialRef: konveyoriov1alpha1.GatewayCredentialRef{
 						SecretName: secretName,
 						Key:        testSecretKey,
 					},
-					Models: []konveyoriov1alpha1.LLMProviderModel{
-						{Name: testLLMModelName, ContextWindow: 100000},
+					Model: konveyoriov1alpha1.GatewayModel{
+						Name: testLLMModelName, ContextWindow: 100000,
 					},
 				},
 			}
-			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
 
 			By("waiting for the verification Job to be created")
 			jobKey := types.NamespacedName{
@@ -283,11 +286,11 @@ var _ = Describe("LLMProvider Controller", func() {
 			)
 			Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
 
-			By("verifying the provider is NotReady with ConnectionFailed")
-			provKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			By("verifying the gateway is NotReady with ConnectionFailed")
+			gwKey := types.NamespacedName{Name: name, Namespace: testNamespace}
 			Eventually(func(g Gomega) {
-				var fetched konveyoriov1alpha1.LLMProvider
-				g.Expect(k8sClient.Get(ctx, provKey, &fetched)).To(Succeed())
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
 
 				g.Expect(fetched.Status.ConnectionVerified).To(BeFalse())
 
@@ -297,7 +300,7 @@ var _ = Describe("LLMProvider Controller", func() {
 				g.Expect(readyCond.Reason).To(Equal("ConnectionFailed"))
 			}, timeout, interval).Should(Succeed())
 
-			Expect(k8sClient.Delete(ctx, provider)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
 		})
 	})

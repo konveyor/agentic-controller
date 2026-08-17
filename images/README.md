@@ -4,7 +4,7 @@
 
 Minimal agent image owned by the controller for verification and
 testing. Used by:
-- LLMProvider verification Jobs (connectivity check)
+- Gateway verification Jobs (connectivity check)
 - E2E tests (proves the controller → Sandbox → Pod pipeline)
 
 This is NOT the production agent base image. The real agent images

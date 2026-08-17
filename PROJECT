@@ -30,7 +30,7 @@ resources:
     namespaced: true
   domain: konveyor.io
   group: ""
-  kind: LLMProvider
+  kind: Gateway
   path: github.com/konveyor/agentic-controller/api/v1alpha1
   version: v1alpha1
 - api:
@@ -54,7 +54,7 @@ resources:
     namespaced: true
   domain: konveyor.io
   group: ""
-  kind: AgentPlaybook
+  kind: AgentWorkflow
   path: github.com/konveyor/agentic-controller/api/v1alpha1
   version: v1alpha1
 - api:
@@ -62,7 +62,7 @@ resources:
     namespaced: true
   domain: konveyor.io
   group: ""
-  kind: AgentPlaybookRun
+  kind: AgentWorkflowRun
   path: github.com/konveyor/agentic-controller/api/v1alpha1
   version: v1alpha1
 version: "3"

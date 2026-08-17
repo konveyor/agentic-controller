@@ -2,7 +2,7 @@
 # Migrates the coolstore Java EE app to Quarkus using 4 stages.
 #
 # Prerequisites:
-#   - LLMProvider "gcp-vertex-ai" from resources.yaml
+#   - Gateway "gcp-vertex-ai" from resources.yaml
 #   - Hub running with app + identity configured
 #
 # Usage:
@@ -115,7 +115,7 @@ metadata:
   name: migration-plan-agent
 spec:
   image: quay.io/konveyor/agent-java:dev
-  providers:
+  gateways:
     - ref: gcp-vertex-ai
   skillCards:
     - ref: plan
@@ -132,7 +132,7 @@ metadata:
   name: migration-execute-agent
 spec:
   image: quay.io/konveyor/agent-java:dev
-  providers:
+  gateways:
     - ref: gcp-vertex-ai
   skillCards:
     - ref: execute
@@ -149,7 +149,7 @@ metadata:
   name: migration-verify-agent
 spec:
   image: quay.io/konveyor/agent-java:dev
-  providers:
+  gateways:
     - ref: gcp-vertex-ai
   skillCards:
     - ref: verify
@@ -187,15 +187,14 @@ metadata:
   name: coolstore-migration-__TIMESTAMP__
 spec:
   workflowRef: java-ee-to-quarkus
-  models:
-    - role: primary
-      provider: gcp-vertex-ai
-      model: claude-sonnet-4-5
+  gateway: gcp-vertex-ai
   env:
     - name: HUB_BASE_URL
       value: "http://host.containers.internal:8080"
     - name: HUB_TOKEN
       value: "__HUB_TOKEN__"
+    - name: HUB_TOKEN_ID
+      value: "__HUB_TOKEN_ID__"
     - name: APP_ID
       value: "1"
     - name: TARGET_BRANCH

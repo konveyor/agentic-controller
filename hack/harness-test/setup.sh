@@ -29,14 +29,12 @@ kubectl create secret generic vertex-credentials \
     --dry-run=client -o yaml | kubectl apply -f -
 echo "  vertex-credentials created"
 
-# Hub token (JWT signed with default key "tackle")
-HUB_KEY="${HUB_KEY:-tackle}"
-EXP=$(( $(date +%s) + 86400 ))
-HEADER_B64=$(printf '{"typ":"JWT","alg":"HS512"}' | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
-PAYLOAD_B64=$(printf '{"sub":"admin","scope":"*:*","exp":%d}' "$EXP" | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
-SIGNATURE=$(printf '%s.%s' "$HEADER_B64" "$PAYLOAD_B64" | openssl dgst -sha512 -hmac "$HUB_KEY" -binary | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
-HUB_TOKEN="${HEADER_B64}.${PAYLOAD_B64}.${SIGNATURE}"
-echo "  hub token generated (expires in 24h)"
+# Hub token — must be set in environment.
+if [ -z "${HUB_TOKEN:-}" ]; then
+    echo "ERROR: HUB_TOKEN must be set. Export HUB_TOKEN from your Hub instance."
+    exit 1
+fi
+echo "  hub token set (HUB_TOKEN_ID=${HUB_TOKEN_ID:-<unset>})"
 
 echo ""
 echo "=== Building agent images ==="
@@ -113,6 +111,7 @@ TIMESTAMP=$(date +%s)
 sed -e "s/__GCP_PROJECT_ID__/$GCP_PROJECT_ID/g" \
     -e "s/__TIMESTAMP__/$TIMESTAMP/g" \
     -e "s|__HUB_TOKEN__|$HUB_TOKEN|g" \
+    -e "s|__HUB_TOKEN_ID__|${HUB_TOKEN_ID:-}|g" \
     "$SCRIPT_DIR/workflow-resources.yaml" | kubectl apply -f -
 echo "  AgentWorkflowRun: coolstore-migration-$TIMESTAMP"
 

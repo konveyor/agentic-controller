@@ -1,0 +1,6 @@
+kind: bugfix
+
+description: >
+  Stage AgentRuns now inherit all of the parent AgentWorkflowRun's labels
+  (controller-owned keys still win), so label-selector queries such as
+  konveyor.io/application match the runs that actually execute.

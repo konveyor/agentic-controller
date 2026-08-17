@@ -71,19 +71,19 @@ var _ = Describe("AgentWorkflow Controller", func() {
 			workflowName = "ap-ctrl-all-ready"
 			agentName1   = "ap-ctrl-agent-1"
 			agentName2   = "ap-ctrl-agent-2"
-			provName     = "ap-prov-ready"
+			gwName       = "ap-prov-ready"
 			secretName   = "ap-secret-ready"
 		)
 
 		It("should set Ready=True with AllAgentsReady", func() {
-			cleanup := makeReadyProvider(provName, secretName)
+			cleanup := makeReadyGateway(gwName, secretName)
 			defer cleanup()
 
 			agent1 := &konveyoriov1alpha1.Agent{
 				ObjectMeta: metav1.ObjectMeta{Name: agentName1, Namespace: testNamespace},
 				Spec: konveyoriov1alpha1.AgentSpec{
-					Image:     testAgentImage,
-					Providers: []konveyoriov1alpha1.AgentProviderRef{{Ref: provName}},
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, agent1)).To(Succeed())
@@ -92,8 +92,8 @@ var _ = Describe("AgentWorkflow Controller", func() {
 			agent2 := &konveyoriov1alpha1.Agent{
 				ObjectMeta: metav1.ObjectMeta{Name: agentName2, Namespace: testNamespace},
 				Spec: konveyoriov1alpha1.AgentSpec{
-					Image:     testAgentImage,
-					Providers: []konveyoriov1alpha1.AgentProviderRef{{Ref: provName}},
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, agent2)).To(Succeed())

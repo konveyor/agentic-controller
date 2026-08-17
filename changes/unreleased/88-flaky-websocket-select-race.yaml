@@ -1,0 +1,8 @@
+kind: bugfix
+
+description: >
+  Fix select race between response and done channels in WebSocket client
+  that caused spurious connection-closed errors when the server closed
+  the connection immediately after sending the final response. Also fix
+  reconciler conflict race in CRD immutability tests and harden e2e kind
+  download with retries and a pinned version.

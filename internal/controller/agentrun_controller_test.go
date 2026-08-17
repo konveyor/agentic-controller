@@ -33,42 +33,43 @@ import (
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 )
 
-// makeReadyProvider creates an LLMProvider with a verified single-key
+// makeReadyGateway creates a Gateway with a verified single-key
 // credential and simulates successful verification. Returns cleanup function.
-func makeReadyProvider(provName, secretName string) func() {
-	return makeReadyProviderWithCred(provName, secretName,
+func makeReadyGateway(gwName, secretName string) func() {
+	return makeReadyGatewayWithCred(gwName, secretName,
 		map[string]string{testSecretKey: "test-value"}, testSecretKey)
 }
 
-// makeReadyProviderKeyless is makeReadyProvider with a keyless credentialRef
+// makeReadyGatewayKeyless is makeReadyGateway with a keyless credentialRef
 // over a multi-variable (SigV4-style) Secret.
-func makeReadyProviderKeyless(provName, secretName string) func() {
-	return makeReadyProviderWithCred(provName, secretName, map[string]string{
+func makeReadyGatewayKeyless(gwName, secretName string) func() {
+	return makeReadyGatewayWithCred(gwName, secretName, map[string]string{
 		"AWS_ACCESS_KEY_ID":     "test-access-key",
 		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
 		"AWS_REGION":            "us-east-1",
 	}, "")
 }
 
-func makeReadyProviderWithCred(provName, secretName string, stringData map[string]string, key string) func() {
+func makeReadyGatewayWithCred(gwName, secretName string, stringData map[string]string, key string) func() {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespace},
 		StringData: stringData,
 	}
 	ExpectWithOffset(2, k8sClient.Create(ctx, secret)).To(Succeed())
 
-	provider := &konveyoriov1alpha1.LLMProvider{
-		ObjectMeta: metav1.ObjectMeta{Name: provName, Namespace: testNamespace},
-		Spec: konveyoriov1alpha1.LLMProviderSpec{
+	gateway := &konveyoriov1alpha1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: gwName, Namespace: testNamespace},
+		Spec: konveyoriov1alpha1.GatewaySpec{
+			Provider:      testProviderType,
 			Endpoint:      testEndpoint,
-			CredentialRef: konveyoriov1alpha1.LLMProviderCredentialRef{SecretName: secretName, Key: key},
-			Models:        []konveyoriov1alpha1.LLMProviderModel{{Name: testLLMModelName, ContextWindow: 100000}},
+			CredentialRef: konveyoriov1alpha1.GatewayCredentialRef{SecretName: secretName, Key: key},
+			Model:         konveyoriov1alpha1.GatewayModel{Name: testLLMModelName, ContextWindow: 100000},
 		},
 	}
-	ExpectWithOffset(2, k8sClient.Create(ctx, provider)).To(Succeed())
+	ExpectWithOffset(2, k8sClient.Create(ctx, gateway)).To(Succeed())
 
 	// Wait for verification Job, simulate success.
-	jobKey := types.NamespacedName{Name: fmt.Sprintf("%s%s-gen1", verificationJobPrefix, provName), Namespace: testNamespace}
+	jobKey := types.NamespacedName{Name: fmt.Sprintf("%s%s-gen1", verificationJobPrefix, gwName), Namespace: testNamespace}
 	EventuallyWithOffset(1, func(g Gomega) {
 		var job batchv1.Job
 		g.Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
@@ -85,19 +86,19 @@ func makeReadyProviderWithCred(provName, secretName string, stringData map[strin
 	)
 	ExpectWithOffset(1, k8sClient.Status().Update(ctx, &job)).To(Succeed())
 
-	// Wait for provider to become Ready.
-	provKey := types.NamespacedName{Name: provName, Namespace: testNamespace}
+	// Wait for gateway to become Ready.
+	gwKey := types.NamespacedName{Name: gwName, Namespace: testNamespace}
 	EventuallyWithOffset(1, func(g Gomega) {
-		var fetched konveyoriov1alpha1.LLMProvider
-		g.Expect(k8sClient.Get(ctx, provKey, &fetched)).To(Succeed())
+		var fetched konveyoriov1alpha1.Gateway
+		g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
 		readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
 		g.Expect(readyCond).NotTo(BeNil())
 		g.Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
 	}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
 
 	return func() {
-		k8sClient.Delete(ctx, provider) //nolint:errcheck
-		k8sClient.Delete(ctx, secret)   //nolint:errcheck
+		k8sClient.Delete(ctx, gateway) //nolint:errcheck
+		k8sClient.Delete(ctx, secret)  //nolint:errcheck
 	}
 }
 
@@ -153,8 +154,8 @@ var _ = Describe("AgentRun Controller", func() {
 			agent := &konveyoriov1alpha1.Agent{
 				ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: testNamespace},
 				Spec: konveyoriov1alpha1.AgentSpec{
-					Image:     testAgentImage,
-					Providers: []konveyoriov1alpha1.AgentProviderRef{{Ref: "nonexistent-llm"}},
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: "nonexistent-llm"}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
@@ -184,20 +185,20 @@ var _ = Describe("AgentRun Controller", func() {
 		const (
 			name       = "ar-ctrl-bad-param"
 			agentName  = "ar-ctrl-agent-badp"
-			provName   = "ar-prov-badp"
+			gwName     = "ar-prov-badp"
 			secretName = "ar-secret-badp"
 		)
 
 		It("should set Phase=Failed with InvalidParams", func() {
-			cleanup := makeReadyProvider(provName, secretName)
+			cleanup := makeReadyGateway(gwName, secretName)
 			defer cleanup()
 
 			agent := &konveyoriov1alpha1.Agent{
 				ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: testNamespace},
 				Spec: konveyoriov1alpha1.AgentSpec{
-					Image:     testAgentImage,
-					Providers: []konveyoriov1alpha1.AgentProviderRef{{Ref: provName}},
-					Params:    []konveyoriov1alpha1.AgentParam{{Name: testParamName, Required: true}},
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
+					Params:   []konveyoriov1alpha1.AgentParam{{Name: testParamName, Required: true}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
@@ -231,23 +232,23 @@ var _ = Describe("AgentRun Controller", func() {
 		})
 	})
 
-	Context("when a model references a provider not in the Agent", func() {
+	Context("when a gateway is not in the Agent's gateway list", func() {
 		const (
-			name       = "ar-ctrl-bad-model"
-			agentName  = "ar-ctrl-agent-badm"
-			provName   = "ar-prov-badm"
-			secretName = "ar-secret-badm"
+			name       = "ar-ctrl-bad-gw"
+			agentName  = "ar-ctrl-agent-badgw"
+			gwName     = "ar-prov-badgw"
+			secretName = "ar-secret-badgw"
 		)
 
-		It("should set Phase=Failed with InvalidModels", func() {
-			cleanup := makeReadyProvider(provName, secretName)
+		It("should set Phase=Failed with InvalidGateway", func() {
+			cleanup := makeReadyGateway(gwName, secretName)
 			defer cleanup()
 
 			agent := &konveyoriov1alpha1.Agent{
 				ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: testNamespace},
 				Spec: konveyoriov1alpha1.AgentSpec{
-					Image:     testAgentImage,
-					Providers: []konveyoriov1alpha1.AgentProviderRef{{Ref: provName}},
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
@@ -257,9 +258,7 @@ var _ = Describe("AgentRun Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
 				Spec: konveyoriov1alpha1.AgentRunSpec{
 					AgentRef: agentName,
-					Models: []konveyoriov1alpha1.AgentRunModelSelection{
-						{Role: testRolePrimary, Provider: "wrong-provider", Model: "some-model"},
-					},
+					Gateway:  "wrong-gateway",
 				},
 			}
 			Expect(k8sClient.Create(ctx, run)).To(Succeed())
@@ -271,8 +270,8 @@ var _ = Describe("AgentRun Controller", func() {
 				g.Expect(fetched.Status.Phase).To(Equal(konveyoriov1alpha1.AgentRunPhaseFailed))
 				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
 				g.Expect(readyCond).NotTo(BeNil())
-				g.Expect(readyCond.Reason).To(Equal("InvalidModels"))
-				g.Expect(readyCond.Message).To(ContainSubstring("wrong-provider"))
+				g.Expect(readyCond.Reason).To(Equal("InvalidGateway"))
+				g.Expect(readyCond.Message).To(ContainSubstring("wrong-gateway"))
 			}, timeout, interval).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
@@ -284,13 +283,13 @@ var _ = Describe("AgentRun Controller", func() {
 		const (
 			name       = "ar-ctrl-sandbox-create"
 			agentName  = "ar-ctrl-agent-sandbox"
-			provName   = "ar-prov-sandbox"
+			gwName     = "ar-prov-sandbox"
 			secretName = "ar-secret-sandbox"
 			skillName  = "ar-skill-sandbox"
 		)
 
 		It("should create a Sandbox with skills and LLM credentials", func() {
-			cleanup := makeReadyProvider(provName, secretName)
+			cleanup := makeReadyGateway(gwName, secretName)
 			defer cleanup()
 
 			By("creating a Ready SkillCard")
@@ -313,7 +312,7 @@ var _ = Describe("AgentRun Controller", func() {
 				Spec: konveyoriov1alpha1.AgentSpec{
 					Image:      testAgentImage,
 					Prompt:     "You are a test agent.",
-					Providers:  []konveyoriov1alpha1.AgentProviderRef{{Ref: provName}},
+					Gateways:   []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
 					SkillCards: []konveyoriov1alpha1.AgentSkillCardRef{{Ref: skillName}},
 					Params: []konveyoriov1alpha1.AgentParam{
 						{Name: testParamName, Required: true},
@@ -330,7 +329,7 @@ var _ = Describe("AgentRun Controller", func() {
 				Spec: konveyoriov1alpha1.AgentRunSpec{
 					AgentRef:     agentName,
 					Params:       []konveyoriov1alpha1.AgentRunParam{{Name: testParamName, Value: testRepoURL}},
-					Models:       []konveyoriov1alpha1.AgentRunModelSelection{{Role: testRolePrimary, Provider: provName, Model: testLLMModelName}},
+					Gateway:      gwName,
 					Instructions: "Run the migration.",
 				},
 			}
@@ -355,11 +354,44 @@ var _ = Describe("AgentRun Controller", func() {
 			By("verifying restartPolicy is Never so failed stages are observable (#51)")
 			Expect(sandbox.Spec.PodTemplate.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyNever))
 
-			By("verifying the single-key provider credential is injected as API_KEY")
+			By("verifying /tmp EmptyDir volume is present for writable temp space")
+			spec := sandbox.Spec.PodTemplate.Spec
+			var tmpVolFound bool
+			for _, v := range spec.Volumes {
+				if v.Name == tmpVolumeName {
+					tmpVolFound = true
+					Expect(v.VolumeSource.EmptyDir).NotTo(BeNil())
+					Expect(v.VolumeSource.EmptyDir.SizeLimit).NotTo(BeNil())
+				}
+			}
+			Expect(tmpVolFound).To(BeTrue(), "expected a 'tmp' EmptyDir volume")
+
+			var tmpMountFound bool
+			for _, m := range spec.Containers[0].VolumeMounts {
+				if m.Name == tmpVolumeName {
+					tmpMountFound = true
+					Expect(m.MountPath).To(Equal("/tmp"))
+					Expect(m.ReadOnly).To(BeFalse())
+				}
+			}
+			Expect(tmpMountFound).To(BeTrue(), "expected a volume mount for /tmp")
+
+			By("verifying workspace EmptyDir volume is present")
+			var wsVolFound bool
+			for _, v := range spec.Volumes {
+				if v.Name == "workspace" {
+					wsVolFound = true
+					Expect(v.VolumeSource.EmptyDir).NotTo(BeNil())
+					Expect(v.VolumeSource.EmptyDir.SizeLimit).NotTo(BeNil())
+				}
+			}
+			Expect(wsVolFound).To(BeTrue(), "expected a 'workspace' EmptyDir volume")
+
+			By("verifying the single-key gateway credential is injected as API_KEY")
 			container := sandbox.Spec.PodTemplate.Spec.Containers[0]
 			var apiKey *corev1.EnvVar
 			for i := range container.Env {
-				if container.Env[i].Name == "KONVEYOR_MODEL_PRIMARY_API_KEY" {
+				if container.Env[i].Name == "KONVEYOR_LLM_API_KEY" {
 					apiKey = &container.Env[i]
 				}
 			}
@@ -373,23 +405,23 @@ var _ = Describe("AgentRun Controller", func() {
 		})
 	})
 
-	Context("when the model's provider has a keyless credentialRef", func() {
+	Context("when the gateway has a keyless credentialRef", func() {
 		const (
 			name       = "ar-ctrl-keyless-cred"
 			agentName  = "ar-ctrl-agent-keyless"
-			provName   = "ar-prov-keyless"
+			gwName     = "ar-prov-keyless"
 			secretName = "ar-secret-keyless"
 		)
 
 		It("should expose the credential Secret via envFrom instead of API_KEY", func() {
-			cleanup := makeReadyProviderKeyless(provName, secretName)
+			cleanup := makeReadyGatewayKeyless(gwName, secretName)
 			defer cleanup()
 
 			agent := &konveyoriov1alpha1.Agent{
 				ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: testNamespace},
 				Spec: konveyoriov1alpha1.AgentSpec{
-					Image:     testAgentImage,
-					Providers: []konveyoriov1alpha1.AgentProviderRef{{Ref: provName}},
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
@@ -399,7 +431,7 @@ var _ = Describe("AgentRun Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
 				Spec: konveyoriov1alpha1.AgentRunSpec{
 					AgentRef: agentName,
-					Models:   []konveyoriov1alpha1.AgentRunModelSelection{{Role: testRolePrimary, Provider: provName, Model: testLLMModelName}},
+					Gateway:  gwName,
 					EnvFrom: []corev1.EnvFromSource{
 						{ConfigMapRef: &corev1.ConfigMapEnvSource{
 							LocalObjectReference: corev1.LocalObjectReference{Name: "user-extra-env"},
@@ -423,7 +455,7 @@ var _ = Describe("AgentRun Controller", func() {
 
 			By("not injecting a single-key API_KEY env var")
 			for _, e := range container.Env {
-				Expect(e.Name).NotTo(Equal("KONVEYOR_MODEL_PRIMARY_API_KEY"))
+				Expect(e.Name).NotTo(Equal("KONVEYOR_LLM_API_KEY"))
 			}
 
 			By("exposing the whole credential Secret via envFrom, before user sources")

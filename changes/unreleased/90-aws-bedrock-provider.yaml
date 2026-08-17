@@ -1,0 +1,4 @@
+kind: bugfix
+description: >
+  Add aws_bedrock provider mapping to harness. Preserve AWS SDK
+  credentials and derive the endpoint from AWS_REGION without warnings.

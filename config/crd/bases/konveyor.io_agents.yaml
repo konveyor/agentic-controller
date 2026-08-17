@@ -32,9 +32,9 @@ spec:
       openAPIV3Schema:
         description: |-
           Agent is a capability definition declaring what is available for execution.
-          It references SkillCards, SkillCollections, LLMProviders, a container image,
+          It references SkillCards, SkillCollections, Gateways, a container image,
           a prompt, and typed parameters. An Agent does not select a specific model —
-          model selection happens at execution time via AgentRun.
+          gateway selection happens at execution time via AgentRun.
         properties:
           apiVersion:
             description: |-
@@ -56,6 +56,25 @@ spec:
           spec:
             description: AgentSpec defines the desired state of an Agent.
             properties:
+              gateways:
+                description: |-
+                  Gateways is the set of gateways (provider/model combinations)
+                  available for runs. At least one gateway must be specified.
+                items:
+                  description: AgentGatewayRef references a Gateway by name.
+                  properties:
+                    ref:
+                      description: Ref is the name of a Gateway CR in the same namespace.
+                      minLength: 1
+                      type: string
+                  required:
+                  - ref
+                  type: object
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - ref
+                x-kubernetes-list-type: map
               image:
                 description: Image is the container image carrying the agent runtime
                   and toolchains.
@@ -112,26 +131,6 @@ spec:
                   Prompt is the standing instructions for how the agent operates.
                   Composed with AgentRun instructions at execution time.
                 type: string
-              providers:
-                description: |-
-                  Providers is the set of LLM providers and models available for runs.
-                  At least one provider must be specified.
-                items:
-                  description: AgentProviderRef references an LLMProvider by name.
-                  properties:
-                    ref:
-                      description: Ref is the name of an LLMProvider CR in the same
-                        namespace.
-                      minLength: 1
-                      type: string
-                  required:
-                  - ref
-                  type: object
-                minItems: 1
-                type: array
-                x-kubernetes-list-map-keys:
-                - ref
-                x-kubernetes-list-type: map
               skillCards:
                 description: SkillCards references individual SkillCard CRs.
                 items:
@@ -167,8 +166,8 @@ spec:
                 - ref
                 x-kubernetes-list-type: map
             required:
+            - gateways
             - image
-            - providers
             type: object
           status:
             description: AgentStatus defines the observed state of an Agent.

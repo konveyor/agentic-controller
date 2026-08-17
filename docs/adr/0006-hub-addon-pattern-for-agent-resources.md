@@ -2,7 +2,7 @@
 
 Hub's integration with the agent platform follows the established addon
 pattern rather than introducing smart resolution endpoints. Hub creates
-AgentRun/AgentWorkflowRun CRs with `HUB_BASE_URL`, `HUB_APP_ID`, and a
+AgentRun/AgentWorkflowRun CRs with `HUB_BASE_URL`, `APP_ID`, and a
 scoped API token injected as env/envFrom — then walks away
 (fire-and-forget). The harness resolves application metadata from Hub at
 runtime, the same way the addon adapter does for addon tasks today.
@@ -34,10 +34,18 @@ env var.
 When Hub receives a create request for an AgentRun or AgentWorkflowRun:
 
 1. Mints a scoped API token with `AddonScopes`
-2. Stores the token in a Kubernetes Secret
-3. Adds `HUB_BASE_URL`, `HUB_APP_ID`, and the token Secret to the CR's
+2. Stores the token and its database ID in a Kubernetes Secret
+   (`HUB_TOKEN`, `HUB_TOKEN_ID`)
+3. Adds `HUB_BASE_URL`, `APP_ID`, and the token Secret to the CR's
    `spec.env` and `spec.envFrom`
-4. Creates the CR via `client.Create()`
+4. Stamps the application id as a label
+   (`konveyor.io/application: "<app id>"`) when the request carries one
+5. Creates the CR via `client.Create()`
+
+The label duplicates `APP_ID` deliberately: the env var is for the
+harness inside the pod, the label is what makes runs queryable by
+application through the API. Application ids are uint64
+(`hub.ParseAppID`), so they are always valid label values.
 
 Hub does not resolve application metadata, git URLs, or credentials at
 create time. Hub is fire-and-forget.
@@ -50,12 +58,17 @@ etcd are the sole source of truth — no database copies. All reads are
 request-driven (`client.Get()` on demand), no informers.
 
 Agents and AgentWorkflows are filtered by `konveyor.io/managed=true`.
-Other resource types are listed unfiltered.
+AgentRun and AgentWorkflowRun lists accept `?application=<app id>`,
+served as a label selector on `konveyor.io/application`. Runs created
+before the label existed are not matched. An invalid or unsupported
+`application` filter is an error, never a silent unfiltered list. Stage
+AgentRuns do not carry the label yet (#107). Other resource types are
+listed unfiltered.
 
 ### Harness resolves at runtime
 
 The harness acts as a Hub client (analogous to the addon adapter). In
-managed mode (`HUB_BASE_URL` + `HUB_APP_ID` set), it calls Hub's existing
+managed mode (`HUB_BASE_URL` + `APP_ID` set), it calls Hub's existing
 REST API to resolve the application's git URL, branch, and decrypted
 credentials. In standalone mode, it reads from `KONVEYOR_PARAM_*` env
 vars and mounted Secrets.

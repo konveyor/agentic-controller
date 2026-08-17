@@ -1,0 +1,12 @@
+kind: enhancement
+
+description: >
+  Harness fronts the pod ACP port with a tee that makes the sandboxed run
+  observable and steerable: viewers get the run session's live stream in
+  standard ACP event types (message/thought chunks, tool calls, usage,
+  plus a harness-emitted plan ladder, git-push tool calls, and stage
+  outcome), can redirect the active turn via
+  _goose/unstable/session/steer or stop it via session/cancel (relayed
+  onto the run connection; HARNESS_HITL_STEER=off for watch-only), and
+  are offered permission asks (HITL) when responsive viewers are
+  attached; every other path fails closed, including on timeout.

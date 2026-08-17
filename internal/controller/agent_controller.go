@@ -37,7 +37,7 @@ import (
 
 const (
 	// Field index keys for Agent -> referenced resource lookups.
-	agentProviderRefIndexField        = ".spec.providers.ref"
+	agentGatewayRefIndexField         = ".spec.gateways.ref"
 	agentSkillCardRefIndexField       = ".spec.skillCards.ref"
 	agentSkillCollectionRefIndexField = ".spec.skillCollections.ref"
 )
@@ -54,7 +54,7 @@ type AgentReconciler struct {
 
 // Reconcile handles Agent reconciliation.
 //
-// The controller validates that all referenced resources (LLMProviders,
+// The controller validates that all referenced resources (Gateways,
 // SkillCards, SkillCollections) exist and are Ready, then reports
 // aggregate readiness on the Agent.
 func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -72,10 +72,10 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	var notReadyReasons []string
 
-	// Check LLMProviders.
-	for _, provRef := range agent.Spec.Providers {
-		ready, reason := r.checkRef(ctx, agent.Namespace, provRef.Ref,
-			&konveyoriov1alpha1.LLMProvider{}, "LLMProvider")
+	// Check Gateways.
+	for _, gwRef := range agent.Spec.Gateways {
+		ready, reason := r.checkRef(ctx, agent.Namespace, gwRef.Ref,
+			&konveyoriov1alpha1.Gateway{}, "Gateway")
 		if !ready {
 			notReadyReasons = append(notReadyReasons, reason)
 		}
@@ -105,7 +105,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: agent.Generation,
 			Reason:             "AllDependenciesReady",
-			Message:            "All referenced providers, skills, and collections are ready",
+			Message:            "All referenced gateways, skills, and collections are ready",
 		})
 	} else {
 		meta.SetStatusCondition(&agent.Status.Conditions, metav1.Condition{
@@ -143,7 +143,7 @@ func (r *AgentReconciler) checkRef(
 	// Use type switch for the known types.
 	var conditions []metav1.Condition
 	switch o := obj.(type) {
-	case *konveyoriov1alpha1.LLMProvider:
+	case *konveyoriov1alpha1.Gateway:
 		conditions = o.Status.Conditions
 	case *konveyoriov1alpha1.SkillCard:
 		conditions = o.Status.Conditions
@@ -167,17 +167,17 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	// Set up field indexes for efficient reverse lookups.
 	if err := mgr.GetFieldIndexer().IndexField(ctx,
-		&konveyoriov1alpha1.Agent{}, agentProviderRefIndexField,
+		&konveyoriov1alpha1.Agent{}, agentGatewayRefIndexField,
 		func(obj client.Object) []string {
 			agent := obj.(*konveyoriov1alpha1.Agent)
-			refs := make([]string, len(agent.Spec.Providers))
-			for i, p := range agent.Spec.Providers {
-				refs[i] = p.Ref
+			refs := make([]string, len(agent.Spec.Gateways))
+			for i, g := range agent.Spec.Gateways {
+				refs[i] = g.Ref
 			}
 			return refs
 		},
 	); err != nil {
-		return fmt.Errorf("indexing %s: %w", agentProviderRefIndexField, err)
+		return fmt.Errorf("indexing %s: %w", agentGatewayRefIndexField, err)
 	}
 
 	if err := mgr.GetFieldIndexer().IndexField(ctx,
@@ -210,8 +210,8 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&konveyoriov1alpha1.Agent{}).
-		Watches(&konveyoriov1alpha1.LLMProvider{},
-			handler.EnqueueRequestsFromMapFunc(r.findAgentsForResource(agentProviderRefIndexField))).
+		Watches(&konveyoriov1alpha1.Gateway{},
+			handler.EnqueueRequestsFromMapFunc(r.findAgentsForResource(agentGatewayRefIndexField))).
 		Watches(&konveyoriov1alpha1.SkillCard{},
 			handler.EnqueueRequestsFromMapFunc(r.findAgentsForResource(agentSkillCardRefIndexField))).
 		Watches(&konveyoriov1alpha1.SkillCollection{},

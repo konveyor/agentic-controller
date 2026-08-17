@@ -4,10 +4,15 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 )
 
 const (
 	DefaultMaxTurns = 200
+
+	// MaxHITLTimeoutSeconds caps HARNESS_HITL_TIMEOUT_SECONDS (10 min).
+	MaxHITLTimeoutSeconds = 600
 )
 
 type Config struct {
@@ -19,10 +24,29 @@ type Config struct {
 
 	HubBaseURL   string
 	HubToken     string
+	HubTokenID   string
 	AppID        string
 	ACPSecretKey string
 
 	TargetBranch string
+
+	// Workflow stage metadata, injected by the controller for
+	// AgentWorkflowRun stages. Both empty for standalone AgentRuns.
+	WorkflowStage      string
+	WorkflowStageCount string
+
+	// ACPTee: the harness fronts the pod ACP port and tees the run's
+	// live stream to attached viewers (default on; HARNESS_ACP_TEE=off
+	// restores goose owning the port directly).
+	ACPTee bool
+	// HITLTimeout: how long a permission ask waits for an attached
+	// viewer before the headless fallback (HARNESS_HITL_TIMEOUT_SECONDS).
+	HITLTimeout time.Duration
+	// HITLSteer: attached viewers may redirect the run session —
+	// `_goose/unstable/session/steer` and `session/cancel` frames naming
+	// the run session are relayed onto the run connection (default on;
+	// HARNESS_HITL_STEER=off makes the run stream watch-only).
+	HITLSteer bool
 
 	// Prompt context layers, composed by internal/prompt.
 	AgentPrompt       string
@@ -30,14 +54,26 @@ type Config struct {
 	StageInstructions string
 }
 
+// envWithFallback reads primary first, falling back to fallback.
+// This supports the transition from KONVEYOR_MODEL_PRIMARY_* to
+// KONVEYOR_LLM_* env var names. Drop the fallback once all deployed
+// controllers use the new names.
+func envWithFallback(primary, fallback string) string {
+	if v := os.Getenv(primary); v != "" {
+		return v
+	}
+	return os.Getenv(fallback)
+}
+
 func LoadFromEnv() (*Config, error) {
+	model := envWithFallback("KONVEYOR_LLM_MODEL", "KONVEYOR_MODEL_PRIMARY_MODEL")
+
 	required := map[string]string{
-		"KONVEYOR_MODEL_PRIMARY_MODEL":    os.Getenv("KONVEYOR_MODEL_PRIMARY_MODEL"),
-		"KONVEYOR_MODEL_PRIMARY_PROVIDER": os.Getenv("KONVEYOR_MODEL_PRIMARY_PROVIDER"),
-		"HUB_BASE_URL":                    os.Getenv("HUB_BASE_URL"),
-		"APP_ID":                          os.Getenv("APP_ID"),
-		"KONVEYOR_ACP_SECRET_KEY":         os.Getenv("KONVEYOR_ACP_SECRET_KEY"),
-		"TARGET_BRANCH":                   os.Getenv("TARGET_BRANCH"),
+		"KONVEYOR_LLM_MODEL":      model,
+		"HUB_BASE_URL":            os.Getenv("HUB_BASE_URL"),
+		"APP_ID":                  os.Getenv("APP_ID"),
+		"KONVEYOR_ACP_SECRET_KEY": os.Getenv("KONVEYOR_ACP_SECRET_KEY"),
+		"TARGET_BRANCH":           os.Getenv("TARGET_BRANCH"),
 	}
 	for k, v := range required {
 		if v == "" {
@@ -46,16 +82,20 @@ func LoadFromEnv() (*Config, error) {
 	}
 
 	cfg := &Config{
-		Model:        required["KONVEYOR_MODEL_PRIMARY_MODEL"],
-		Provider:     required["KONVEYOR_MODEL_PRIMARY_PROVIDER"],
-		Endpoint:     os.Getenv("KONVEYOR_MODEL_PRIMARY_ENDPOINT"),
-		APIKey:       os.Getenv("KONVEYOR_MODEL_PRIMARY_API_KEY"),
+		Model:        model,
+		Provider:     envWithFallback("KONVEYOR_LLM_PROVIDER", "KONVEYOR_MODEL_PRIMARY_PROVIDER"),
+		Endpoint:     envWithFallback("KONVEYOR_LLM_ENDPOINT", "KONVEYOR_MODEL_PRIMARY_ENDPOINT"),
+		APIKey:       envWithFallback("KONVEYOR_LLM_API_KEY", "KONVEYOR_MODEL_PRIMARY_API_KEY"),
 		MaxTurns:     DefaultMaxTurns,
 		HubBaseURL:   required["HUB_BASE_URL"],
 		HubToken:     os.Getenv("HUB_TOKEN"),
+		HubTokenID:   os.Getenv("HUB_TOKEN_ID"),
 		AppID:        required["APP_ID"],
 		ACPSecretKey: required["KONVEYOR_ACP_SECRET_KEY"],
 		TargetBranch: required["TARGET_BRANCH"],
+
+		WorkflowStage:      os.Getenv("KONVEYOR_WORKFLOW_STAGE"),
+		WorkflowStageCount: os.Getenv("KONVEYOR_WORKFLOW_STAGE_COUNT"),
 
 		AgentPrompt:       os.Getenv("KONVEYOR_PROMPT"),
 		WorkflowGuide:     workflowGuideFromEnv(),
@@ -66,7 +106,31 @@ func LoadFromEnv() (*Config, error) {
 		cfg.MaxTurns = n
 	}
 
+	// Default-ON kill switches: the one E2E path must exercise the tee
+	// (and steering), so only an explicit opt-out disables them.
+	cfg.ACPTee = !envSwitchedOff("HARNESS_ACP_TEE")
+	cfg.HITLSteer = !envSwitchedOff("HARNESS_HITL_STEER")
+	if n, err := strconv.Atoi(os.Getenv("HARNESS_HITL_TIMEOUT_SECONDS")); err == nil && n > 0 {
+		// Ceiling: a single ask parking the run for hours isn't HITL,
+		// it's abandonment — the pod deadline should not be spent inside
+		// one unanswered dialog.
+		if n > MaxHITLTimeoutSeconds {
+			n = MaxHITLTimeoutSeconds
+		}
+		cfg.HITLTimeout = time.Duration(n) * time.Second
+	}
+
 	return cfg, nil
+}
+
+// envSwitchedOff reports whether a default-ON feature env var is set to an
+// explicit opt-out value.
+func envSwitchedOff(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "off", "false", "0", "disabled":
+		return true
+	}
+	return false
 }
 
 // workflowGuideFromEnv reads the workflow guide the controller injects.

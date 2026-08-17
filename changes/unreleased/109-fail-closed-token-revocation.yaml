@@ -1,0 +1,6 @@
+kind: bugfix
+description: >
+  Fix Hub API token leak when an intermediate workflow stage fails. The
+  harness now defaults to fail-closed: the token is revoked on every exit
+  path except when an intermediate stage succeeds and a subsequent stage
+  needs the token.

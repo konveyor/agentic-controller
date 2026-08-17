@@ -1,0 +1,8 @@
+kind: bugfix
+description: >
+  Harness skips the branch push when a run produced no commits beyond its
+  checkout point, so no-op, refused, and skill-less runs no longer litter
+  remote repositories with empty branches. A workflow stage that adds no
+  new commits on the shared branch skips its push the same way. Run
+  notices report a skipped push honestly (no changes to push) instead of
+  claiming results landed on the branch.

@@ -194,11 +194,11 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "SkillCollection")
 		os.Exit(1)
 	}
-	if err := (&controller.LLMProviderReconciler{
+	if err := (&controller.GatewayReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "LLMProvider")
+		setupLog.Error(err, "Failed to create controller", "controller", "Gateway")
 		os.Exit(1)
 	}
 	if err := (&controller.AgentReconciler{

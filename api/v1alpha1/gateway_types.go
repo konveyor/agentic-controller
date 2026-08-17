@@ -20,15 +20,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// LLMProviderCredentialRef references a Secret containing LLM API credentials.
-type LLMProviderCredentialRef struct {
+// GatewayCredentialRef references a Secret containing API credentials.
+type GatewayCredentialRef struct {
 	// SecretName is the name of the Secret in the same namespace.
 	// +kubebuilder:validation:MinLength=1
 	SecretName string `json:"secretName"`
 
 	// Key is the key within the Secret that contains the credential value.
 	// When set, the credential is a single value (e.g. a bearer token) and
-	// is injected into sandbox containers as KONVEYOR_MODEL_<ROLE>_API_KEY.
+	// is injected into sandbox containers as KONVEYOR_LLM_API_KEY.
 	// When omitted, the credential spans multiple environment variables
 	// (e.g. AWS SigV4: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
 	// AWS_REGION) and the whole Secret is exposed to the sandbox container
@@ -38,8 +38,8 @@ type LLMProviderCredentialRef struct {
 	Key string `json:"key,omitempty"`
 }
 
-// LLMProviderModel declares a model available through this provider.
-type LLMProviderModel struct {
+// GatewayModel declares the model served by this gateway.
+type GatewayModel struct {
 	// Name is the model identifier (e.g. "claude-sonnet-4-20250514", "gpt-4o").
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
@@ -55,39 +55,43 @@ type LLMProviderModel struct {
 	Tier string `json:"tier,omitempty"`
 }
 
-// LLMProviderSpec defines the desired state of an LLMProvider.
-type LLMProviderSpec struct {
+// GatewaySpec defines the desired state of a Gateway.
+type GatewaySpec struct {
+	// Provider is the runtime provider identifier (e.g. "anthropic",
+	// "openai", "gcp-vertex-ai"). Injected as KONVEYOR_LLM_PROVIDER
+	// so the harness can map credentials to provider-specific env vars.
+	// This is a pre-OpenShell shim — when OpenShell is integrated,
+	// inference.local eliminates the need for provider-specific
+	// credential mapping and this field is removed.
+	// +kubebuilder:validation:MinLength=1
+	Provider string `json:"provider"`
+
 	// Endpoint is the base URL of the LLM service.
 	// +kubebuilder:validation:MinLength=1
 	Endpoint string `json:"endpoint"`
 
 	// CredentialRef references a Secret containing the API credential.
-	CredentialRef LLMProviderCredentialRef `json:"credentialRef"`
+	CredentialRef GatewayCredentialRef `json:"credentialRef"`
 
-	// Models is the list of models available through this provider.
-	// +kubebuilder:validation:MinItems=1
-	// +listType=map
-	// +listMapKey=name
-	Models []LLMProviderModel `json:"models"`
+	// Model is the model served by this gateway. Each Gateway serves
+	// exactly one provider/model combination, mirroring the OpenShell
+	// gateway model where one gateway = one model.
+	Model GatewayModel `json:"model"`
 }
 
-// LLMProviderStatus defines the observed state of an LLMProvider.
-type LLMProviderStatus struct {
+// GatewayStatus defines the observed state of a Gateway.
+type GatewayStatus struct {
 	// ObservedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// ConnectionVerified indicates whether the controller has successfully
-	// verified connectivity to the provider endpoint.
+	// verified connectivity to the gateway endpoint.
 	// +optional
 	ConnectionVerified bool `json:"connectionVerified,omitempty"`
 
-	// DiscoveredModels lists the model names discovered from the provider.
-	// +optional
-	DiscoveredModels []string `json:"discoveredModels,omitempty"`
-
 	// Conditions represent the latest available observations of the
-	// LLMProvider's state.
+	// Gateway's state.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -96,28 +100,30 @@ type LLMProviderStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=llm
+// +kubebuilder:resource:shortName=gw
 // +kubebuilder:printcolumn:name="Endpoint",type=string,JSONPath=`.spec.endpoint`
+// +kubebuilder:printcolumn:name="Model",type=string,JSONPath=`.spec.model.name`
 // +kubebuilder:printcolumn:name="Verified",type=boolean,JSONPath=`.status.connectionVerified`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// LLMProvider is an LLM service endpoint with credentials and the set of
-// models it serves. Each model declares its context window size and an
-// optional tier label. The controller verifies connectivity on create/update.
-type LLMProvider struct {
+// Gateway is an LLM service endpoint serving exactly one provider/model
+// combination. Each Gateway has credentials and a single model declaration.
+// This mirrors the OpenShell gateway model where one gateway = one model.
+// The controller verifies connectivity on create/update.
+type Gateway struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   LLMProviderSpec   `json:"spec,omitempty"`
-	Status LLMProviderStatus `json:"status,omitempty"`
+	Spec   GatewaySpec   `json:"spec,omitempty"`
+	Status GatewayStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// LLMProviderList contains a list of LLMProvider.
-type LLMProviderList struct {
+// GatewayList contains a list of Gateway.
+type GatewayList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []LLMProvider `json:"items"`
+	Items           []Gateway `json:"items"`
 }

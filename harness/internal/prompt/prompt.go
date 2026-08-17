@@ -28,14 +28,12 @@ not say where to put something.
 `
 
 // Layers are the context layers composed into a stage prompt, ordered from
-// least to most specific. Any of them may be empty except Skill.
+// least to most specific.
 type Layers struct {
 	// AgentPrompt is the Agent's standing prompt.
 	AgentPrompt string
 	// WorkflowGuide is the workflow's ambient guide.
 	WorkflowGuide string
-	// Skill is the content discovered from the mounted SkillCards.
-	Skill string
 	// StageTask is the task for this stage.
 	StageTask string
 }
@@ -59,16 +57,8 @@ func Build(l Layers) string {
 		b.WriteString("\n\n")
 	}
 
-	// Skills are optional (#82): with none mounted the agent still needs to be
-	// told to commit, since nothing else in the prompt says so.
-	if l.Skill != "" {
-		b.WriteString("## Skill Instructions\n\n")
-		b.WriteString(l.Skill)
-		b.WriteString("\n\n")
-	} else {
-		b.WriteString("## Working Guidelines\n\n")
-		b.WriteString("Commit your changes to git with a descriptive message when your work is complete.\n\n")
-	}
+	b.WriteString("## Working Guidelines\n\n")
+	b.WriteString("Commit your changes to git with a descriptive message when your work is complete.\n\n")
 
 	if l.StageTask != "" {
 		b.WriteString("## Stage Task\n\n")

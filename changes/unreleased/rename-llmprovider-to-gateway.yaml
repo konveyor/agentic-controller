@@ -1,0 +1,9 @@
+kind: breaking
+description: >
+  Rename LLMProvider CRD to Gateway and flatten to one model per CR.
+  Each Gateway represents one provider/model combination, mirroring
+  the OpenShell gateway model. Agent.spec.providers renamed to
+  Agent.spec.gateways. AgentRun.spec.models replaced with single
+  AgentRun.spec.gateway field. Env vars changed from
+  KONVEYOR_MODEL_{ROLE}_* to KONVEYOR_LLM_ENDPOINT, KONVEYOR_LLM_MODEL,
+  KONVEYOR_LLM_API_KEY. Harness reads new names with fallback to old.

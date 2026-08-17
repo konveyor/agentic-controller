@@ -60,9 +60,9 @@ type AgentParam struct {
 	Required bool `json:"required,omitempty"`
 }
 
-// AgentProviderRef references an LLMProvider by name.
-type AgentProviderRef struct {
-	// Ref is the name of an LLMProvider CR in the same namespace.
+// AgentGatewayRef references a Gateway by name.
+type AgentGatewayRef struct {
+	// Ref is the name of a Gateway CR in the same namespace.
 	// +kubebuilder:validation:MinLength=1
 	Ref string `json:"ref"`
 }
@@ -92,12 +92,12 @@ type AgentSpec struct {
 	// +optional
 	Prompt string `json:"prompt,omitempty"`
 
-	// Providers is the set of LLM providers and models available for runs.
-	// At least one provider must be specified.
+	// Gateways is the set of gateways (provider/model combinations)
+	// available for runs. At least one gateway must be specified.
 	// +kubebuilder:validation:MinItems=1
 	// +listType=map
 	// +listMapKey=ref
-	Providers []AgentProviderRef `json:"providers"`
+	Gateways []AgentGatewayRef `json:"gateways"`
 
 	// SkillCards references individual SkillCard CRs.
 	// +optional
@@ -140,9 +140,9 @@ type AgentStatus struct {
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Agent is a capability definition declaring what is available for execution.
-// It references SkillCards, SkillCollections, LLMProviders, a container image,
+// It references SkillCards, SkillCollections, Gateways, a container image,
 // a prompt, and typed parameters. An Agent does not select a specific model —
-// model selection happens at execution time via AgentRun.
+// gateway selection happens at execution time via AgentRun.
 type Agent struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

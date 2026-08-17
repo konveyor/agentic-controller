@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"strings"
 
@@ -386,20 +387,27 @@ func (r *AgentWorkflowRunReconciler) createAgentRunForStage(
 		},
 	)
 
+	// Stage AgentRuns inherit all of the workflow run's labels so
+	// label-selector queries (e.g. konveyor.io/application, ADR 0006)
+	// match the runs that actually execute. Controller-owned keys are
+	// written last into a copy so callers cannot override them and the
+	// parent's live label map is never mutated.
+	labels := make(map[string]string, len(pbRun.Labels)+3)
+	maps.Copy(labels, pbRun.Labels)
+	labels[labelManagedBy] = managedByLabel
+	labels[labelAgentWorkflowRun] = pbRun.Name
+	labels[labelStage] = stage.Name
+
 	agentRun := &konveyoriov1alpha1.AgentRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      agentRunName,
 			Namespace: pbRun.Namespace,
-			Labels: map[string]string{
-				labelManagedBy:        managedByLabel,
-				labelAgentWorkflowRun: pbRun.Name,
-				labelStage:            stage.Name,
-			},
+			Labels:    labels,
 		},
 		Spec: konveyoriov1alpha1.AgentRunSpec{
 			AgentRef:     stage.AgentRef,
 			Instructions: stage.Instructions,
-			Models:       pbRun.Spec.Models,
+			Gateway:      pbRun.Spec.Gateway,
 			Params:       stageParams,
 			Env:          env,
 			EnvFrom:      pbRun.Spec.EnvFrom,

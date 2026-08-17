@@ -43,12 +43,11 @@ type AgentWorkflowRunSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	WorkflowRef string `json:"workflowRef"`
 
-	// Models selects specific provider/model combinations for all stages.
-	// Individual stages may override these selections in the future.
+	// Gateway selects the Gateway (provider/model combination) for all
+	// stages. Individual stages may override this selection in the future.
 	// +optional
-	// +listType=map
-	// +listMapKey=role
-	Models []AgentRunModelSelection `json:"models,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	Gateway string `json:"gateway,omitempty"`
 
 	// Params supplies values for Agent parameters across all stages.
 	// +optional

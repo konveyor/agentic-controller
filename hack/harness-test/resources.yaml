@@ -1,19 +1,20 @@
 # Shared resources for harness integration tests in Kind.
-# Creates: LLMProvider (used by workflow-resources.yaml)
+# Creates: Gateway (used by workflow-resources.yaml)
 #
 # Usage:
 #   hack/harness-test/setup.sh
 
 ---
 apiVersion: konveyor.io/v1alpha1
-kind: LLMProvider
+kind: Gateway
 metadata:
   name: gcp-vertex-ai
 spec:
+  provider: gcp-vertex-ai
   endpoint: "global-aiplatform.googleapis.com"
   credentialRef:
     secretName: vertex-credentials
-  models:
-    - name: claude-sonnet-4-5
-      contextWindow: 200000
-      tier: premium
+  model:
+    name: claude-sonnet-4-5
+    contextWindow: 200000
+    tier: premium

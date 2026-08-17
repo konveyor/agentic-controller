@@ -36,17 +36,17 @@ import (
 
 const (
 	// verificationJobPrefix is the prefix for verification Job names.
-	verificationJobPrefix = "llm-verify-"
+	verificationJobPrefix = "gw-verify-"
 
-	// DefaultVerificationImage is the default image used for LLM provider
+	// DefaultVerificationImage is the default image used for Gateway
 	// verification when no override is configured. In production, the
 	// controller should use the agentic-controller-agent image from
 	// this repository.
 	DefaultVerificationImage = "quay.io/konveyor/agentic-controller-agent:latest"
 )
 
-// LLMProviderReconciler reconciles an LLMProvider object.
-type LLMProviderReconciler struct {
+// GatewayReconciler reconciles a Gateway object.
+type GatewayReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
@@ -55,50 +55,49 @@ type LLMProviderReconciler struct {
 	VerificationImage string
 }
 
-// +kubebuilder:rbac:groups=konveyor.io,resources=llmproviders,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=konveyor.io,resources=llmproviders/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=konveyor.io,resources=llmproviders/finalizers,verbs=update
+// +kubebuilder:rbac:groups=konveyor.io,resources=gateways,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=konveyor.io,resources=gateways/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=konveyor.io,resources=gateways/finalizers,verbs=update
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
-// Reconcile handles LLMProvider reconciliation.
+// Reconcile handles Gateway reconciliation.
 //
-// The controller verifies provider connectivity by:
+// The controller verifies gateway connectivity by:
 //  1. Checking that the referenced credential Secret exists
 //  2. Creating a verification Job that tests the endpoint using the
 //     agent base image
 //  3. Updating status based on the Job result
-func (r *LLMProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	var provider konveyoriov1alpha1.LLMProvider
-	if err := r.Get(ctx, req.NamespacedName, &provider); err != nil {
+	var gateway konveyoriov1alpha1.Gateway
+	if err := r.Get(ctx, req.NamespacedName, &gateway); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	logger.V(1).Info("Reconciling LLMProvider", "name", provider.Name)
+	logger.V(1).Info("Reconciling Gateway", "name", gateway.Name)
 
-	original := provider.DeepCopy()
-	provider.Status.ObservedGeneration = provider.Generation
+	original := gateway.DeepCopy()
+	gateway.Status.ObservedGeneration = gateway.Generation
 
 	// Step 1: Check the credential Secret exists.
 	secretKey := types.NamespacedName{
-		Namespace: provider.Namespace,
-		Name:      provider.Spec.CredentialRef.SecretName,
+		Namespace: gateway.Namespace,
+		Name:      gateway.Spec.CredentialRef.SecretName,
 	}
 	var secret corev1.Secret
 	if err := r.Get(ctx, secretKey, &secret); err != nil {
 		if errors.IsNotFound(err) {
-			provider.Status.ConnectionVerified = false
-			provider.Status.DiscoveredModels = nil
-			meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
+			gateway.Status.ConnectionVerified = false
+			meta.SetStatusCondition(&gateway.Status.Conditions, metav1.Condition{
 				Type:               ConditionTypeReady,
 				Status:             metav1.ConditionFalse,
-				ObservedGeneration: provider.Generation,
+				ObservedGeneration: gateway.Generation,
 				Reason:             "CredentialSecretNotFound",
-				Message:            fmt.Sprintf("Secret %q not found", provider.Spec.CredentialRef.SecretName),
+				Message:            fmt.Sprintf("Secret %q not found", gateway.Spec.CredentialRef.SecretName),
 			})
-			return r.patchStatus(ctx, &provider, original)
+			return r.patchStatus(ctx, &gateway, original)
 		}
 		return ctrl.Result{}, err
 	}
@@ -106,63 +105,84 @@ func (r *LLMProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Check the expected key exists in the Secret. A keyless credentialRef
 	// means the whole Secret is the credential (multi-variable, e.g. AWS
 	// SigV4) — then it just must not be empty.
-	if provider.Spec.CredentialRef.Key != "" {
-		if _, ok := secret.Data[provider.Spec.CredentialRef.Key]; !ok {
-			provider.Status.ConnectionVerified = false
-			provider.Status.DiscoveredModels = nil
-			meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
+	if gateway.Spec.CredentialRef.Key != "" {
+		if _, ok := secret.Data[gateway.Spec.CredentialRef.Key]; !ok {
+			gateway.Status.ConnectionVerified = false
+			meta.SetStatusCondition(&gateway.Status.Conditions, metav1.Condition{
 				Type:               ConditionTypeReady,
 				Status:             metav1.ConditionFalse,
-				ObservedGeneration: provider.Generation,
+				ObservedGeneration: gateway.Generation,
 				Reason:             "CredentialKeyNotFound",
 				Message: fmt.Sprintf("Key %q not found in Secret %q",
-					provider.Spec.CredentialRef.Key, provider.Spec.CredentialRef.SecretName),
+					gateway.Spec.CredentialRef.Key, gateway.Spec.CredentialRef.SecretName),
 			})
-			return r.patchStatus(ctx, &provider, original)
+			return r.patchStatus(ctx, &gateway, original)
 		}
 	} else if len(secret.Data) == 0 {
-		provider.Status.ConnectionVerified = false
-		provider.Status.DiscoveredModels = nil
-		meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
+		gateway.Status.ConnectionVerified = false
+		meta.SetStatusCondition(&gateway.Status.Conditions, metav1.Condition{
 			Type:               ConditionTypeReady,
 			Status:             metav1.ConditionFalse,
-			ObservedGeneration: provider.Generation,
+			ObservedGeneration: gateway.Generation,
 			Reason:             "CredentialSecretEmpty",
 			Message: fmt.Sprintf("Secret %q has no data keys",
-				provider.Spec.CredentialRef.SecretName),
+				gateway.Spec.CredentialRef.SecretName),
 		})
-		return r.patchStatus(ctx, &provider, original)
+		return r.patchStatus(ctx, &gateway, original)
 	}
 
 	// Step 2: If already verified (or failed) for the current generation,
 	// skip re-verification. A spec change (new generation) will re-trigger.
-	readyCond := meta.FindStatusCondition(provider.Status.Conditions, ConditionTypeReady)
+	readyCond := meta.FindStatusCondition(gateway.Status.Conditions, ConditionTypeReady)
 	if readyCond != nil &&
-		readyCond.ObservedGeneration == provider.Generation &&
+		readyCond.ObservedGeneration == gateway.Generation &&
 		(readyCond.Reason == "ConnectionVerified" || readyCond.Reason == "ConnectionFailed") {
 		return ctrl.Result{}, nil
 	}
 
+	// Clean up verification Jobs from prior generations. If a Gateway
+	// spec changes while verification is queued/running, the old Job
+	// is orphaned because completion events reconcile the new generation.
+	var oldJobs batchv1.JobList
+	if err := r.List(ctx, &oldJobs,
+		client.InNamespace(gateway.Namespace),
+		client.MatchingLabels{"konveyor.io/gateway": gateway.Name},
+	); err != nil {
+		return ctrl.Result{}, err
+	}
+	currentJobName := fmt.Sprintf("%s%s-gen%d", verificationJobPrefix, gateway.Name, gateway.Generation)
+	for i := range oldJobs.Items {
+		if oldJobs.Items[i].Name != currentJobName {
+			if err := r.Delete(ctx, &oldJobs.Items[i],
+				client.PropagationPolicy(metav1.DeletePropagationBackground),
+			); client.IgnoreNotFound(err) != nil {
+				logger.V(1).Info("Failed to delete stale verification Job",
+					"job", oldJobs.Items[i].Name)
+			}
+		}
+	}
+
 	// Step 3: Check for an existing verification Job.
 	// Include generation in name to avoid collisions when re-verifying.
-	jobName := fmt.Sprintf("%s%s-gen%d", verificationJobPrefix, provider.Name, provider.Generation)
-	jobKey := types.NamespacedName{Namespace: provider.Namespace, Name: jobName}
+	jobName := currentJobName
+	jobKey := types.NamespacedName{Namespace: gateway.Namespace, Name: jobName}
 	var job batchv1.Job
 	if err := r.Get(ctx, jobKey, &job); err != nil {
 		if errors.IsNotFound(err) {
 			// No verification Job exists — create one.
-			if err := r.createVerificationJob(ctx, &provider, jobName); err != nil {
+			if err := r.createVerificationJob(ctx, &gateway, jobName); err != nil {
 				logger.Error(err, "Failed to create verification Job")
 				return ctrl.Result{}, err
 			}
-			meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
+			gateway.Status.ConnectionVerified = false
+			meta.SetStatusCondition(&gateway.Status.Conditions, metav1.Condition{
 				Type:               ConditionTypeReady,
 				Status:             metav1.ConditionFalse,
-				ObservedGeneration: provider.Generation,
+				ObservedGeneration: gateway.Generation,
 				Reason:             "Verifying",
 				Message:            "Connectivity verification in progress",
 			})
-			return r.patchStatus(ctx, &provider, original)
+			return r.patchStatus(ctx, &gateway, original)
 		}
 		return ctrl.Result{}, err
 	}
@@ -170,29 +190,20 @@ func (r *LLMProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Step 3: Check the Job status.
 	if isJobComplete(&job) {
 		if isJobSucceeded(&job) {
-			provider.Status.ConnectionVerified = true
-			// Populate discoveredModels from the spec (the Job verified
-			// the endpoint is reachable; model discovery from the API
-			// response is deferred).
-			models := make([]string, len(provider.Spec.Models))
-			for i, m := range provider.Spec.Models {
-				models[i] = m.Name
-			}
-			provider.Status.DiscoveredModels = models
-			meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
+			gateway.Status.ConnectionVerified = true
+			meta.SetStatusCondition(&gateway.Status.Conditions, metav1.Condition{
 				Type:               ConditionTypeReady,
 				Status:             metav1.ConditionTrue,
-				ObservedGeneration: provider.Generation,
+				ObservedGeneration: gateway.Generation,
 				Reason:             "ConnectionVerified",
-				Message:            fmt.Sprintf("Endpoint %s is reachable", provider.Spec.Endpoint),
+				Message:            fmt.Sprintf("Endpoint %s is reachable", gateway.Spec.Endpoint),
 			})
 		} else {
-			provider.Status.ConnectionVerified = false
-			provider.Status.DiscoveredModels = nil
-			meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
+			gateway.Status.ConnectionVerified = false
+			meta.SetStatusCondition(&gateway.Status.Conditions, metav1.Condition{
 				Type:               ConditionTypeReady,
 				Status:             metav1.ConditionFalse,
-				ObservedGeneration: provider.Generation,
+				ObservedGeneration: gateway.Generation,
 				Reason:             "ConnectionFailed",
 				Message:            fmt.Sprintf("Verification Job %q failed", jobName),
 			})
@@ -204,23 +215,24 @@ func (r *LLMProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	} else {
 		// Job still running.
-		meta.SetStatusCondition(&provider.Status.Conditions, metav1.Condition{
+		gateway.Status.ConnectionVerified = false
+		meta.SetStatusCondition(&gateway.Status.Conditions, metav1.Condition{
 			Type:               ConditionTypeReady,
 			Status:             metav1.ConditionFalse,
-			ObservedGeneration: provider.Generation,
+			ObservedGeneration: gateway.Generation,
 			Reason:             "Verifying",
 			Message:            "Connectivity verification in progress",
 		})
 	}
 
-	return r.patchStatus(ctx, &provider, original)
+	return r.patchStatus(ctx, &gateway, original)
 }
 
 // createVerificationJob creates a Job that verifies connectivity to the
-// LLM provider endpoint using the agent base image.
-func (r *LLMProviderReconciler) createVerificationJob(
+// gateway endpoint using the agent base image.
+func (r *GatewayReconciler) createVerificationJob(
 	ctx context.Context,
-	provider *konveyoriov1alpha1.LLMProvider,
+	gateway *konveyoriov1alpha1.Gateway,
 	jobName string,
 ) error {
 	image := r.VerificationImage
@@ -233,16 +245,16 @@ func (r *LLMProviderReconciler) createVerificationJob(
 	// A keyless credentialRef (multi-variable credential, e.g. AWS SigV4)
 	// has no single value to send as a bearer token, so the probe runs
 	// unauthenticated — reachability still verifies (2xx-4xx passes).
-	env := []corev1.EnvVar{{Name: "LLM_ENDPOINT", Value: provider.Spec.Endpoint}}
-	if provider.Spec.CredentialRef.Key != "" {
+	env := []corev1.EnvVar{{Name: "LLM_ENDPOINT", Value: gateway.Spec.Endpoint}}
+	if gateway.Spec.CredentialRef.Key != "" {
 		env = append(env, corev1.EnvVar{
 			Name: "LLM_API_KEY",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: provider.Spec.CredentialRef.SecretName,
+						Name: gateway.Spec.CredentialRef.SecretName,
 					},
-					Key: provider.Spec.CredentialRef.Key,
+					Key: gateway.Spec.CredentialRef.Key,
 				},
 			},
 		})
@@ -252,11 +264,11 @@ func (r *LLMProviderReconciler) createVerificationJob(
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
-			Namespace: provider.Namespace,
+			Namespace: gateway.Namespace,
 			Labels: map[string]string{
 				labelManagedBy:                managedByLabel,
-				"app.kubernetes.io/component": "llm-verification",
-				"konveyor.io/llmprovider":     provider.Name,
+				"app.kubernetes.io/component": "gateway-verification",
+				"konveyor.io/gateway":         gateway.Name,
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -283,22 +295,22 @@ func (r *LLMProviderReconciler) createVerificationJob(
 		},
 	}
 
-	// Set owner reference so the Job is cleaned up with the provider.
-	if err := ctrl.SetControllerReference(provider, job, r.Scheme); err != nil {
+	// Set owner reference so the Job is cleaned up with the gateway.
+	if err := ctrl.SetControllerReference(gateway, job, r.Scheme); err != nil {
 		return fmt.Errorf("setting owner reference: %w", err)
 	}
 
 	return r.Create(ctx, job)
 }
 
-// patchStatus patches the LLMProvider status and returns a reconcile result.
-func (r *LLMProviderReconciler) patchStatus(
+// patchStatus patches the Gateway status and returns a reconcile result.
+func (r *GatewayReconciler) patchStatus(
 	ctx context.Context,
-	provider *konveyoriov1alpha1.LLMProvider,
-	original *konveyoriov1alpha1.LLMProvider,
+	gateway *konveyoriov1alpha1.Gateway,
+	original *konveyoriov1alpha1.Gateway,
 ) (ctrl.Result, error) {
-	if err := r.Status().Patch(ctx, provider, client.MergeFrom(original)); err != nil {
-		log.FromContext(ctx).Error(err, "Failed to patch LLMProvider status")
+	if err := r.Status().Patch(ctx, gateway, client.MergeFrom(original)); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to patch Gateway status")
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
@@ -326,10 +338,10 @@ func isJobSucceeded(job *batchv1.Job) bool {
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *LLMProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *GatewayReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&konveyoriov1alpha1.LLMProvider{}).
+		For(&konveyoriov1alpha1.Gateway{}).
 		Owns(&batchv1.Job{}).
-		Named("llmprovider").
+		Named("gateway").
 		Complete(r)
 }

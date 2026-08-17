@@ -7,9 +7,9 @@ executing agent workloads via [Agent Sandbox](https://github.com/kubernetes-sigs
 ## Overview
 
 The controller follows the Tekton Task/TaskRun pattern: an **Agent**
-declares what is available (skills, LLM providers, container image,
+declares what is available (skills, gateways (provider/model combinations), container image,
 prompt, typed parameters) and an **AgentRun** supplies concrete values
-(model selections, parameter values, instructions) to trigger execution.
+(gateway selection, parameter values, instructions) to trigger execution.
 
 The controller is domain-agnostic. It does not call Hub, Backstage, or
 any inventory system. Parameter values are opaque — the controller
@@ -22,8 +22,8 @@ CI pipeline) resolves application metadata before creating the CR.
 |-----|---------|
 | **SkillCard** | Individual skill or rule. Resolves to an OCI artifact mounted at `/opt/skills/{name}/`. |
 | **SkillCollection** | Group of skills. References skills by OCI image, git source, or SkillCard CR name. |
-| **LLMProvider** | LLM service endpoint, credentials, and available models. |
-| **Agent** | Template declaring available skills, providers, container image, prompt, and typed parameters. |
+| **Gateway** | LLM service endpoint serving one provider/model combination. |
+| **Agent** | Template declaring available skills, gateways, container image, prompt, and typed parameters. |
 | **AgentRun** | Execute a single Agent with specific values. Creates an Agent Sandbox. |
 | **AgentWorkflow** | Ordered sequence of stages, each referencing an Agent. |
 | **AgentWorkflowRun** | Execute a workflow. Creates AgentRuns sequentially per stage. |

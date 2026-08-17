@@ -64,11 +64,17 @@ func ParseAppID(s string) (uint, error) {
 	return uint(n), nil
 }
 
+// RevokeToken revokes a Hub API token by its database ID.
+func (c *Client) RevokeToken(id uint) error {
+	return c.rich.Token.Revoke(id)
+}
+
 // ClearEnv removes Hub credentials from the process environment so
-// child processes (goose) cannot access them. Note: this does NOT
-// revoke the Hub API token — it remains valid until its JWT expiry.
+// child processes (goose) cannot access them. Token revocation is
+// handled separately by the stage-aware logic in main.
 func ClearEnv() {
 	os.Unsetenv("HUB_BASE_URL")
 	os.Unsetenv("HUB_TOKEN")
+	os.Unsetenv("HUB_TOKEN_ID")
 	os.Unsetenv("APP_ID")
 }
