@@ -1,0 +1,7 @@
+kind: enhancement
+
+description: >
+  Add a `make harness-build` target to cross-compile the migration-harness
+  binary for local use, with GOOS/GOARCH overrides (e.g. windows, darwin).
+  The agent images continue to build it for linux only, inside their
+  Containerfile.

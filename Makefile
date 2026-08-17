@@ -100,15 +100,29 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 ##@ Build
 
 CONTROLLER_AGENT_IMG ?= quay.io/konveyor/agentic-controller-agent:latest
-AGENT_BASE_IMG ?= quay.io/konveyor/agent-base:latest
-AGENT_JAVA_IMG ?= quay.io/konveyor/agent-java:latest
-AGENT_GO_IMG ?= quay.io/konveyor/agent-go:latest
-AGENT_CSHARP_IMG ?= quay.io/konveyor/agent-csharp:latest
-AGENT_NODEJS_IMG ?= quay.io/konveyor/agent-nodejs:latest
+export AGENT_BASE_IMG ?= quay.io/konveyor/agent-base:latest
+export AGENT_JAVA_IMG ?= quay.io/konveyor/agent-java:latest
+export AGENT_GO_IMG ?= quay.io/konveyor/agent-go:latest
+export AGENT_CSHARP_IMG ?= quay.io/konveyor/agent-csharp:latest
+export AGENT_NODEJS_IMG ?= quay.io/konveyor/agent-nodejs:latest
+# AGENT_PLATFORMS defines the target platforms for multi-arch agent image
+# builds (make agent-images-multiarch-build/-push). Limited to what
+# agent-base's goose install step resolves: x86_64 and aarch64.
+export AGENT_PLATFORMS ?= linux/amd64,linux/arm64
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
+
+# GOOS/GOARCH default to the host toolchain; override to cross-compile, e.g.
+# make harness-build GOOS=windows GOARCH=amd64
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
+
+.PHONY: harness-build
+harness-build: ## Build the migration-harness binary for local use (GOOS/GOARCH override to cross-compile; the agent images always build it for linux inside their Containerfile).
+	cd harness && GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o bin/migration-harness ./cmd/migration-harness/
+	if [ "$(GOOS)" = "windows" ]; then mv harness/bin/migration-harness harness/bin/migration-harness.exe; fi
 
 .PHONY: controller-agent-build
 controller-agent-build: ## Build the controller's test/verification agent image.
@@ -148,6 +162,47 @@ agent-images-push: agent-images-build ## Build and push all agent images.
 	$(CONTAINER_TOOL) push $(AGENT_GO_IMG)
 	$(CONTAINER_TOOL) push $(AGENT_CSHARP_IMG)
 	$(CONTAINER_TOOL) push $(AGENT_NODEJS_IMG)
+
+# Multi-arch builds use podman's native manifest-list support: build
+# --platform + --manifest, then manifest push.
+#
+# Each image is first built under a "localhost/..." staging tag, not its
+# real quay.io tag. quay.io/konveyor/agent-base:latest etc. are real,
+# already-published images; if a language image's Containerfile is built
+# with BASE_IMAGE pointed at that real name, podman's build resolves the
+# per-platform FROM by pulling the (single-arch) published image instead of
+# using the multi-arch manifest just built locally under the same name — it
+# only warns ("image platform (linux/amd64) does not match the expected
+# platform (linux/arm64)") and silently continues, baking the wrong
+# architecture's base into the arm64 build. A staging name with no real
+# registry behind it forces strictly local, per-platform-correct resolution.
+# The real tags are only ever attached at push time.
+AGENT_BASE_STAGING := localhost/agent-base:staging
+AGENT_JAVA_STAGING := localhost/agent-java:staging
+AGENT_GO_STAGING := localhost/agent-go:staging
+AGENT_CSHARP_STAGING := localhost/agent-csharp:staging
+AGENT_NODEJS_STAGING := localhost/agent-nodejs:staging
+
+.PHONY: agent-images-multiarch-build
+agent-images-multiarch-build: ## Build agent-base + all agent images as multi-arch (linux/amd64,linux/arm64) manifests, without pushing. Requires podman.
+	podman manifest rm $(AGENT_BASE_STAGING) >/dev/null 2>&1 || true
+	podman rmi $(AGENT_BASE_STAGING) >/dev/null 2>&1 || true
+	podman build --platform=$(AGENT_PLATFORMS) --manifest $(AGENT_BASE_STAGING) -f images/agent-base/Containerfile .
+	@for entry in "agent-java:$(AGENT_JAVA_STAGING)" "agent-go:$(AGENT_GO_STAGING)" "agent-csharp:$(AGENT_CSHARP_STAGING)" "agent-nodejs:$(AGENT_NODEJS_STAGING)"; do \
+		lang=$${entry%%:*}; img=$${entry#*:}; \
+		echo "--- $$lang ($$img) ---"; \
+		podman manifest rm $$img >/dev/null 2>&1 || true; \
+		podman rmi $$img >/dev/null 2>&1 || true; \
+		podman build --platform=$(AGENT_PLATFORMS) --build-arg BASE_IMAGE=$(AGENT_BASE_STAGING) --manifest $$img -f images/$$lang/Containerfile . || exit 1; \
+	done
+
+.PHONY: agent-images-multiarch-push
+agent-images-multiarch-push: agent-images-multiarch-build ## Build and push agent-base + all agent images as multi-arch manifests. Requires podman.
+	podman manifest push --all $(AGENT_BASE_STAGING) docker://$(AGENT_BASE_IMG)
+	podman manifest push --all $(AGENT_JAVA_STAGING) docker://$(AGENT_JAVA_IMG)
+	podman manifest push --all $(AGENT_GO_STAGING) docker://$(AGENT_GO_IMG)
+	podman manifest push --all $(AGENT_CSHARP_STAGING) docker://$(AGENT_CSHARP_IMG)
+	podman manifest push --all $(AGENT_NODEJS_STAGING) docker://$(AGENT_NODEJS_IMG)
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.

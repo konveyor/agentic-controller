@@ -1,0 +1,12 @@
+kind: feature
+
+description: >
+  Build all agent images (agent-base, agent-go, agent-java, agent-csharp,
+  agent-nodejs) for linux/amd64 and linux/arm64 on merge, using
+  konveyor/release-tools' shared multi-arch build-and-push workflow, with
+  agent-base publishing first so the language images build against a
+  genuinely multi-arch base. On pull requests, the same five images are
+  instead built per-arch and uploaded as downloadable workflow artifacts
+  (via konveyor/ci's shared build-image action), with no registry push. A
+  podman-based Makefile target is also added for building the same
+  multi-arch manifests locally.
