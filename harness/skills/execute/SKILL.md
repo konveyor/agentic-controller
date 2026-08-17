@@ -15,9 +15,7 @@ phases. Runs the build gate after each phase and fixes errors before moving on.
 ## Startup
 
 1. Read `.konveyor/implementation.md`
-2. Scan `/opt/skills/` for skills with `tags: [domain]` in their frontmatter
-3. Read the domain skill's phases, modules, and references
-4. Read `.konveyor/questionnaire.json` for context on decisions made
+2. Read `.konveyor/questionnaire.json` for context on decisions made
 
 ---
 
@@ -49,8 +47,29 @@ and run the build after all steps are complete.
 
 You MUST complete this step.
 
-Write `.konveyor/execute.json`. See [templates/execute.md](templates/execute.md)
-for the output format and field definitions.
+Write `.konveyor/execute.json` following the schema below exactly. Do NOT invent
+your own output format.
+
+```json
+{
+  "status": "completed",
+  "steps": [
+    {
+      "id": 1,
+      "file": "<path>",
+      "action": "MODIFY|CREATE|DELETE",
+      "status": "applied|failed",
+      "commit": "<hash or null>",
+      "error": "<error message or null>"
+    }
+  ]
+}
+```
+
+Fields: `status` is the overall execution status. Each `steps` entry records the
+step `id` from the implementation plan, the `file` touched, the `action`
+(MODIFY/CREATE/DELETE), `status` (`applied` or `failed`), the `commit` hash (or
+null if failed), and an `error` message (or null if it succeeded).
 
 Commit:
 

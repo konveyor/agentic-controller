@@ -31,11 +31,7 @@ Find and read the build manifest to identify the build tool, framework, and depe
 
 ### Step 1c: Runtime and deployment configuration discovery
 
-Find configuration files that reveal how the application runs. Do not look for specific app server names — find whatever deployment/runtime config exists:
-
-```bash
-find /workspace -maxdepth 3 -type f \( -name "*.xml" -o -name "*.properties" -o -name "*.yaml" -o -name "*.yml" -o -name "*.conf" -o -name "*.config" -o -name "*.env" -o -name "*.ini" \) | grep -vE 'node_modules|target/|bin/|obj/' | sort
-```
+Find configuration files that reveal how the application runs. Do not look for specific app server names — find whatever deployment/runtime config exists.
 
 Read the configuration files you find. Look for:
 - **Server or runtime references**: anything that names an app server, container, runtime, or platform
@@ -148,7 +144,59 @@ Walk through each of the 7 categories. For each one that applies:
 
 ## Output: .konveyor/questionnaire.json
 
-After all phases, write `.konveyor/questionnaire.json`. See [templates/questionnaire.md](templates/questionnaire.md) for the full schema and field descriptions.
+After all phases, write `.konveyor/questionnaire.json` following the schema below
+exactly. Do NOT invent your own output format.
+
+```json
+{
+  "detection": {
+    "language": "<detected language>",
+    "version": "<detected version>",
+    "frameworks": ["<framework-1>", "<framework-2>"],
+    "build_tool": "<build tool>",
+    "app_server": "<app server or null>",
+    "source_file_count": 0
+  },
+  "decisions": [
+    {
+      "id": 1,
+      "question": "<decision that needs to be made>",
+      "options": ["A) ...", "B) ...", "C) ..."],
+      "recommendation": "<recommended option letter>",
+      "chosen": "<chosen option letter>",
+      "reasoning": "<why this option was chosen>"
+    }
+  ],
+  "mode": "interactive|non-interactive"
+}
+```
+
+### Field reference
+
+**detection**
+
+| Field | Description |
+|---|---|
+| `language` | Primary language (java, javascript, go, python, rust, csharp, etc.) |
+| `version` | Language version detected from build manifest or source |
+| `frameworks` | List of frameworks and libraries detected |
+| `build_tool` | Build tool (maven, gradle, npm, cargo, dotnet, etc.) |
+| `app_server` | Application server if detected, otherwise null |
+| `source_file_count` | Approximate count of source files |
+
+**decisions** — each captures a choice where multiple valid approaches exist.
+
+| Field | Description |
+|---|---|
+| `id` | Sequential decision number |
+| `question` | The decision stated clearly |
+| `options` | 2-4 concrete options with brief trade-offs |
+| `recommendation` | The option letter the agent recommended |
+| `chosen` | The option letter that was selected |
+| `reasoning` | Why this option was chosen over alternatives |
+
+**mode** — `interactive` (decisions presented one at a time) or
+`non-interactive` (agent chose the best option for each autonomously).
 
 ---
 

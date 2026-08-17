@@ -17,7 +17,7 @@ starts and responds correctly. Does NOT re-execute migration steps.
 
 1. Read `.konveyor/implementation.md` — find the Verification section for build, test, and blackbox commands
 2. Read `.konveyor/execute.json` — check if execution completed or was aborted
-3. Scan `/opt/skills/` for domain skills — read `references/verify-errors.md` if it exists for error-to-fix mappings
+3. If a domain skill is loaded, read `references/verify-errors.md` if it exists for error-to-fix mappings
 4. If execution was aborted, log a warning but still attempt verification
 
 ---
@@ -71,12 +71,7 @@ and record `runtime: "skipped"`.
 ### 3a. Start the application
 
 Use the run command from the implementation plan's Verification section, or
-detect it from the framework:
-
-```bash
-# The plan's Verification section should have a run command
-# If not, try common patterns based on detected framework
-```
+detect it from the framework.
 
 Wait for the application to start (timeout: 60 seconds).
 
@@ -120,8 +115,44 @@ Stop the application and verify it shuts down without errors.
 
 You MUST complete this step.
 
-Write `.konveyor/verify.json`. See [templates/verify.md](templates/verify.md)
-for the output format and field definitions.
+Write `.konveyor/verify.json` following the schema below exactly. Do NOT invent
+your own output format.
+
+```json
+{
+  "stage": "verify",
+  "status": "passed|failed",
+  "build": {
+    "status": "passed|failed",
+    "fix_iterations": 0,
+    "remaining_errors": []
+  },
+  "tests": {
+    "status": "passed|failed|skipped",
+    "passed": 0,
+    "failed": 0,
+    "total": 0,
+    "failures": []
+  },
+  "runtime": {
+    "status": "passed|failed|skipped",
+    "health_check": "passed|failed|skipped",
+    "startup_time_ms": 0,
+    "smoke_tests": {
+      "passed": 0,
+      "failed": 0
+    },
+    "log_warnings": [],
+    "clean_shutdown": true
+  },
+  "summary": "<one sentence: build status, test results, runtime status>"
+}
+```
+
+Fields: `status` is `passed` only if the build passes (test/runtime failures are
+documented but do not block). `build`, `tests`, and `runtime` capture the results
+of each step above; `summary` is a one-sentence recap of build, test, and runtime
+status.
 
 Top-level `status` is `passed` only if build passes. Test and runtime failures
 are documented but do not block the stage.
