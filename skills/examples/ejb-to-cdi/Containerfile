@@ -1,0 +1,12 @@
+# Single-skill image: SKILL.md sits at the image root.
+#
+# The loader treats this shape and the bundle shape identically — it detects
+# which by whether SKILL.md is at the root. Kept here as the worked example
+# of a third-party skill that ships on its own.
+#
+#   podman build -t quay.io/example/ejb-to-cdi:dev \
+#     -f skills/examples/ejb-to-cdi/Containerfile skills/examples/ejb-to-cdi
+
+FROM scratch
+
+COPY SKILL.md /SKILL.md

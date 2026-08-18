@@ -269,35 +269,30 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 ##@ Skills
 
-SKILL_IMAGE ?= quay.io/konveyor/skills
-SKILL_DIRS := $(wildcard skills/examples/*/skill.yaml)
-SKILL_DIRS := $(dir $(SKILL_DIRS))
-SKILLCTL_VERSION ?= v0.7.2
-
-SKILLCTL ?= $(LOCALBIN)/skillctl
-
-.PHONY: skillctl
-skillctl: $(SKILLCTL) ## Download skillctl locally if necessary.
-$(SKILLCTL): $(LOCALBIN)
-	$(call go-install-tool,$(SKILLCTL),github.com/redhat-et/skillimage/cmd/skillctl,$(SKILLCTL_VERSION))
+# Skills are ordinary OCI images: a Containerfile, any builder, the same
+# signing and mirroring pipeline as every other image we ship. This repo's
+# skills travel as one bundle image — the loader detects a bundle by the
+# absence of SKILL.md at the image root.
+SKILL_IMAGE ?= quay.io/konveyor/skills:latest
 
 .PHONY: skill-build
-skill-build: skillctl ## Build all example skills into the local OCI store.
-	@for dir in $(SKILL_DIRS); do \
-		echo "Building skill: $${dir}" ;\
-		"$(SKILLCTL)" build "$${dir}" ;\
-	done
+skill-build: ## Build the skill bundle image.
+	$(CONTAINER_TOOL) build -t $(SKILL_IMAGE) -f skills/Containerfile skills
 
 .PHONY: skill-push
-skill-push: skill-build ## Build and push all example skills to the registry.
-	@for dir in $(SKILL_DIRS); do \
-		name=$$(basename "$${dir}") ;\
-		local_ref=$$($(SKILLCTL) list | grep -w "$${name}" | head -1 | awk '{print $$1 ":" $$2}') ;\
-		if [ -z "$${local_ref}" ]; then echo "ERROR: skill '$${name}' not found in local store" >&2; exit 1; fi ;\
-		echo "Tagging $${local_ref} -> $(SKILL_IMAGE):$${name}" ;\
-		"$(SKILLCTL)" tag "$${local_ref}" "$(SKILL_IMAGE):$${name}" ;\
-		echo "Pushing $(SKILL_IMAGE):$${name}" ;\
-		"$(SKILLCTL)" push "$(SKILL_IMAGE):$${name}" ;\
+skill-push: skill-build ## Build and push the skill bundle image.
+	$(CONTAINER_TOOL) push $(SKILL_IMAGE)
+
+# A skill is one directory deep, so a directory of directories is not itself a
+# bundle and its contents are not seen. skills/examples/ is therefore named
+# separately rather than being silently skipped.
+SKILL_TREES ?= ../skills ../skills/examples
+
+.PHONY: skill-validate
+skill-validate: ## Check every SKILL.md frontmatter parses and is complete.
+	@cd harness && for tree in $(SKILL_TREES); do \
+		echo "Validating $${tree}" ;\
+		go run ./cmd/migration-harness skills validate "$${tree}" || exit 1 ;\
 	done
 
 ##@ Changelog
