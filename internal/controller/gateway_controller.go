@@ -43,6 +43,9 @@ const (
 	// controller should use the agentic-controller-agent image from
 	// this repository.
 	DefaultVerificationImage = "quay.io/konveyor/agentic-controller-agent:latest"
+
+	// verificationHTTPCodePattern requires a 2xx status from the probe.
+	verificationHTTPCodePattern = "^2"
 )
 
 // GatewayReconciler reconciles a Gateway object.
@@ -228,6 +231,18 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return r.patchStatus(ctx, &gateway, original)
 }
 
+// gatewayVerificationCurlCommand builds the shell command used by the
+// verification Job. When includeAuth is true, the request sends
+// Authorization: Bearer $LLM_API_KEY. Keyless credentials omit the header
+// so gateways are probed for reachability without an empty Bearer token.
+func gatewayVerificationCurlCommand(includeAuth bool) string {
+	curl := "curl -sk --max-time 10 -o /dev/null -w '%{http_code}'"
+	if includeAuth {
+		curl += ` -H "Authorization: Bearer $LLM_API_KEY"`
+	}
+	return curl + ` "$LLM_ENDPOINT/v1/models" | grep -qE '` + verificationHTTPCodePattern + `'`
+}
+
 // createVerificationJob creates a Job that verifies connectivity to the
 // gateway endpoint using the agent base image.
 func (r *GatewayReconciler) createVerificationJob(
@@ -243,11 +258,12 @@ func (r *GatewayReconciler) createVerificationJob(
 	// The verification Job runs a simple curl against the endpoint.
 	// The agent base image includes curl. Only 2xx counts as success so
 	// 401/403 (invalid or missing API key) fail verification instead of
-	// marking ConnectionVerified. A keyless credentialRef (multi-variable
-	// credential, e.g. AWS SigV4) has no single bearer token; the probe
-	// still requires a 2xx from /v1/models.
+	// marking ConnectionVerified. Keyless credentialRef (empty key,
+	// e.g. AWS SigV4) omits Authorization entirely — an empty Bearer
+	// would 401 under the ^2 check.
+	includeAuth := gateway.Spec.CredentialRef.Key != ""
 	env := []corev1.EnvVar{{Name: "LLM_ENDPOINT", Value: gateway.Spec.Endpoint}}
-	if gateway.Spec.CredentialRef.Key != "" {
+	if includeAuth {
 		env = append(env, corev1.EnvVar{
 			Name: "LLM_API_KEY",
 			ValueFrom: &corev1.EnvVarSource{
@@ -285,8 +301,7 @@ func (r *GatewayReconciler) createVerificationJob(
 							Command: []string{
 								"sh", "-c",
 								// Use env vars to avoid shell injection.
-								// Pass API key via Authorization header to validate credentials.
-								"curl -sk --max-time 10 -o /dev/null -w '%{http_code}' -H \"Authorization: Bearer $LLM_API_KEY\" \"$LLM_ENDPOINT/v1/models\" | grep -qE '^2'",
+								gatewayVerificationCurlCommand(includeAuth),
 							},
 							Env: env,
 						},

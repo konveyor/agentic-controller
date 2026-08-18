@@ -1,0 +1,4 @@
+kind: bugfix
+description: >
+  Treat HTTP 401/403 as Gateway verification failures and omit an empty
+  Authorization Bearer header for keyless credentials.

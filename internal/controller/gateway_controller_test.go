@@ -177,6 +177,10 @@ var _ = Describe("Gateway Controller", func() {
 				var job batchv1.Job
 				g.Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
 				g.Expect(job.Labels["konveyor.io/gateway"]).To(Equal(name))
+				g.Expect(job.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+				g.Expect(job.Spec.Template.Spec.Containers[0].Command).To(ContainElement(
+					ContainSubstring(verificationHTTPCodePattern),
+				))
 			}, timeout, interval).Should(Succeed())
 
 			By("verifying the gateway is in Verifying state")
