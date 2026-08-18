@@ -1,0 +1,78 @@
+# Reproduces the pod shape the AgentRun controller now generates:
+#   - image sources as ImageVolumes staged read-only under /opt/skills-src
+#   - inline sources as a ConfigMap staged the same way
+#   - git sources handed to the loader via KONVEYOR_SKILL_SOURCES
+#   - an always-on skill-loader init container assembling /opt/skills
+#
+# The image source uses subPath to take one skill out of an image holding
+# four, which is what makes a SkillCard mean one skill. Load policy comes from
+# the source declaration, never from content.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: skill-inline-house-rules
+data:
+  SKILL.md: |
+    ---
+    name: house-rules
+    description: Never leave javax imports behind in a migrated module.
+    ---
+
+    Always finish the import rewrite.
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: skill-loader-probe
+spec:
+  restartPolicy: Never
+  initContainers:
+    - name: skill-loader
+      image: localhost/harness-test:dev
+      imagePullPolicy: IfNotPresent
+      args: ["skills", "load"]
+      env:
+        - name: KONVEYOR_SKILL_SOURCES
+          value: '[{"name":"konveyor","subPath":"javaee-to-quarkus"},{"name":"house-rules","type":"rule"},{"name":"acme","type":"rule","git":{"url":"https://github.com/konveyor/agentic-controller"},"subPath":"skills/grill-me"}]'
+      volumeMounts:
+        - name: skills
+          mountPath: /opt/skills
+        - name: skill-konveyor
+          mountPath: /opt/skills-src/konveyor
+          readOnly: true
+        - name: skill-house-rules
+          mountPath: /opt/skills-src/house-rules
+          readOnly: true
+  containers:
+    - name: agent
+      image: localhost/harness-test:dev
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          echo "=== assembled skills root ==="
+          ls -1 /opt/skills
+          echo "=== every SKILL.md, one level deep ==="
+          ls -1 /opt/skills/*/SKILL.md
+          echo "=== supporting files survived ==="
+          ls -1 /opt/skills/javaee-to-quarkus/references/ | head -3
+          echo "=== skills not selected by subPath stayed out ==="
+          ls /opt/skills/plan 2>&1 | head -1
+          echo "=== manifest ==="
+          cat /opt/skills/.konveyor-skills.json
+          echo "=== mount options for the staged ImageVolume ==="
+          grep ' /opt/skills' /proc/self/mountinfo || true
+      volumeMounts:
+        - name: skills
+          mountPath: /opt/skills
+          readOnly: true
+  volumes:
+    - name: skills
+      emptyDir: {}
+    - name: skill-konveyor
+      image:
+        reference: localhost/konveyor-skills:dev
+        pullPolicy: IfNotPresent
+    - name: skill-house-rules
+      configMap:
+        name: skill-inline-house-rules

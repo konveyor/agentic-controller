@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: skill-loader-collision
+spec:
+  restartPolicy: Never
+  initContainers:
+    - name: skill-loader
+      image: localhost/harness-test:dev
+      imagePullPolicy: IfNotPresent
+      args: ["skills", "load"]
+      env:
+        # skills/plan declares frontmatter name "plan", which the bundle also ships.
+        - name: KONVEYOR_SKILL_SOURCES
+          value: '[{"name":"konveyor","subPath":"plan"},{"name":"acme","git":{"url":"https://github.com/konveyor/agentic-controller"},"subPath":"skills/plan"}]'
+      volumeMounts:
+        - {name: skills, mountPath: /opt/skills}
+        - {name: skill-konveyor, mountPath: /opt/skills-src/konveyor, readOnly: true}
+  containers:
+    - name: agent
+      image: localhost/harness-test:dev
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args: ["echo 'THE AGENT SHOULD NEVER START'"]
+      volumeMounts:
+        - {name: skills, mountPath: /opt/skills, readOnly: true}
+  volumes:
+    - name: skills
+      emptyDir: {}
+    - name: skill-konveyor
+      image: {reference: 'localhost/konveyor-skills:dev', pullPolicy: IfNotPresent}

@@ -1,0 +1,27 @@
+# Does a file the init container writes into $HOME survive into the agent
+# container? That is what decides whether the loader could own the
+# ~/.agents/skills link.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: home-boundary-probe
+spec:
+  restartPolicy: Never
+  initContainers:
+    - name: init
+      image: localhost/harness-test:dev
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          mkdir -p /root/.agents && ln -sfn /opt/skills /root/.agents/skills
+          echo "init wrote:"; ls -l /root/.agents/
+  containers:
+    - name: agent
+      image: localhost/harness-test:dev
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          echo "agent sees in /root/.agents:"
+          ls -l /root/.agents/ 2>&1 || echo "  <<< directory does not exist >>>"
