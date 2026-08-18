@@ -38,7 +38,7 @@ make agent-images-push CONTAINER_TOOL=podman          # push to quay (native arc
 
 In CI, all five images (agent-base + the four language images) build for
 `linux/amd64` and `linux/arm64` via
-[konveyor/release-tools](https://github.com/konveyor/release-tools)'
+[konveyor/release-tools](https://github.com/konveyor/release-tools)
 shared `build-push-images.yaml` reusable workflow (see `images.yml`): each
 arch builds natively on its own runner and pushes under an arch-suffixed
 tag, then a final job assembles those into a manifest list under the real

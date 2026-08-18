@@ -121,6 +121,7 @@ GOARCH ?= $(shell go env GOARCH)
 
 .PHONY: harness-build
 harness-build: ## Build the migration-harness binary for local use (GOOS/GOARCH override to cross-compile; the agent images always build it for linux inside their Containerfile).
+	mkdir -p harness/bin
 	cd harness && GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o bin/migration-harness ./cmd/migration-harness/
 	if [ "$(GOOS)" = "windows" ]; then mv harness/bin/migration-harness harness/bin/migration-harness.exe; fi
 

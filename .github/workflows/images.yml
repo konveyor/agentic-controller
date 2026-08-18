@@ -80,7 +80,7 @@ jobs:
           persist-credentials: false
 
       - name: Build and upload agent-base artifact
-        uses: konveyor/ci/build-image@main
+        uses: konveyor/ci/build-image@e45ec039d03d41be52ae0c9abef260ee3ae8172a # main
         with:
           repo: ${{ github.repository }}
           checked_out: true
@@ -121,7 +121,7 @@ jobs:
           persist-credentials: false
 
       - name: Build and upload ${{ matrix.image.name }} artifact
-        uses: konveyor/ci/build-image@main
+        uses: konveyor/ci/build-image@e45ec039d03d41be52ae0c9abef260ee3ae8172a # main
         with:
           repo: ${{ github.repository }}
           checked_out: true
@@ -187,7 +187,7 @@ jobs:
     permissions:
       contents: read
     name: Build and push agent-base (multi-arch)
-    uses: konveyor/release-tools/.github/workflows/build-push-images.yaml@main
+    uses: konveyor/release-tools/.github/workflows/build-push-images.yaml@4cf4ec7e8a15336b88c3e5ba2ee126f4082f53f2 # main
     with:
       registry: "quay.io/konveyor"
       image_name: agent-base
@@ -216,7 +216,7 @@ jobs:
             containerfile: images/agent-csharp/Containerfile
           - name: agent-nodejs
             containerfile: images/agent-nodejs/Containerfile
-    uses: konveyor/release-tools/.github/workflows/build-push-images.yaml@main
+    uses: konveyor/release-tools/.github/workflows/build-push-images.yaml@4cf4ec7e8a15336b88c3e5ba2ee126f4082f53f2 # main
     with:
       registry: "quay.io/konveyor"
       image_name: ${{ matrix.images.name }}
