@@ -342,12 +342,6 @@ func runStage(cmd *cobra.Command, args []string) error {
 	}
 	emitPlan("completed", "completed", "in_progress")
 
-	if promptResult != nil && promptResult.Usage != nil {
-		logging.Info("token usage: input=%d output=%d total=%d",
-			promptResult.Usage.InputTokens, promptResult.Usage.OutputTokens, promptResult.Usage.TotalTokens)
-		writeTokenUsage(cloneDir, promptResult.Usage)
-	}
-
 	// 10. Check goose health
 	if !srv.Alive() {
 		logging.Err("goose serve crashed")
@@ -557,26 +551,4 @@ func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir strin
 
 	logging.Ok("wrote %d analysis insights to %s", len(insights), analysisPath)
 	return true, nil
-}
-
-func writeTokenUsage(workDir string, usage *acp.PromptUsage) {
-	konveyorDir := filepath.Join(workDir, ".konveyor")
-	os.MkdirAll(konveyorDir, 0o755)
-
-	usagePath := filepath.Join(konveyorDir, "token-usage.json")
-
-	var existing []map[string]any
-	if data, err := os.ReadFile(usagePath); err == nil {
-		json.Unmarshal(data, &existing)
-	}
-
-	entry := map[string]any{
-		"inputTokens":  usage.InputTokens,
-		"outputTokens": usage.OutputTokens,
-		"totalTokens":  usage.TotalTokens,
-	}
-	existing = append(existing, entry)
-
-	data, _ := json.MarshalIndent(existing, "", "  ")
-	os.WriteFile(usagePath, data, 0o644)
 }
