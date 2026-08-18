@@ -169,16 +169,16 @@ spec:
   stages:
     - name: questionnaire
       agentRef: migration-questionnaire-agent
-      instructions: "Analyze the source application and produce .konveyor/questionnaire.json with detection results and migration decisions."
+      instructions: "Load the questionnaire skill and follow its SKILL.md exactly. Analyze the source application to detect its tech stack, validate the migration prompt, and gather migration decisions. Use the output schema defined in SKILL.md as the exact structure for .konveyor/questionnaire.json — reproduce every required field. Do not invent your own output format."
     - name: plan
       agentRef: migration-plan-agent
-      instructions: "Follow the plan skill's SKILL.md exactly. Read .konveyor/questionnaire.json and run graphify for grounding. Use the output schemas defined in SKILL.md as the exact structure for .konveyor/spec.md and .konveyor/implementation.md — reproduce every required section and field. Do not invent your own document structure."
+      instructions: "Load the plan skill and follow its SKILL.md exactly. Read .konveyor/questionnaire.json and run graphify for grounding. Use the output schemas defined in SKILL.md as the exact structure for .konveyor/spec.md and .konveyor/implementation.md — reproduce every required section and field. Do not invent your own document structure."
     - name: execute
       agentRef: migration-execute-agent
-      instructions: "Follow the execute skill's SKILL.md exactly. Execute each step in .konveyor/implementation.md to migrate the code from Java EE to Quarkus. Use the output schema defined in SKILL.md as the exact structure for .konveyor/execute.json — reproduce every required field verbatim. Do not invent your own output format."
+      instructions: "Load the execute skill and follow its SKILL.md exactly. Execute each step in .konveyor/implementation.md to migrate the code from Java EE to Quarkus. Use the output schema defined in SKILL.md as the exact structure for .konveyor/execute.json — reproduce every required field verbatim. Do not invent your own output format."
     - name: verify
       agentRef: migration-verify-agent
-      instructions: "Follow the verify skill's SKILL.md exactly. Run the build, fix any compilation errors, then run tests. Use the output schema defined in SKILL.md as the exact structure for .konveyor/verify.json — reproduce every required field verbatim. Do not invent your own output format."
+      instructions: "Load the verify skill and follow its SKILL.md exactly. Run the build, fix any compilation errors, then run tests. Use the output schema defined in SKILL.md as the exact structure for .konveyor/verify.json — reproduce every required field verbatim. Do not invent your own output format."
 
 ---
 apiVersion: konveyor.io/v1alpha1

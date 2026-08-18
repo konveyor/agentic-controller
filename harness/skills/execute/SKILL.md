@@ -2,7 +2,7 @@
 name: execute
 description: >
   Reads the implementation plan and executes migration steps phase by phase.
-  Commits after each step. Does not build, test, or push — that is the verify stage's job.
+  Does not build or test — that is the verify stage's job.
 ---
 
 # Execute Stage
@@ -33,17 +33,13 @@ and run the build after all steps are complete.
 2. Apply the transformation described in the step
 3. Use domain skill references (dependency-map, api-map, config-map, pattern-map) for mappings
 4. Write the modified file
-5. Commit:
-   ```bash
-   git add <path_to_file> && git commit -m "Step <N>: <short description>"
-   ```
-6. Record step status as `applied` with the commit hash
-7. If the step cannot be applied (file missing, transformation impossible):
+5. Record step status as `applied`
+6. If the step cannot be applied (file missing, transformation impossible):
    record step status as `failed` with the error, and continue to the next step
 
 ---
 
-## Write Output and Commit
+## Write Output
 
 You MUST complete this step.
 
@@ -59,7 +55,6 @@ your own output format.
       "file": "<path>",
       "action": "MODIFY|CREATE|DELETE",
       "status": "applied|failed",
-      "commit": "<hash or null>",
       "error": "<error message or null>"
     }
   ]
@@ -68,17 +63,8 @@ your own output format.
 
 Fields: `status` is the overall execution status. Each `steps` entry records the
 step `id` from the implementation plan, the `file` touched, the `action`
-(MODIFY/CREATE/DELETE), `status` (`applied` or `failed`), the `commit` hash (or
-null if failed), and an `error` message (or null if it succeeded).
-
-Commit:
-
-```bash
-git add .konveyor/execute.json
-git commit -m "Add execute results"
-```
-
-Do NOT push.
+(MODIFY/CREATE/DELETE), `status` (`applied` or `failed`), and an `error` message
+(or null if it succeeded).
 
 ---
 
@@ -86,7 +72,6 @@ Do NOT push.
 
 - Follow the domain skill's phase order exactly
 - Select steps by `Phase:` field — only run steps matching the current phase
-- Commit after each step — do NOT push
 - Do NOT fix build errors — that is the verify stage's job
 - Do NOT run tests — that is the verify stage's job
 - Do NOT modify `.konveyor/implementation.md` or `.konveyor/spec.md`

@@ -16,7 +16,7 @@ This skill is designed for **enterprise applications** — codebases that may us
 
 ## Phase 1: Detect
 
-Analyze the source repository at `/workspace/` to build a tech summary. Do this by reading files — not by building or executing the project.
+Analyze the source repository in your working directory (`/workspace/repo`) to build a tech summary. Do this by reading files — not by building or executing the project.
 
 ### Step 1a: Project structure discovery
 

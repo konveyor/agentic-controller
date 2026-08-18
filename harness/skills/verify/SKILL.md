@@ -40,12 +40,10 @@ For each compiler error:
    - Never change business logic — if a fix would alter what the code does, record it and stop
    - Never remove or stub out methods to make the build pass
    - If unsure, record the error and move on
-5. Commit:
-   ```bash
-   git add -A && git commit -m "Verify fix: <describe what was fixed>"
-   ```
 
-Repeat up to `KONVEYOR_PARAM_MAX_FIX_ITERATIONS` times (default 3).
+Re-run the build after each round of fixes and keep working through the
+remaining errors. If a few rounds go by without progress, stop and record the
+remaining errors rather than churning on the same failures.
 
 If still failing: record `build: "failed"` with remaining errors.
 
@@ -111,7 +109,7 @@ Stop the application and verify it shuts down without errors.
 
 ---
 
-## Write Output and Commit
+## Write Output
 
 You MUST complete this step.
 
@@ -157,15 +155,6 @@ status.
 Top-level `status` is `passed` only if build passes. Test and runtime failures
 are documented but do not block the stage.
 
-Commit:
-
-```bash
-git add .konveyor/verify.json
-git commit -m "Add verification results"
-```
-
-Do NOT push.
-
 ---
 
 ## Rules
@@ -176,4 +165,3 @@ Do NOT push.
 - Document test failures, do not fix them
 - Stop the application after runtime checks — do not leave it running
 - You MUST write `.konveyor/verify.json` before finishing
-- Commit when done — do NOT push

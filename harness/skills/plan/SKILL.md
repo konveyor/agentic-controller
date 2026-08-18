@@ -16,7 +16,7 @@ decisions supplement it. Does NOT modify any source files — planning only.
 
 - `.konveyor/questionnaire.json` — decisions from prior stage
 - `.konveyor/analysis.json` — Kantra rule violations and patterns (if present)
-- Domain skills (`tags: [domain]`) — migration knowledge (phases, modules, references) if avaialble 
+- Domain skill — migration knowledge (phases, modules, references), if one is loaded
 
 ---
 
@@ -129,19 +129,16 @@ your own headings.
 <name and description of the domain skill being used, or "none">
 ```
 
-### Interactive mode
+### Approval
 
-If `KONVEYOR_PARAM_INTERACTIVE` is `true`: present `.konveyor/spec.md` for
-approval.
+If the harness runs this stage in an approval mode that surfaces the spec to a
+human, present `.konveyor/spec.md` for approval before continuing.
 
-- If the user **approves**: proceed to Phase 3.
-- If the user **rejects**: ask what needs to change, revise the spec, and
+- If the spec is **approved**: proceed to Phase 3.
+- If the spec is **rejected**: ask what needs to change, revise the spec, and
   re-present for approval. Repeat until approved.
 
-### Non-interactive mode (default)
-
-If `KONVEYOR_PARAM_INTERACTIVE` is unset or not `true`: proceed directly to
-Phase 3. This is the default — interactive mode requires explicit opt-in.
+Otherwise, proceed directly to Phase 3.
 
 ---
 
@@ -263,24 +260,15 @@ for each config file — one file per step, always.
 
 ---
 
-## Phase 4 — Write Output and Commit
+## Phase 4 — Write Output
 
-You MUST complete this phase — planning is not done until outputs are written
-and committed.
+You MUST complete this phase — planning is not done until outputs are written.
 
 1. Create the `.konveyor/` directory if it does not exist
 2. Write `.konveyor/spec.md`
 3. Write `.konveyor/implementation.md`
-4. Commit the outputs:
 
-```bash
-git add .konveyor/spec.md .konveyor/implementation.md
-git commit -m "Add migration plan and spec"
-```
-
-Do NOT push.
-
-The stage is NOT complete until both files are written and committed.
+The stage is NOT complete until both files are written.
 
 ---
 
@@ -292,4 +280,3 @@ The stage is NOT complete until both files are written and committed.
 - Follow the domain skill's phase order when structuring steps
 - Honor questionnaire decisions — if a decision was made, do not re-derive your own preference
 - You MUST write `.konveyor/spec.md` and `.konveyor/implementation.md` before finishing
-- Commit plan outputs when done — do NOT push
