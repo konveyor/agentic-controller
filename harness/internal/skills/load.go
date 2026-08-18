@@ -582,3 +582,48 @@ func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+// ReadManifest loads what the loader recorded for this pod.
+//
+// The harness reads it to find the always-loaded rules. Skills are optional
+// (#82), so a missing manifest means a run with no skills rather than an
+// error: the loader writes one whenever it runs, and a pod that never ran it
+// has nothing to inject.
+func ReadManifest(skillsDir string) (*Manifest, error) {
+	raw, err := os.ReadFile(filepath.Join(skillsDir, ManifestFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &Manifest{}, nil
+		}
+		return nil, fmt.Errorf("reading %s: %w", ManifestFile, err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", ManifestFile, err)
+	}
+	return &m, nil
+}
+
+// RuleContent returns the body of every always-loaded rule, in manifest order,
+// keyed for the prompt by skill name.
+//
+// ADR 0014: no runtime feature guarantees content reaches the model, so a rule
+// is injected rather than left for the agent to load. The body is read from the
+// assembled root, which is the same content the runtime would have served.
+func RuleContent(skillsDir string, m *Manifest) ([]Rule, error) {
+	out := make([]Rule, 0, len(m.Rules))
+	for _, name := range m.Rules {
+		body, err := os.ReadFile(filepath.Join(skillsDir, name, SkillFile))
+		if err != nil {
+			return nil, fmt.Errorf("reading rule %q: %w", name, err)
+		}
+		out = append(out, Rule{Name: name, Body: skill.Body(string(body))})
+	}
+	return out, nil
+}
+
+// Rule is one always-loaded skill, ready to place in a prompt.
+type Rule struct {
+	Name string
+	Body string
+}

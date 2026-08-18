@@ -27,11 +27,21 @@ commits if you stage broadly. This applies even when a skill's instructions do
 not say where to put something.
 `
 
+// Rule is one always-loaded skill, injected into every prompt.
+type Rule struct {
+	Name string
+	Body string
+}
+
 // Layers are the context layers composed into a stage prompt, ordered from
 // least to most specific.
 type Layers struct {
 	// AgentPrompt is the Agent's standing prompt.
 	AgentPrompt string
+	// Rules are the always-loaded skills, in the order the loader assembled
+	// them. On-demand skills are not here; the runtime discovers those and the
+	// agent reads them if it judges them relevant (ADR 0014).
+	Rules []Rule
 	// WorkflowGuide is the workflow's ambient guide.
 	WorkflowGuide string
 	// StageTask is the task for this stage.
@@ -49,6 +59,18 @@ func Build(l Layers) string {
 	if l.AgentPrompt != "" {
 		b.WriteString(l.AgentPrompt)
 		b.WriteString("\n\n")
+	}
+
+	// After the environment rules and before anything task-specific, so a
+	// later layer cannot read as relaxing them.
+	if len(l.Rules) > 0 {
+		b.WriteString("## Rules\n\n")
+		b.WriteString("These always apply. They are not optional and not task-specific.\n\n")
+		for _, r := range l.Rules {
+			b.WriteString("### " + r.Name + "\n\n")
+			b.WriteString(strings.TrimRight(r.Body, "\n"))
+			b.WriteString("\n\n")
+		}
 	}
 
 	if l.WorkflowGuide != "" {

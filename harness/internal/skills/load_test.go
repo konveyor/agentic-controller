@@ -550,3 +550,77 @@ func TestLoadRejectsATraversingSourceName(t *testing.T) {
 		t.Fatal("want an error when a source name escapes the staging directory")
 	}
 }
+
+func TestRuleContentRoundTripsWhatLoadAssembled(t *testing.T) {
+	src, dest := t.TempDir(), t.TempDir()
+	writeSkill(t, filepath.Join(src, "house", "house-rules"), "house-rules", nil)
+	writeSkill(t, filepath.Join(src, "tools", "planner"), "planner", nil)
+
+	if _, err := load(t, src, dest,
+		Source{Name: "house", Type: TypeRule},
+		Source{Name: "tools"},
+	); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	m, err := ReadManifest(dest)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	rules, err := RuleContent(dest, m)
+	if err != nil {
+		t.Fatalf("rule content: %v", err)
+	}
+
+	if len(rules) != 1 || rules[0].Name != "house-rules" {
+		t.Fatalf("rules = %+v, want only house-rules", rules)
+	}
+	// The frontmatter is loader bookkeeping; the model should see the prose.
+	if strings.Contains(rules[0].Body, "description:") {
+		t.Errorf("frontmatter leaked into the prompt body: %q", rules[0].Body)
+	}
+	if !strings.Contains(rules[0].Body, "# house-rules") {
+		t.Errorf("body = %q, want the skill's content", rules[0].Body)
+	}
+}
+
+func TestReadManifestTreatsAMissingFileAsNoSkills(t *testing.T) {
+	m, err := ReadManifest(t.TempDir())
+	if err != nil {
+		t.Fatalf("a missing manifest should not be an error: %v", err)
+	}
+	if len(m.Skills) != 0 || len(m.Rules) != 0 {
+		t.Errorf("manifest = %+v, want empty", m)
+	}
+}
+
+func TestReadManifestRejectsAnUnparseableFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ManifestFile), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadManifest(dir); err == nil {
+		t.Fatal("want an error for an unparseable manifest")
+	}
+}
+
+func TestRuleContentFailsOnAMissingRule(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := RuleContent(dir, &Manifest{Rules: []string{"gone"}}); err == nil {
+		t.Fatal("want an error when a manifest rule has no SKILL.md")
+	}
+}
+
+func TestRuleContentPreservesManifestOrder(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"alpha", "beta"} {
+		writeSkill(t, filepath.Join(dir, n), n, nil)
+	}
+	rules, err := RuleContent(dir, &Manifest{Rules: []string{"beta", "alpha"}})
+	if err != nil {
+		t.Fatalf("rule content: %v", err)
+	}
+	if len(rules) != 2 || rules[0].Name != "beta" || rules[1].Name != "alpha" {
+		t.Errorf("rules = %+v, want manifest order", rules)
+	}
+}

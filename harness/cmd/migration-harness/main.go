@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/konveyor/migration-harness/internal/hub"
 	"github.com/konveyor/migration-harness/internal/logging"
 	"github.com/konveyor/migration-harness/internal/prompt"
+	"github.com/konveyor/migration-harness/internal/skills"
 	"github.com/konveyor/migration-harness/internal/tee"
 	"github.com/konveyor/migration-harness/internal/watcher"
 )
@@ -139,6 +141,28 @@ func runStage(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("discover skills: %w", err)
 	}
 	hasSkills := len(skillPaths) > 0
+
+	// Always-loaded rules. The runtime discovers on-demand skills itself and
+	// the agent reads them when it judges them relevant, but nothing
+	// guarantees it ever reads a rule, so the harness puts those in the prompt
+	// (ADR 0014). The loader decided which are rules and recorded them, since
+	// a skill's directory is its frontmatter name and nothing outside the
+	// image knows that (ADR 0015).
+	manifest, err := skills.ReadManifest(skillsDir())
+	if err != nil {
+		return fmt.Errorf("read skill manifest: %w", err)
+	}
+	rules, err := skills.RuleContent(skillsDir(), manifest)
+	if err != nil {
+		return fmt.Errorf("read rules: %w", err)
+	}
+	if len(rules) > 0 {
+		names := make([]string, 0, len(rules))
+		for _, r := range rules {
+			names = append(names, r.Name)
+		}
+		logging.Info("always-loaded rules: %s", strings.Join(names, ", "))
+	}
 
 	if hasSkills {
 		if err := git.EnsureGitignore(cloneDir, []string{
@@ -295,8 +319,13 @@ func runStage(cmd *cobra.Command, args []string) error {
 	emitPlan("completed", "pending", "pending")
 
 	// 7. Build prompt from context layers
+	promptRules := make([]prompt.Rule, 0, len(rules))
+	for _, r := range rules {
+		promptRules = append(promptRules, prompt.Rule{Name: r.Name, Body: r.Body})
+	}
 	stagePrompt := prompt.Build(prompt.Layers{
 		AgentPrompt:   cfg.AgentPrompt,
+		Rules:         promptRules,
 		WorkflowGuide: cfg.WorkflowGuide,
 		StageTask:     cfg.StageInstructions,
 	})
