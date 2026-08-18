@@ -12,6 +12,8 @@ require (
 	sigs.k8s.io/controller-runtime v0.24.1
 )
 
+require gopkg.in/yaml.v3 v3.0.1 // indirect
+
 require (
 	cel.dev/expr v0.25.1 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect

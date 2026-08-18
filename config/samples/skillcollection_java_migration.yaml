@@ -1,3 +1,7 @@
+# A collection groups skills so an Agent can reference them in one line.
+# Grouping is separate from packaging: plan and javaee-to-quarkus come out of
+# the same image, house-rules has no image at all, and the collection neither
+# knows nor cares.
 apiVersion: konveyor.io/v1alpha1
 kind: SkillCollection
 metadata:
@@ -5,13 +9,9 @@ metadata:
 spec:
   version: "2.0.0"
   skills:
-    - name: javax-to-jakarta-ee
-      skillCardRef: javax-to-jakarta-ee
-    - name: maven-migration
-      skillCardRef: maven-migration
-    - name: no-javax-imports
-      skillCardRef: no-javax-imports
-    - name: ejb-to-cdi
-      skillCardRef: ejb-to-cdi
+    - name: plan
+      skillCardRef: plan
     - name: javaee-to-quarkus
       skillCardRef: javaee-to-quarkus
+    - name: house-rules
+      skillCardRef: house-rules

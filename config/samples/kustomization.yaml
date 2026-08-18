@@ -1,11 +1,11 @@
-# Default skill resources installed with the controller.
-# These provide out-of-the-box migration skills backed by
-# OCI images pushed to quay.io/konveyor/skills/.
+# Default skill resources installed with the controller, one resource per file
+# as kubebuilder scaffolds them.
+#
+# plan and javaee-to-quarkus come out of one image, each selected with
+# subPath; house-rules is inline and needs no image at all.
 resources:
-  - skillcard_javax_to_jakarta_ee.yaml
-  - skillcard_maven_migration.yaml
-  - skillcard_no_javax_imports.yaml
-  - skillcard_ejb_to_cdi.yaml
+  - skillcard_plan.yaml
   - skillcard_javaee_to_quarkus.yaml
+  - skillcard_inline_house_rules.yaml
   - skillcollection_java_migration.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples
