@@ -85,7 +85,7 @@ jobs:
           repo: ${{ github.repository }}
           checked_out: true
           image_name: agent-base
-          image_tag: pr${{ github.event.pull_request.number }}_${{ matrix.arch }}
+          image_tag: pr${{ github.event.pull_request.number }}-${{ matrix.arch }}
           dockerfile_path: images/agent-base/Containerfile
           build_context: "."
           cache-key-file: harness/go.sum
@@ -126,55 +126,11 @@ jobs:
           repo: ${{ github.repository }}
           checked_out: true
           image_name: ${{ matrix.image.name }}
-          image_tag: pr${{ github.event.pull_request.number }}_${{ matrix.arch_info.arch }}
+          image_tag: pr${{ github.event.pull_request.number }}-${{ matrix.arch_info.arch }}
           dockerfile_path: ${{ matrix.image.containerfile }}
           build_context: "."
-          base_image: agent-base--pr${{ github.event.pull_request.number }}_${{ matrix.arch_info.arch }}
+          base_image: agent-base--pr${{ github.event.pull_request.number }}-${{ matrix.arch_info.arch }}
           base_image_arg: BASE_IMAGE
-
-  # Combine each image's amd64+arm64 artifacts into one downloadable
-  # multi-arch manifest tar (podman manifest add ... docker-archive:<file>,
-  # then podman manifest push --all ... oci-archive:<file>) — no registry
-  # involved, so there's no risk of the local/registry name-collision issue
-  # documented in images/README.md.
-  agent-images-multiarch-artifact:
-    needs: [agent-base-artifact, agent-lang-images-artifact]
-    if: github.event_name == 'pull_request'
-    name: Combine ${{ matrix.image }} multi-arch artifact
-    strategy:
-      fail-fast: false
-      matrix:
-        image: [agent-base, agent-go, agent-java, agent-csharp, agent-nodejs]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download per-arch ${{ matrix.image }} artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: "${{ matrix.image }}--pr${{ github.event.pull_request.number }}_*"
-          path: /tmp/images
-          merge-multiple: true
-
-      - name: Combine into a multi-arch manifest and save
-        id: combine
-        run: |
-          TAG="pr${{ github.event.pull_request.number }}"
-          podman manifest create "${{ matrix.image }}:${TAG}"
-          for image in /tmp/images/*.tar; do
-            echo "Loading image: ${image}"
-            podman load -i "${image}"
-            podman manifest add "${{ matrix.image }}:${TAG}" "docker-archive:${image}"
-          done
-          mkdir -p image_artifact
-          TAR_FILE="image_artifact/${{ matrix.image }}--${TAG}-multiarch.tar"
-          podman manifest push --all "${{ matrix.image }}:${TAG}" "oci-archive:${TAR_FILE}:${{ matrix.image }}:${TAG}"
-          echo "tar_file=${TAR_FILE}" >> "$GITHUB_OUTPUT"
-
-      - name: Upload combined multi-arch artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: "${{ matrix.image }}--pr${{ github.event.pull_request.number }}-multiarch"
-          path: ${{ steps.combine.outputs.tar_file }}
-          retention-days: 7
 
   # Multi-arch (amd64/arm64) build+push, via Konveyor's shared reusable
   # workflow: each arch builds natively (arm64 gets a real ARM runner) and

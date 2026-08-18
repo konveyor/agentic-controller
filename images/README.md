@@ -54,8 +54,8 @@ make agent-images-multiarch-build                    # build both platforms loca
 make agent-images-multiarch-push                     # build and push multi-arch manifests to quay
 ```
 
-These local targets build agent-base first under a `localhost/...` staging
-tag rather than its real quay.io tag — building directly under the real
+These local targets build agent-base first under a `localhost/...` tag
+rather than its real quay.io tag — building directly under the real
 name would let podman's per-platform `FROM` resolution pull the
 already-published (single-arch) image from quay instead of using the
 multi-arch manifest just built locally under that same name, silently
@@ -68,17 +68,16 @@ assembling the manifest.
 
 On a pull request, images aren't pushed anywhere — instead `images.yml`
 builds all five images for both `linux/amd64` and `linux/arm64` and
-uploads each as a downloadable workflow artifact, via
+uploads each as a downloadable per-arch workflow artifact
+(`<image>--pr<N>-<arch>`, e.g. `agent-java--pr148-amd64`), via
 [konveyor/ci](https://github.com/konveyor/ci)'s shared `build-image`
 action (the same one analyzer-lsp's `demo-testing.yml` uses):
 
 1. `agent-base-artifact` builds agent-base per arch and uploads
-   `agent-base--pr<N>_<arch>`.
+   `agent-base--pr<N>-<arch>`.
 2. `agent-lang-images-artifact` (needs agent-base-artifact) builds each
    language image per arch, downloading and loading the matching
    agent-base artifact as its `BASE_IMAGE` build-arg.
-3. `agent-images-multiarch-artifact` downloads each image's two per-arch
-   tars, combines them into a manifest list locally (`podman manifest add
-   ... docker-archive:<file>` — no registry involved), and uploads one
-   combined `<image>--pr<N>-multiarch` tar per image, loadable with
-   `podman load`.
+
+Each per-arch tar is a plain `podman load`-able single-arch image — grab
+the one matching your machine's architecture to test it locally.

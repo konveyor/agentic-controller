@@ -167,43 +167,43 @@ agent-images-push: agent-images-build ## Build and push all agent images.
 # Multi-arch builds use podman's native manifest-list support: build
 # --platform + --manifest, then manifest push.
 #
-# Each image is first built under a "localhost/..." staging tag, not its
-# real quay.io tag. quay.io/konveyor/agent-base:latest etc. are real,
+# Each image is first built under a "localhost/..." tag, not its real
+# quay.io tag. quay.io/konveyor/agent-base:latest etc. are real,
 # already-published images; if a language image's Containerfile is built
 # with BASE_IMAGE pointed at that real name, podman's build resolves the
 # per-platform FROM by pulling the (single-arch) published image instead of
 # using the multi-arch manifest just built locally under the same name — it
 # only warns ("image platform (linux/amd64) does not match the expected
 # platform (linux/arm64)") and silently continues, baking the wrong
-# architecture's base into the arm64 build. A staging name with no real
-# registry behind it forces strictly local, per-platform-correct resolution.
-# The real tags are only ever attached at push time.
-AGENT_BASE_STAGING := localhost/agent-base:staging
-AGENT_JAVA_STAGING := localhost/agent-java:staging
-AGENT_GO_STAGING := localhost/agent-go:staging
-AGENT_CSHARP_STAGING := localhost/agent-csharp:staging
-AGENT_NODEJS_STAGING := localhost/agent-nodejs:staging
+# architecture's base into the arm64 build. A "localhost/..." reference has
+# no real registry behind it, forcing strictly local, per-platform-correct
+# resolution. The real tags are only ever attached at push time.
+AGENT_BASE_LOCALHOST := localhost/agent-base:latest
+AGENT_JAVA_LOCALHOST := localhost/agent-java:latest
+AGENT_GO_LOCALHOST := localhost/agent-go:latest
+AGENT_CSHARP_LOCALHOST := localhost/agent-csharp:latest
+AGENT_NODEJS_LOCALHOST := localhost/agent-nodejs:latest
 
 .PHONY: agent-images-multiarch-build
 agent-images-multiarch-build: ## Build agent-base + all agent images as multi-arch (linux/amd64,linux/arm64) manifests, without pushing. Requires podman.
-	podman manifest rm $(AGENT_BASE_STAGING) >/dev/null 2>&1 || true
-	podman rmi $(AGENT_BASE_STAGING) >/dev/null 2>&1 || true
-	podman build --platform=$(AGENT_PLATFORMS) --manifest $(AGENT_BASE_STAGING) -f images/agent-base/Containerfile .
-	@for entry in "agent-java:$(AGENT_JAVA_STAGING)" "agent-go:$(AGENT_GO_STAGING)" "agent-csharp:$(AGENT_CSHARP_STAGING)" "agent-nodejs:$(AGENT_NODEJS_STAGING)"; do \
+	podman manifest rm $(AGENT_BASE_LOCALHOST) >/dev/null 2>&1 || true
+	podman rmi $(AGENT_BASE_LOCALHOST) >/dev/null 2>&1 || true
+	podman build --platform=$(AGENT_PLATFORMS) --manifest $(AGENT_BASE_LOCALHOST) -f images/agent-base/Containerfile .
+	@for entry in "agent-java:$(AGENT_JAVA_LOCALHOST)" "agent-go:$(AGENT_GO_LOCALHOST)" "agent-csharp:$(AGENT_CSHARP_LOCALHOST)" "agent-nodejs:$(AGENT_NODEJS_LOCALHOST)"; do \
 		lang=$${entry%%:*}; img=$${entry#*:}; \
 		echo "--- $$lang ($$img) ---"; \
 		podman manifest rm $$img >/dev/null 2>&1 || true; \
 		podman rmi $$img >/dev/null 2>&1 || true; \
-		podman build --platform=$(AGENT_PLATFORMS) --build-arg BASE_IMAGE=$(AGENT_BASE_STAGING) --manifest $$img -f images/$$lang/Containerfile . || exit 1; \
+		podman build --platform=$(AGENT_PLATFORMS) --build-arg BASE_IMAGE=$(AGENT_BASE_LOCALHOST) --manifest $$img -f images/$$lang/Containerfile . || exit 1; \
 	done
 
 .PHONY: agent-images-multiarch-push
 agent-images-multiarch-push: agent-images-multiarch-build ## Build and push agent-base + all agent images as multi-arch manifests. Requires podman.
-	podman manifest push --all $(AGENT_BASE_STAGING) docker://$(AGENT_BASE_IMG)
-	podman manifest push --all $(AGENT_JAVA_STAGING) docker://$(AGENT_JAVA_IMG)
-	podman manifest push --all $(AGENT_GO_STAGING) docker://$(AGENT_GO_IMG)
-	podman manifest push --all $(AGENT_CSHARP_STAGING) docker://$(AGENT_CSHARP_IMG)
-	podman manifest push --all $(AGENT_NODEJS_STAGING) docker://$(AGENT_NODEJS_IMG)
+	podman manifest push --all $(AGENT_BASE_LOCALHOST) docker://$(AGENT_BASE_IMG)
+	podman manifest push --all $(AGENT_JAVA_LOCALHOST) docker://$(AGENT_JAVA_IMG)
+	podman manifest push --all $(AGENT_GO_LOCALHOST) docker://$(AGENT_GO_IMG)
+	podman manifest push --all $(AGENT_CSHARP_LOCALHOST) docker://$(AGENT_CSHARP_IMG)
+	podman manifest push --all $(AGENT_NODEJS_LOCALHOST) docker://$(AGENT_NODEJS_IMG)
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
