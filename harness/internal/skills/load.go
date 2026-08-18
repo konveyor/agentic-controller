@@ -1,0 +1,584 @@
+package skills
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	gogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+
+	"github.com/konveyor/agentic-controller/api/skill"
+	"github.com/konveyor/migration-harness/internal/logging"
+)
+
+const (
+	// ManifestFile records what the loader assembled, written into the skills
+	// root. A dotfile rather than a sibling directory: the root is already
+	// shared with the agent container, and runtimes discover skills by looking
+	// for SKILL.md, so a dotfile is inert to them. It gives the harness the
+	// rules list without re-walking, and gives the repo-shadowing check
+	// something authoritative to compare against.
+	ManifestFile = ".konveyor-skills.json"
+)
+
+// Source and GitSource are the controller's declaration of what it staged.
+// Aliases rather than copies: the controller marshals the same types onto
+// KONVEYOR_SKILL_SOURCES from the other side of the module boundary, and
+// api/skill is the package both modules already import.
+type Source = skill.Source
+
+// GitSource is a repository cloned at pod start.
+type GitSource = skill.GitSource
+
+// Options configures an assembly run.
+type Options struct {
+	// SrcDir holds one subdirectory per mounted source: ImageVolumes and
+	// ConfigMap volumes alike.
+	SrcDir string
+	// DestDir is the assembled skills root the agent runtime sees.
+	DestDir string
+	// Sources is the declared source list. When empty the loader falls back
+	// to scanning SrcDir, which is what makes the command usable by hand;
+	// in a pod the controller always declares them, so an unexpected
+	// directory cannot quietly become skills.
+	Sources []Source
+}
+
+// Loaded is one assembled skill.
+type Loaded struct {
+	// Name is the frontmatter name, and also the directory under DestDir.
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+	// Source is the staging directory it came from, the SkillCard name.
+	Source string `json:"source"`
+	// SourcePath is where inside that source it was found. Empty for a
+	// single-skill source, the subdirectory name for one out of a bundle.
+	SourcePath string `json:"sourcePath,omitempty"`
+}
+
+// Manifest is what the loader wrote, recorded at DestDir/.konveyor-skills.json.
+type Manifest struct {
+	Skills []Loaded `json:"skills"`
+	// Rules lists the names of skills with type: rule, in assembly order. The
+	// harness injects these into every prompt.
+	Rules []string `json:"rules"`
+}
+
+// candidate is a skill directory found in a source, before validation.
+type candidate struct {
+	dir        string // absolute path on disk
+	source     string // staging directory name
+	sourcePath string // subdirectory within the source, empty if single-skill
+	typeName   string // load policy the source imposes, empty to let frontmatter decide
+}
+
+// Load assembles DestDir from every source and validates the result. It fails
+// before writing anything if any skill is unusable, so the agent either starts
+// with a known-good skills root or does not start.
+func Load(ctx context.Context, opts Options) (*Manifest, error) {
+	candidates, cleanup, err := collect(ctx, opts)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		// Not an error. Skills are optional (#82) and a run with none is a
+		// supported configuration.
+		if err := prune(opts.DestDir, nil); err != nil {
+			return nil, err
+		}
+		return writeManifest(opts.DestDir, &Manifest{Skills: []Loaded{}, Rules: []string{}})
+	}
+
+	// Validate everything before copying anything, so a bad skill in the last
+	// source does not leave a half-assembled root behind.
+	loaded, byName, err := check(candidates)
+	if err != nil {
+		return nil, err
+	}
+
+	// Assembly is not necessarily the first thing to touch DestDir: an init
+	// container that reruns, or a by-hand invocation, finds the previous run's
+	// output. A skill dropped from the sources has to leave with it, because
+	// the agent runtime discovers skills by walking this directory and would
+	// otherwise go on seeing one nothing declares.
+	keep := make(map[string]bool, len(loaded))
+	for _, l := range loaded {
+		keep[l.Name] = true
+	}
+	if err := prune(opts.DestDir, keep); err != nil {
+		return nil, err
+	}
+
+	for _, l := range loaded {
+		src := byName[l.Name].dir
+		dst := filepath.Join(opts.DestDir, l.Name)
+		if err := copyTree(src, dst); err != nil {
+			return nil, fmt.Errorf("assembling skill %q from %s: %w", l.Name, src, err)
+		}
+	}
+
+	rules := make([]string, 0, len(loaded))
+	for _, l := range loaded {
+		if l.Type == TypeRule {
+			rules = append(rules, l.Name)
+		}
+	}
+	return writeManifest(opts.DestDir, &Manifest{Skills: loaded, Rules: rules})
+}
+
+// Validate checks a skill directory tree without assembling anything, so CI
+// can catch an unusable skill at review time rather than at pod init. dir is
+// one skill or a directory of them, the same shapes Load accepts. Load policy
+// is not a property of content, so the reported Type is always the default.
+func Validate(dir string) ([]Loaded, error) {
+	candidates, err := discover(dir, filepath.Base(dir))
+	if err != nil {
+		return nil, err
+	}
+	out, _, err := check(candidates)
+	return out, err
+}
+
+// check reads and validates every candidate's frontmatter and settles its load
+// policy, returning what would be assembled and where each one came from.
+//
+// One implementation, because CI runs it through Validate and pod init runs it
+// through Load: a rule that lived in only one of them would let a skill pass
+// review and then fail the pod, which is the drift ADR 0015 gave the shared
+// api/skill package to avoid.
+func check(candidates []candidate) ([]Loaded, map[string]candidate, error) {
+	loaded := make([]Loaded, 0, len(candidates))
+	byName := make(map[string]candidate, len(candidates))
+	var problems []string
+
+	for _, c := range candidates {
+		fm, err := readFrontmatter(filepath.Join(c.dir, SkillFile))
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", c.label(), err))
+			continue
+		}
+		if prev, dup := byName[fm.Name]; dup {
+			problems = append(problems, fmt.Sprintf(
+				"duplicate skill name %q: %s and %s", fm.Name, prev.label(), c.label()))
+			continue
+		}
+		byName[fm.Name] = c
+
+		// The destination is the frontmatter name, not the directory the skill
+		// arrived in. That collapses the two namespaces, the mount path and
+		// the runtime's own view of a skill's name, into one, so a collision
+		// is a real collision rather than a silent walk-order choice.
+		if base := filepath.Base(c.dir); base != fm.Name {
+			logging.Info("skill %q arrived as %s, assembling it under its frontmatter name", fm.Name, c.label())
+		}
+
+		// Load policy comes from the SkillCard, never from content. Validate
+		// walks a bare directory with no card behind it, so typeName is empty
+		// there and every skill reports the default.
+		skillType := c.typeName
+		switch skillType {
+		case "":
+			skillType = TypeSkill
+		case TypeSkill, TypeRule:
+		default:
+			problems = append(problems, fmt.Sprintf(
+				"source %q sets type %q, want %q or %q", c.source, skillType, TypeSkill, TypeRule))
+			continue
+		}
+
+		loaded = append(loaded, Loaded{
+			Name:        fm.Name,
+			Description: fm.Description,
+			Type:        skillType,
+			Source:      c.source,
+			SourcePath:  c.sourcePath,
+		})
+	}
+
+	if len(problems) > 0 {
+		return loaded, byName, fmt.Errorf("%d unusable skill(s):\n  %s",
+			len(problems), strings.Join(problems, "\n  "))
+	}
+	return loaded, byName, nil
+}
+
+func (c candidate) label() string {
+	if c.sourcePath == "" {
+		return c.source
+	}
+	return c.source + "/" + c.sourcePath
+}
+
+// collect finds every candidate skill across mounted sources and git clones.
+// The returned cleanup removes any temporary clone directories.
+func collect(ctx context.Context, opts Options) ([]candidate, func(), error) {
+	var candidates []candidate
+	var tmpDirs []string
+	cleanup := func() {
+		for _, d := range tmpDirs {
+			_ = os.RemoveAll(d)
+		}
+	}
+
+	sources := opts.Sources
+
+	// "One source, one skill" is a SkillCard invariant, so it only applies to
+	// sources the controller declared. Scanning is the by-hand path with no
+	// cards behind it, where a directory of skills is a reasonable thing to
+	// point at.
+	declared := len(sources) > 0
+
+	if !declared {
+		// Fall back to whatever is staged. In a pod the controller always
+		// declares the sources, so an unexpected directory cannot become
+		// skills.
+		scanned, err := scanSrcDir(opts.SrcDir)
+		if err != nil {
+			return nil, cleanup, err
+		}
+		sources = scanned
+	}
+
+	for _, s := range sources {
+		// The name is joined onto SrcDir, so it has to be one path segment.
+		// Guarded here as well as in the controller, because the loader also
+		// runs by hand and against a declaration it did not write, and because
+		// the sibling subPath join below has always been guarded.
+		if s.Name == "" || s.Name != filepath.Base(s.Name) || s.Name == "." || s.Name == ".." {
+			return nil, cleanup, fmt.Errorf(
+				"source %q is not a usable directory name; it must be a single path segment", s.Name)
+		}
+		root := filepath.Join(opts.SrcDir, s.Name)
+
+		if s.Git != nil {
+			tmp, err := os.MkdirTemp("", "skill-clone-")
+			if err != nil {
+				return nil, cleanup, fmt.Errorf("temp dir for %s: %w", s.Name, err)
+			}
+			tmpDirs = append(tmpDirs, tmp)
+
+			if err := clone(ctx, s.Name, *s.Git, tmp); err != nil {
+				return nil, cleanup, err
+			}
+			root = tmp
+		} else if info, err := os.Stat(root); err != nil || !info.IsDir() {
+			return nil, cleanup, fmt.Errorf(
+				"source %q was declared but nothing is staged at %s", s.Name, root)
+		}
+
+		// subPath selects one skill out of a source holding several. It works
+		// the same for a clone and for a mount, so it lives on the source
+		// rather than on the git block.
+		if s.SubPath != "" {
+			root = filepath.Join(root, filepath.Clean("/"+s.SubPath))
+			if info, err := os.Stat(root); err != nil || !info.IsDir() {
+				return nil, cleanup, fmt.Errorf(
+					"source %q: subPath %q is not a directory in it", s.Name, s.SubPath)
+			}
+		}
+
+		found, err := discover(root, s.Name)
+		if err != nil {
+			return nil, cleanup, err
+		}
+
+		// A SkillCard is one skill. Resolving to several means the source
+		// holds a set and the card did not say which, so name them rather
+		// than silently turning one card into many skills.
+		if declared && len(found) > 1 {
+			names := make([]string, 0, len(found))
+			for _, f := range found {
+				names = append(names, f.sourcePath)
+			}
+			sort.Strings(names)
+			return nil, cleanup, fmt.Errorf(
+				"source %q holds %d skills (%s); set subPath to select one, or use a SkillCollection",
+				s.Name, len(found), strings.Join(names, ", "))
+		}
+
+		for i := range found {
+			found[i].typeName = s.Type
+		}
+		candidates = append(candidates, found...)
+	}
+
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].label() < candidates[j].label() })
+	return candidates, cleanup, nil
+}
+
+// scanSrcDir treats every staged subdirectory as an undeclared source.
+func scanSrcDir(srcDir string) ([]Source, error) {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading source dir %s: %w", srcDir, err)
+	}
+
+	var out []Source
+	for _, e := range entries {
+		if isKubernetesInternal(e.Name()) {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(srcDir, e.Name())); err != nil || !info.IsDir() {
+			continue
+		}
+		out = append(out, Source{Name: e.Name()})
+	}
+	return out, nil
+}
+
+// discover decides whether a source holds one skill or several. SKILL.md at
+// the root means one; otherwise every immediate subdirectory holding a
+// SKILL.md is a skill. The shape is detected rather than declared, so a
+// single-skill image and a bundle need no metadata to tell them apart.
+func discover(dir, sourceName string) ([]candidate, error) {
+	if exists(filepath.Join(dir, SkillFile)) {
+		return []candidate{{dir: dir, source: sourceName}}, nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading source %s: %w", sourceName, err)
+	}
+
+	var out []candidate
+	for _, e := range entries {
+		if isKubernetesInternal(e.Name()) || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		sub := filepath.Join(dir, e.Name())
+		if info, err := os.Stat(sub); err != nil || !info.IsDir() {
+			continue
+		}
+		if exists(filepath.Join(sub, SkillFile)) {
+			out = append(out, candidate{dir: sub, source: sourceName, sourcePath: e.Name()})
+		}
+	}
+
+	if len(out) == 0 {
+		return nil, fmt.Errorf(
+			"source %q contributed no skills: no %s at its root and no subdirectory containing one",
+			sourceName, SkillFile)
+	}
+	return out, nil
+}
+
+func clone(ctx context.Context, name string, g GitSource, dest string) error {
+	if g.Ref == "" {
+		logging.Info("git source %q has no ref, cloning the default branch of %s, so this run is not reproducible", name, g.URL)
+	}
+	opts := &gogit.CloneOptions{URL: g.URL, Depth: 1, SingleBranch: true}
+	if g.Ref != "" {
+		opts.ReferenceName = plumbing.NewBranchReferenceName(g.Ref)
+	}
+
+	if _, err := gogit.PlainCloneContext(ctx, dest, false, opts); err != nil {
+		if g.Ref == "" {
+			return fmt.Errorf("git source %q: cloning %s: %w", name, g.URL, err)
+		}
+		// A tag is not a branch reference, but it is still shallow-cloneable,
+		// and a pinned tag is the case the log line above pushes people
+		// towards. Try it before falling back to a full clone.
+		tagOpts := *opts
+		tagOpts.ReferenceName = plumbing.NewTagReferenceName(g.Ref)
+		if err := os.RemoveAll(dest); err != nil {
+			return err
+		}
+		if _, err := gogit.PlainCloneContext(ctx, dest, false, &tagOpts); err == nil {
+			return nil
+		}
+		// A commit is neither, so give up on shallow and check it out from a
+		// full clone rather than guessing further.
+		if err2 := cloneAndCheckout(ctx, g, dest); err2 != nil {
+			return fmt.Errorf("git source %q: cloning %s at ref %q: %w", name, g.URL, g.Ref, err2)
+		}
+	}
+	return nil
+}
+
+func cloneAndCheckout(ctx context.Context, g GitSource, dest string) error {
+	// PlainCloneContext leaves the directory behind on failure.
+	if err := os.RemoveAll(dest); err != nil {
+		return err
+	}
+	repo, err := gogit.PlainCloneContext(ctx, dest, false, &gogit.CloneOptions{URL: g.URL})
+	if err != nil {
+		return err
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		return err
+	}
+	hash, err := repo.ResolveRevision(plumbing.Revision(g.Ref))
+	if err != nil {
+		return fmt.Errorf("resolving %q: %w", g.Ref, err)
+	}
+	return wt.Checkout(&gogit.CheckoutOptions{Hash: *hash})
+}
+
+// maxCopyDepth bounds the recursion below, so a symlink cycle within a source
+// ends with an error naming the directory rather than running until the stack
+// does.
+const maxCopyDepth = 32
+
+// copyTree copies src to dst, resolving symlinks into their content.
+//
+// Resolving rather than preserving is what makes a ConfigMap source work: the
+// kubelet projects keys as symlinks into a timestamped ..data directory, so a
+// link-preserving copy would produce a tree of dangling links once the source
+// mount is out of scope.
+//
+// A link is followed only while it stays inside the source: skill content is
+// whatever the publisher put there, and a link out of the tree would copy
+// anything the init container can read, its ServiceAccount token included.
+func copyTree(src, dst string) error {
+	root, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return fmt.Errorf("resolving %s: %w", src, err)
+	}
+	return copyDir(root, root, dst, 0)
+}
+
+// copyDir copies dir, which must resolve within root, to dst.
+//
+// A recursion rather than filepath.WalkDir, which never descends through a
+// symlinked directory and would silently drop a skill's supporting files.
+func copyDir(root, dir, dst string, depth int) error {
+	if depth > maxCopyDepth {
+		return fmt.Errorf("%s nests more than %d directories deep", dir, maxCopyDepth)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		// The kubelet's bookkeeping in a projected volume, and the clone
+		// metadata a git source arrives with: .git carries the remote URL with
+		// whatever credential was in it, and no skill needs it.
+		if isKubernetesInternal(name) || name == ".git" {
+			continue
+		}
+		resolved, info, err := resolveWithin(root, filepath.Join(dir, name))
+		if err != nil {
+			return err
+		}
+		switch {
+		case info.IsDir():
+			if err := copyDir(root, resolved, filepath.Join(dst, name), depth+1); err != nil {
+				return err
+			}
+		case info.Mode().IsRegular():
+			if err := copyFile(resolved, filepath.Join(dst, name), info.Mode().Perm()); err != nil {
+				return err
+			}
+		}
+		// Anything else -- a socket, a device -- is not skill content.
+	}
+	return nil
+}
+
+// resolveWithin follows path to what it really is, and refuses to leave root.
+func resolveWithin(root, path string) (string, os.FileInfo, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolving %s: %w", path, err)
+	}
+	rel, err := filepath.Rel(root, resolved)
+	// Compared against ".." exactly, and against a "../" prefix: a projected
+	// ConfigMap's real directory is named "..<timestamp>", which is inside.
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", nil, fmt.Errorf(
+			"%s points at %s, outside the skill; a skill can only carry files its own source holds",
+			path, resolved)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolving %s: %w", path, err)
+	}
+	return resolved, info, nil
+}
+
+func copyFile(src, dst string, perm os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// prune removes skill directories a previous run assembled that this one did
+// not. A nil keep set removes all of them.
+func prune(destDir string, keep map[string]bool) error {
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("reading %s: %w", destDir, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() || keep[e.Name()] {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(destDir, e.Name())); err != nil {
+			return fmt.Errorf("removing stale skill %q: %w", e.Name(), err)
+		}
+		logging.Info("removed %s, it is no longer in the sources", e.Name())
+	}
+	return nil
+}
+
+func writeManifest(destDir string, m *Manifest) (*Manifest, error) {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return nil, err
+	}
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(destDir, ManifestFile), append(b, '\n'), 0o644); err != nil {
+		return nil, fmt.Errorf("writing manifest: %w", err)
+	}
+	return m, nil
+}
+
+// isKubernetesInternal matches the bookkeeping entries the kubelet projects
+// into ConfigMap and Secret volumes: the ..data symlink and the timestamped
+// directory it points at.
+func isKubernetesInternal(name string) bool {
+	return strings.HasPrefix(name, "..")
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
