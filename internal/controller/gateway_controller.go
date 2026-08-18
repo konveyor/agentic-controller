@@ -240,11 +240,12 @@ func (r *GatewayReconciler) createVerificationJob(
 		image = DefaultVerificationImage
 	}
 
-	// The verification Job runs a simple curl/wget against the endpoint
-	// to check reachability. The agent base image includes curl.
-	// A keyless credentialRef (multi-variable credential, e.g. AWS SigV4)
-	// has no single value to send as a bearer token, so the probe runs
-	// unauthenticated — reachability still verifies (2xx-4xx passes).
+	// The verification Job runs a simple curl against the endpoint.
+	// The agent base image includes curl. Only 2xx counts as success so
+	// 401/403 (invalid or missing API key) fail verification instead of
+	// marking ConnectionVerified. A keyless credentialRef (multi-variable
+	// credential, e.g. AWS SigV4) has no single bearer token; the probe
+	// still requires a 2xx from /v1/models.
 	env := []corev1.EnvVar{{Name: "LLM_ENDPOINT", Value: gateway.Spec.Endpoint}}
 	if gateway.Spec.CredentialRef.Key != "" {
 		env = append(env, corev1.EnvVar{
@@ -285,7 +286,7 @@ func (r *GatewayReconciler) createVerificationJob(
 								"sh", "-c",
 								// Use env vars to avoid shell injection.
 								// Pass API key via Authorization header to validate credentials.
-								"curl -sk --max-time 10 -o /dev/null -w '%{http_code}' -H \"Authorization: Bearer $LLM_API_KEY\" \"$LLM_ENDPOINT/v1/models\" | grep -qE '^[2-4]'",
+								"curl -sk --max-time 10 -o /dev/null -w '%{http_code}' -H \"Authorization: Bearer $LLM_API_KEY\" \"$LLM_ENDPOINT/v1/models\" | grep -qE '^2'",
 							},
 							Env: env,
 						},
