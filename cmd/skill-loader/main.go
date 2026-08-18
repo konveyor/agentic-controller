@@ -131,8 +131,10 @@ func logf(format string, args ...any) {
 }
 
 func main() {
+	// The subcommands report their own failures, with the detail that makes an
+	// init-container log useful. Printing err here as well would say the same
+	// thing twice in the one place an operator looks.
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
