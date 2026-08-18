@@ -31,3 +31,6 @@ go.work
 
 # Local scratch files
 .scratch/
+
+# Personal maintainer notes, cluster state and run logs
+.dev/
