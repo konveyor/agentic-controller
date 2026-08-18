@@ -243,18 +243,26 @@ that the ref resolves, not that the skill is usable.
 **The rules are the Agent Skills spec's, not ours.** `name` is 1-64
 characters, lowercase alphanumerics and single hyphens, no leading or
 trailing hyphen, and must match its directory name; `description` is 1-1024
-and non-empty. The prototype's validator is looser than that, allowing
-uppercase, `_` and `.`, and will be tightened to match. The directory rule is
-satisfied by construction, since decision 7 assembles each skill under its
-own frontmatter name.
+and non-empty. The field set is closed to `name`, `description`, `license`,
+`compatibility`, `metadata` and `allowed-tools`, and `skills-ref` errors on
+anything else, so the validator rejects a stray top-level key rather than
+ignoring one. `type: rule` in frontmatter is the case that matters: an author
+who writes it is told, rather than silently getting a skill. The directory
+rule is satisfied by construction, since decision 7 assembles each skill
+under its own frontmatter name.
 
 **One implementation, four callers.** The controller, the loader, CI and an
 author checking a skill before publishing all apply the same rules, so they
-belong in a shared package rather than the two copies the prototype has. The
+belong in a shared package rather than the two copies the prototype had. The
 plumbing is real: `harness/` is a separate Go module, so the package needs a
 home both modules can depend on. That is worth doing rather than deferring,
 because "the looser of the two" drifting is the validation gap ADR 0014
 flags as load-bearing.
+
+The home is `api/skill`, the only module both already import, depending on
+nothing beyond a YAML parser. The controller's copy is gone, and with it the
+drift it had: it checked neither the name rules nor the description limit, so
+a card it called valid could still fail the loader.
 
 The fourth caller is worth naming as intended scope: now that anyone can
 build a skill image with a plain Containerfile, the low barrier to building
@@ -347,9 +355,29 @@ started: a skill with no frontmatter, and a name collision, which reports
 that an init container's `$HOME` does not reach the agent container, is under
 decision 5.
 
-Not measured: a full AgentRun through the controller against a live model. The
-probe drives the pod shape the controller generates and envtest covers the
-controller, but the two have not been run end to end together.
+The controller side was then run against the same cluster rather than only in
+envtest: Agent Sandbox v0.5.0 installed, a real Gateway verified, and an Agent
+referencing three SkillCards. Two cards select different skills out of one
+image with `subPath`, the third is inline. The controller produced two
+ImageVolumes on the same reference, a run-scoped ConfigMap, the `skills`
+emptyDir and the loader, and the loader assembled all three:
+
+```
+sources: 3 declared under /opt/skills-src, destination: /opt/skills
+[ok] house-rules (rule) from house-rules
+[ok] javaee-to-quarkus (skill) from javaee-to-quarkus
+[ok] plan (rule) from plan
+always-loaded rules: [house-rules plan]
+```
+
+`plan` is a rule because its SkillCard says so, which is the whole of decision
+8 working end to end: the policy is on the CR, the content declares nothing,
+and the loader resolves the name. Deleting the AgentRun garbage collected the
+inline ConfigMap, confirming the ownership scoping.
+
+Still not measured: a run against a live model. The agent container starts
+after a known-good skills root, but nothing has yet read those skills and
+acted on them.
 
 ## Consequences
 
@@ -411,19 +439,53 @@ collection is self-contained and needs none.
 **Enumerating a source needs no registry client in the controller.** The
 objection is that reading an image means pull secrets and egress in the
 reconciler, which decision 4 rules out. It does not survive contact: the
-kubelet must pull the image to run the skill anyway, so the credentials, the
-ImageVolume gate and the mount semantics have to work regardless. A
-short-lived pod mounting the source exactly as the loader does can enumerate
-it, asking nothing new of the controller process, and the loader already
-knows how to walk a source, so it is another mode of the same binary.
+kubelet must pull the image to run the skill anyway, so a short-lived Job
+mounting the source as the agent pod does can read it, and the loader already
+knows how to walk one. Creating that Job asks no new permission either, since
+Gateway verification already runs one.
 
-Deferred. Most of what remains is ordinary: how the pod reports back, not
-re-enumerating every reconcile, deterministic child names, owner references,
-pruning. The one needing a real answer is where per-skill `type` lives, since
-content does not declare it (decision 8) and an edit to a generated card
-would not survive the next reconcile. Naming types on the collection is the
-likely shape, with enumeration supplying the set and the collection the
-policy.
+Both halves were built, because the real question is not whether a Job can
+read a source but how the answer gets out. Each was measured on the same
+four-skill image: cards written with their `subPath`, twenty after switching
+the image, sixteen pruned on switching back, all collected with the
+collection. **Writing the cards from the Job is adopted**, for the reasons
+below; it ships for `SkillCollection.spec.image`, and a collection whose
+entries are git sources still needs its cards written by hand.
+
+**Reporting it back** costs no credentials in the pod, and two measured
+properties spoil it. The termination message caps at 4096 bytes and truncates
+from the *front*, so an 11162-byte payload returned as a valid JSON suffix
+that will not parse, and descriptions have to be shed to fit. Worse, the
+answer dies with the pod: one collected before the controller reads it leaves
+a Job still reporting success, wedging the collection until a spec bump.
+
+**Writing the cards from the Job** has no answer to get out, so none of that
+exists, and it drops the controller's `pods` permission too. It costs a
+ServiceAccount on a pod that mounts user-supplied content, scoped and
+verified to SkillCards in one namespace and nothing else, no secrets, no
+pods, no collections. The image a card points at still comes from the
+collection rather than the walk, so a skill cannot nominate its own. It also
+pulls controller-runtime and the api module into the harness, which had no
+Kubernetes dependency at all; that is marked in `materialize.go` rather than
+absorbed, and leaves with the approach.
+
+The trade is a credential-holding pod against a fragile channel, and the
+channel is the worse half: its two failures are properties of the mechanism
+rather than bugs in the spike, so no amount of work on it removes them. The
+ServiceAccount is bounded and checkable, and it was checked. So writing the
+cards is what ships, and the `pods` read permission the reporting approach
+needed is not requested.
+
+What that does not settle is the question above. Users still author
+SkillCards, and a collection generating them is one source type's convenience
+rather than the authoring model. It is a step toward it, taken because it was
+the cheaper half to get right, not because the larger question is answered.
+
+Still open, and answered by neither spike: where per-skill `type` lives.
+Content does not declare it (decision 8), a collection-wide `type` is all
+either spike supports, and an edit to a generated card would not survive the
+next reconcile. Naming types per skill on the collection is the likely shape,
+with enumeration supplying the set and the collection the policy.
 
 ## Alternatives considered
 
@@ -514,8 +576,8 @@ prompt. This decides how they are packaged and delivered to that mount. Both
 preserve `/opt/skills/{name}/SKILL.md`. It revises one 0014 decision, the
 source of the rules list (§8), and closes four gaps 0014 defers: frontmatter
 validation, the two-namespace collision, inline cards that resolve empty, and
-a manifest for the repo-shadowing check. **#138 needs updating alongside
-this.**
+a manifest for the repo-shadowing check. 0014's rules section carries that
+revision, applied when the implementation landed.
 
 **ADR 0007 on `skill-exec-probe`** measured that `noexec` does not reach the
 container under CRI-O. Nothing here depends on it either way, since skills are
