@@ -65,6 +65,13 @@ spec:
           - --health-probe-bind-address=:8081
         image: controller:latest
         name: manager
+        env:
+          # The skill loader and the enumeration Job run this image. The
+          # controller cannot read its own image without `pods get`, which it
+          # deliberately does not have, so kustomize sets it alongside the
+          # image above and the two must be kept in step.
+          - name: SKILL_LOADER_IMAGE
+            value: controller:latest
         ports:
         - containerPort: 8081
           name: health

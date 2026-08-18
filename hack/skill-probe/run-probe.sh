@@ -43,18 +43,18 @@ echo "==> Building the skill bundle image"
     -t localhost/konveyor-skills:dev \
     -f "${REPO_ROOT}/skills/Containerfile" "${REPO_ROOT}/skills" >/dev/null
 
-echo "==> Building an image carrying the harness binary"
-# A stand-in for agent-base. The loader is a harness subcommand, so the real
-# pod runs the agent's own image and this probe only needs the binary.
+echo "==> Building an image carrying the skill loader"
+# A stand-in for the controller's image, which is what runs the loader in a
+# real pod. This probe only needs the binary.
 GOARCH="${PLATFORM##*/}"
-(cd "${REPO_ROOT}/harness" && CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH}" \
-    go build -o "${WORK}/migration-harness-linux" ./cmd/migration-harness/)
+(cd "${REPO_ROOT}" && CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH}" \
+    go build -o "${WORK}/skill-loader-linux" ./cmd/skill-loader/)
 
 cat >"${WORK}/Containerfile" <<'EOF'
 FROM registry.access.redhat.com/ubi10/ubi-minimal:latest
-COPY migration-harness-linux /usr/local/bin/migration-harness
+COPY skill-loader-linux /usr/local/bin/skill-loader
 RUN mkdir -p /opt/skills /opt/skills-src
-ENTRYPOINT ["migration-harness"]
+ENTRYPOINT ["skill-loader"]
 EOF
 "${CONTAINER_TOOL}" build --platform "${PLATFORM}" -q \
     -t localhost/harness-test:dev -f "${WORK}/Containerfile" "${WORK}" >/dev/null

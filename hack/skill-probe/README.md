@@ -34,13 +34,12 @@ hack/skill-probe/run-probe.sh
 
 ## run-collection-probe.sh
 
-Needs the controller, and the controller needs to know which image to run
-enumeration Jobs with. That image must carry the harness binary.
+Needs the controller. The loader and the enumeration Job both run the
+controller's own image, which kustomize sets as `SKILL_LOADER_IMAGE` alongside
+the manager's, so there is nothing extra to configure.
 
 ```sh
 make deploy IMG=<controller image>
-kubectl -n agentic-controller-system set env \
-  deploy/agentic-controller-controller-manager ENUMERATION_IMAGE=<agent-base image>
 hack/skill-probe/run-collection-probe.sh
 ```
 
@@ -63,7 +62,7 @@ Create an application pointing at a repository you do not mind a run touching,
 and note its id.
 
 ```sh
-AGENT_IMAGE=<agent-base image> \
+AGENT_IMAGE=<agent image> \
 SKILL_IMAGE=<skill bundle image> \
 GATEWAY=<name of a Ready Gateway> \
 HUB_BASE_URL=http://tackle-hub.konveyor-hub.svc:8080 \

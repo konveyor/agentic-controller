@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"cmp"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -182,6 +183,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The loader and the enumeration Job run this image, set by kustomize to
+	// match the manager's own. The controller cannot read its own image
+	// without `pods get`, which it does not have.
+	skillLoaderImage := os.Getenv("SKILL_LOADER_IMAGE")
+	if skillLoaderImage == "" {
+		setupLog.Info("SKILL_LOADER_IMAGE is unset; AgentRuns with skills and " +
+			"image-sourced SkillCollections will not start")
+	}
+
 	if err := (&controller.SkillCardReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -192,8 +202,9 @@ func main() {
 	if err := (&controller.SkillCollectionReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-		// Any agent image carries the harness binary that does the walk.
-		EnumerationImage: os.Getenv("ENUMERATION_IMAGE"),
+		// Both run the controller's own image. ENUMERATION_IMAGE stays as an
+		// override for anyone who needs the Job to differ.
+		EnumerationImage: cmp.Or(os.Getenv("ENUMERATION_IMAGE"), skillLoaderImage),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "SkillCollection")
 		os.Exit(1)
@@ -213,8 +224,9 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.AgentRunReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		SkillLoaderImage: skillLoaderImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "AgentRun")
 		os.Exit(1)

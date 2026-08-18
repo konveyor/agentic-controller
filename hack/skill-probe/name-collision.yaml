@@ -8,7 +8,7 @@ spec:
     - name: skill-loader
       image: localhost/harness-test:dev
       imagePullPolicy: IfNotPresent
-      args: ["skills", "load"]
+      args: ["load"]
       env:
         # skills/plan declares frontmatter name "plan", which the bundle also ships.
         - name: KONVEYOR_SKILL_SOURCES

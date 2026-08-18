@@ -90,15 +90,12 @@ const (
 	// validates the skills root before the agent starts.
 	skillLoaderContainerName = "skill-loader"
 
-	// harnessBinary is the harness executable, on PATH in every agent image.
+	// loaderBinary is the skill loader in the controller's own image. An
+	// absolute path because that image is distroless and has no PATH.
 	// Named explicitly rather than left to the image's ENTRYPOINT: an agent
 	// image is free to wrap its entrypoint in a script, and the loader has to
 	// run the subcommand either way.
-	harnessBinary = "migration-harness"
-
-	// harnessSkillsCmd is the harness subcommand group. Not the same thing as
-	// skillsVolumeName, which happens to share the string.
-	harnessSkillsCmd = "skills"
+	loaderBinary = "/skill-loader"
 
 	// agentContainerName is the container that runs the agent itself.
 	agentContainerName = "agent"
@@ -120,6 +117,12 @@ const (
 type AgentRunReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// SkillLoaderImage runs the skill-loader init container. It is the
+	// controller's own image, so an agent image is not required to carry the
+	// harness binary and the source list written here is always read by a
+	// loader of the same version.
+	SkillLoaderImage string
 }
 
 // +kubebuilder:rbac:groups=konveyor.io,resources=agentruns,verbs=get;list;watch;create;update;patch;delete
@@ -482,7 +485,7 @@ func (r *AgentRunReconciler) createSandbox(
 					// retry (backoffLimit-style) can be added later if needed.
 					RestartPolicy: corev1.RestartPolicyNever,
 					InitContainers: []corev1.Container{
-						skillLoaderContainer(agent.Spec.Image, skillSrc, loaderMounts),
+						skillLoaderContainer(r.SkillLoaderImage, skillSrc, loaderMounts),
 					},
 					Containers: []corev1.Container{
 						{
@@ -932,17 +935,18 @@ func (r *AgentRunReconciler) createInlineSkillConfigMaps(
 // the skills root. It always runs, even with no skills, so there is one pod
 // shape and one place that fails a run whose skills are unusable.
 //
-// It runs the agent's own image, since the loader is a subcommand of the
-// harness binary already there. Command names that binary rather than trusting
-// an ENTRYPOINT the image may wrap, and both directories are explicit because
-// this container does not inherit the env their defaults come from.
+// It runs the controller's own image rather than the agent's, so an agent
+// image is not required to carry our binary and the source list the controller
+// writes is always read by a loader of the same version. Command names the
+// binary rather than trusting an ENTRYPOINT, and both directories are explicit
+// because this container does not inherit the env their defaults come from.
 func skillLoaderContainer(image string, sources *skillSources, mounts []corev1.VolumeMount) corev1.Container {
 	c := corev1.Container{
 		Name:    skillLoaderContainerName,
 		Image:   image,
-		Command: []string{harnessBinary},
+		Command: []string{loaderBinary},
 		Args: []string{
-			harnessSkillsCmd, "load",
+			"load",
 			"--src-dir", skillsSrcDir,
 			"--dest-dir", skillsDir,
 		},

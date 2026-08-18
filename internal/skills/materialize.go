@@ -13,7 +13,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
-	"github.com/konveyor/migration-harness/internal/logging"
 )
 
 // Creating SkillCards from inside the enumerating pod. ADR 0015 argues the
@@ -112,7 +111,7 @@ func Materialize(ctx context.Context, dir string, opts MaterializeOptions) ([]st
 		}); err != nil {
 			return nil, fmt.Errorf("writing SkillCard %q: %w", name, err)
 		}
-		logging.Info("wrote SkillCard %s (subPath %q)", name, s.SourcePath)
+		logf("wrote SkillCard %s (subPath %q)", name, s.SourcePath)
 	}
 
 	var owned konveyoriov1alpha1.SkillCardList
@@ -128,7 +127,7 @@ func Materialize(ctx context.Context, dir string, opts MaterializeOptions) ([]st
 		if err := c.Delete(ctx, &owned.Items[i]); err != nil {
 			return nil, fmt.Errorf("pruning SkillCard %q: %w", owned.Items[i].Name, err)
 		}
-		logging.Info("pruned SkillCard %s, no longer in the source", owned.Items[i].Name)
+		logf("pruned SkillCard %s, no longer in the source", owned.Items[i].Name)
 	}
 
 	return names, nil

@@ -166,9 +166,30 @@ Sources stage read-only under `/opt/skills-src/{sourceName}`. The loader
 assembles them into `/opt/skills`, validates the result, and exits non-zero
 with the reason if anything is unusable. It runs on every pod, including one
 with no skills, so there is a single pod shape and one component owning both
-assembly and validation. It is a subcommand of the harness binary already in
-`agent-base`, running the agent's own image, so it adds no image to build,
-version, sign or mirror.
+assembly and validation. It is `skill-loader`, shipped in the controller's own
+image, so it adds no image to build, version, sign or mirror.
+
+> **Revised during implementation, 2026-08-18.** This said the loader was a
+> subcommand of the harness binary, running the agent's own image. That makes
+> "carries our harness binary" a requirement of every agent image the
+> controller is pointed at, and the failure when one does not is an init
+> container that cannot start, with no log to say why. The project's own e2e
+> agent image hit exactly that.
+>
+> It is now its own binary in the controller's image. That is still not a new
+> artifact, so the reasoning above holds, and `KONVEYOR_SKILL_SOURCES` becomes
+> a contract between two things that ship together rather than one the
+> controller writes and a user-pinned agent image parses. The manifest is now
+> the contract that spans images, which is the smaller surface of the two. The
+> image comes from `SKILL_LOADER_IMAGE`, set by kustomize to match the
+> manager's, because reading it from the pod would need `get pods`, which the
+> enumeration work deliberately gives up.
+>
+> Assembly, validation and materialization moved with it, into the controller's
+> module. That removes the reason the harness depended on controller-runtime
+> and the api types: it now reads the manifest and nothing more. It also gives
+> §6's fourth caller for free, since `go install`ing `cmd/skill-loader` gets an
+> author the same `validate` the pod runs.
 
 Two cards selecting different skills out of one image share its pull, and
 stage under their own names:
@@ -182,7 +203,7 @@ volumes:
 
 initContainers:
   - name: skill-loader
-    image: <the agent's own image>
+    image: <the controller's own image>
     args: ["skills", "load"]
     env:
       - name: KONVEYOR_SKILL_SOURCES

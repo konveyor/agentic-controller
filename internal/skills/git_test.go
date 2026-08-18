@@ -46,7 +46,7 @@ func TestLoadGitSourceSingleSkill(t *testing.T) {
 	})
 	src, dest := t.TempDir(), t.TempDir()
 
-	m, err := load(t, src, dest, Source{Name: "acme", Git: &GitSource{URL: url}})
+	m, err := load(t, src, dest, Source{Name: srcAcme, Git: &GitSource{URL: url}})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestLoadGitSourceWithSeveralSkillsNeedsSubPath(t *testing.T) {
 	})
 	src, dest := t.TempDir(), t.TempDir()
 
-	_, err := load(t, src, dest, Source{Name: "acme", Git: &GitSource{URL: url}})
+	_, err := load(t, src, dest, Source{Name: srcAcme, Git: &GitSource{URL: url}})
 	if err == nil || !strings.Contains(err.Error(), "holds 2 skills") {
 		t.Fatalf("want a several-skills error, got %v", err)
 	}
@@ -83,7 +83,7 @@ func TestLoadGitSourceSubPath(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
 
 	m, err := load(t, src, dest,
-		Source{Name: "acme", SubPath: "contrib/skills/nested", Git: &GitSource{URL: url}})
+		Source{Name: srcAcme, SubPath: "contrib/skills/nested", Git: &GitSource{URL: url}})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestLoadGitSourceBadSubPath(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
 
 	_, err := load(t, src, dest,
-		Source{Name: "acme", SubPath: "does/not/exist", Git: &GitSource{URL: url}})
+		Source{Name: srcAcme, SubPath: "does/not/exist", Git: &GitSource{URL: url}})
 	if err == nil || !strings.Contains(err.Error(), "subPath") {
 		t.Fatalf("want a subPath error, got %v", err)
 	}
@@ -111,13 +111,13 @@ func TestLoadGitSourceUnreachableFailsReadably(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
 	missing := filepath.Join(t.TempDir(), "no-such-repo")
 
-	_, err := load(t, src, dest, Source{Name: "acme", Git: &GitSource{URL: missing}})
+	_, err := load(t, src, dest, Source{Name: srcAcme, Git: &GitSource{URL: missing}})
 	if err == nil {
 		t.Fatal("want an error for an unreachable repository")
 	}
 	// The message names the source and the URL, which is what makes an init
 	// failure diagnosable from kubectl logs alone.
-	for _, want := range []string{"acme", missing} {
+	for _, want := range []string{srcAcme, missing} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q, got: %v", want, err)
 		}
@@ -128,14 +128,14 @@ func TestLoadGitSourceUnreachableFailsReadably(t *testing.T) {
 // mounted one is caught like any other collision.
 func TestLoadGitAndMountedSourcesCollide(t *testing.T) {
 	url := newRepo(t, func(dir string) {
-		writeSkill(t, dir, "plan", nil)
+		writeSkill(t, dir, skillPlan, nil)
 	})
 	src, dest := t.TempDir(), t.TempDir()
-	writeSkill(t, filepath.Join(src, "konveyor"), "plan", nil)
+	writeSkill(t, filepath.Join(src, srcKonveyor), skillPlan, nil)
 
 	_, err := load(t, src, dest,
-		Source{Name: "konveyor"},
-		Source{Name: "acme", Git: &GitSource{URL: url}})
+		Source{Name: srcKonveyor},
+		Source{Name: srcAcme, Git: &GitSource{URL: url}})
 	if err == nil || !strings.Contains(err.Error(), "duplicate skill name") {
 		t.Fatalf("want a duplicate-name error, got %v", err)
 	}
@@ -150,12 +150,12 @@ func TestLoadAllThreeSourceKinds(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
 
 	// An image holding several skills, one selected.
-	writeSkill(t, filepath.Join(src, "konveyor", "plan"), "plan", nil)
-	writeSkill(t, filepath.Join(src, "konveyor", "javaee"), "javaee", map[string]string{
+	writeSkill(t, filepath.Join(src, srcKonveyor, skillPlan), skillPlan, nil)
+	writeSkill(t, filepath.Join(src, srcKonveyor, skillJavaee), skillJavaee, map[string]string{
 		"references/annotations.md": "map",
 	})
 	// A ConfigMap, symlink farm and all.
-	cm := filepath.Join(src, "house-rules")
+	cm := filepath.Join(src, skillHouse)
 	data := filepath.Join(cm, "..2026_08_13_12_00_00.1")
 	if err := os.MkdirAll(data, 0o755); err != nil {
 		t.Fatal(err)
@@ -172,27 +172,27 @@ func TestLoadAllThreeSourceKinds(t *testing.T) {
 	}
 
 	m, err := load(t, src, dest,
-		Source{Name: "konveyor", SubPath: "javaee"},
-		Source{Name: "house-rules", Type: TypeRule},
-		Source{Name: "acme", Git: &GitSource{URL: url}})
+		Source{Name: srcKonveyor, SubPath: skillJavaee},
+		Source{Name: skillHouse, Type: TypeRule},
+		Source{Name: srcAcme, Git: &GitSource{URL: url}})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
 	// Every skill lands one level deep, whatever produced it.
-	for _, want := range []string{"javaee", "house-rules", "from-git"} {
+	for _, want := range []string{skillJavaee, skillHouse, "from-git"} {
 		if _, err := os.Stat(filepath.Join(dest, want, SkillFile)); err != nil {
 			t.Errorf("skill %q not assembled: %v", want, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dest, "javaee", "references", "annotations.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(dest, skillJavaee, "references", "annotations.md")); err != nil {
 		t.Errorf("supporting file lost: %v", err)
 	}
 	// The unselected skill in the image stays out.
-	if _, err := os.Stat(filepath.Join(dest, "plan")); err == nil {
+	if _, err := os.Stat(filepath.Join(dest, skillPlan)); err == nil {
 		t.Error("a skill outside the subPath was assembled")
 	}
-	if len(m.Rules) != 1 || m.Rules[0] != "house-rules" {
+	if len(m.Rules) != 1 || m.Rules[0] != skillHouse {
 		t.Errorf("rules = %v, want [house-rules]", m.Rules)
 	}
 }
@@ -223,7 +223,7 @@ func versionedSkillRepo(t *testing.T) versionedRepo {
 	}
 
 	commit := func(description string) string {
-		writeSkillRaw(t, filepath.Join(dir, "acme"),
+		writeSkillRaw(t, filepath.Join(dir, srcAcme),
 			"---\nname: acme\ndescription: "+description+"\n---\n\n# acme\n")
 		if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err != nil {
 			t.Fatal(err)
@@ -275,9 +275,9 @@ func versionedSkillRepo(t *testing.T) versionedRepo {
 
 // descriptionOf reads back what the loader actually assembled, which is the
 // only proof the requested revision was the one checked out.
-func descriptionOf(t *testing.T, dest, name string) string {
+func descriptionOf(t *testing.T, dest string) string {
 	t.Helper()
-	content, err := os.ReadFile(filepath.Join(dest, name, SkillFile))
+	content, err := os.ReadFile(filepath.Join(dest, srcAcme, SkillFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,10 +296,10 @@ func TestLoadGitSourceWithoutRefTakesTheDefaultBranch(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
 
 	if _, err := load(t, src, dest,
-		Source{Name: "acme", Git: &GitSource{URL: repo.url}}); err != nil {
+		Source{Name: srcAcme, Git: &GitSource{URL: repo.url}}); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if got := descriptionOf(t, dest, "acme"); got != "version two" {
+	if got := descriptionOf(t, dest); got != "version two" {
 		t.Errorf("description = %q, want the default branch head", got)
 	}
 }
@@ -310,10 +310,10 @@ func TestLoadGitSourceAtBranch(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
 
 	if _, err := load(t, src, dest,
-		Source{Name: "acme", Git: &GitSource{URL: repo.url, Ref: repo.branch}}); err != nil {
+		Source{Name: srcAcme, Git: &GitSource{URL: repo.url, Ref: repo.branch}}); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if got := descriptionOf(t, dest, "acme"); got != "on a branch" {
+	if got := descriptionOf(t, dest); got != "on a branch" {
 		t.Errorf("description = %q, want the side branch", got)
 	}
 }
@@ -326,10 +326,10 @@ func TestLoadGitSourceAtTag(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
 
 	if _, err := load(t, src, dest,
-		Source{Name: "acme", Git: &GitSource{URL: repo.url, Ref: "v1"}}); err != nil {
+		Source{Name: srcAcme, Git: &GitSource{URL: repo.url, Ref: "v1"}}); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if got := descriptionOf(t, dest, "acme"); got != "version one" {
+	if got := descriptionOf(t, dest); got != "version one" {
 		t.Errorf("description = %q, want the tagged commit", got)
 	}
 }
@@ -340,10 +340,10 @@ func TestLoadGitSourceAtCommit(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
 
 	if _, err := load(t, src, dest,
-		Source{Name: "acme", Git: &GitSource{URL: repo.url, Ref: repo.v1Commit}}); err != nil {
+		Source{Name: srcAcme, Git: &GitSource{URL: repo.url, Ref: repo.v1Commit}}); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if got := descriptionOf(t, dest, "acme"); got != "version one" {
+	if got := descriptionOf(t, dest); got != "version one" {
 		t.Errorf("description = %q, want the pinned commit", got)
 	}
 }
@@ -355,11 +355,11 @@ func TestLoadGitSourceAtMissingRefFails(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
 
 	_, err := load(t, src, dest,
-		Source{Name: "acme", Git: &GitSource{URL: repo.url, Ref: "v99"}})
+		Source{Name: srcAcme, Git: &GitSource{URL: repo.url, Ref: "v99"}})
 	if err == nil {
 		t.Fatal("want an error for a ref that does not exist")
 	}
-	for _, want := range []string{"acme", "v99"} {
+	for _, want := range []string{srcAcme, "v99"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q, got: %v", want, err)
 		}

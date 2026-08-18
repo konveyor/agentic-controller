@@ -15,14 +15,15 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/konveyor/agentic-controller/api/skill"
 	"github.com/konveyor/migration-harness/internal/acp"
 	"github.com/konveyor/migration-harness/internal/config"
 	"github.com/konveyor/migration-harness/internal/git"
 	"github.com/konveyor/migration-harness/internal/goose"
 	"github.com/konveyor/migration-harness/internal/hub"
 	"github.com/konveyor/migration-harness/internal/logging"
+
 	"github.com/konveyor/migration-harness/internal/prompt"
-	"github.com/konveyor/migration-harness/internal/skills"
 	"github.com/konveyor/migration-harness/internal/tee"
 	"github.com/konveyor/migration-harness/internal/watcher"
 )
@@ -148,11 +149,11 @@ func runStage(cmd *cobra.Command, args []string) error {
 	// (ADR 0014). The loader decided which are rules and recorded them, since
 	// a skill's directory is its frontmatter name and nothing outside the
 	// image knows that (ADR 0015).
-	manifest, err := skills.ReadManifest(skillsDir())
+	manifest, err := skill.ReadManifest(skillsDir())
 	if err != nil {
 		return fmt.Errorf("read skill manifest: %w", err)
 	}
-	rules, err := skills.RuleContent(skillsDir(), manifest)
+	rules, err := skill.RuleContent(skillsDir(), manifest)
 	if err != nil {
 		return fmt.Errorf("read rules: %w", err)
 	}

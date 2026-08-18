@@ -12,6 +12,16 @@ import (
 // writeSkill creates a skill directory with valid frontmatter and optional
 // extra files, keyed by path relative to the skill directory. There is no type
 // argument: load policy is a SkillCard field, never content.
+// Fixture names shared by the tests in this package.
+const (
+	srcAcme       = "acme"
+	srcKonveyor   = "konveyor"
+	skillPlan     = "plan"
+	skillJavaee   = "javaee"
+	skillHouse    = "house-rules"
+	testNamespace = "default"
+)
+
 func writeSkill(t *testing.T, dir, name string, extra map[string]string) {
 	t.Helper()
 	writeSkillRaw(t, dir, "---\nname: "+name+"\ndescription: does "+name+"\n---\n\n# "+name+"\n")
@@ -73,8 +83,8 @@ func TestLoadSingleSkillSource(t *testing.T) {
 // one.
 func TestLoadScanAcceptsSeveralSkillsPerDirectory(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
-	multi := filepath.Join(src, "konveyor")
-	writeSkill(t, filepath.Join(multi, "plan"), "plan", nil)
+	multi := filepath.Join(src, srcKonveyor)
+	writeSkill(t, filepath.Join(multi, skillPlan), skillPlan, nil)
 	writeSkill(t, filepath.Join(multi, "execute"), "execute", nil)
 
 	m, err := load(t, src, dest)
@@ -90,17 +100,17 @@ func TestLoadScanAcceptsSeveralSkillsPerDirectory(t *testing.T) {
 // SkillCard is one skill.
 func TestLoadMultiSkillSourceNeedsSubPath(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
-	multi := filepath.Join(src, "konveyor")
-	writeSkill(t, filepath.Join(multi, "plan"), "plan", nil)
+	multi := filepath.Join(src, srcKonveyor)
+	writeSkill(t, filepath.Join(multi, skillPlan), skillPlan, nil)
 	writeSkill(t, filepath.Join(multi, "execute"), "execute", nil)
 	writeSkill(t, filepath.Join(multi, "verify"), "verify", nil)
 
-	_, err := load(t, src, dest, Source{Name: "konveyor"})
+	_, err := load(t, src, dest, Source{Name: srcKonveyor})
 	if err == nil {
 		t.Fatal("want an error when one card resolves to several skills")
 	}
 	// The message has to name what it found, or the user cannot pick.
-	for _, want := range []string{"holds 3 skills", "plan", "execute", "verify", "subPath"} {
+	for _, want := range []string{"holds 3 skills", skillPlan, "execute", "verify", "subPath"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q, got: %v", want, err)
 		}
@@ -111,23 +121,23 @@ func TestLoadMultiSkillSourceNeedsSubPath(t *testing.T) {
 // one level deep.
 func TestLoadSubPathSelectsOneSkill(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
-	multi := filepath.Join(src, "konveyor")
-	writeSkill(t, filepath.Join(multi, "plan"), "plan", map[string]string{
+	multi := filepath.Join(src, srcKonveyor)
+	writeSkill(t, filepath.Join(multi, skillPlan), skillPlan, map[string]string{
 		"references/phases.md": "phases",
 	})
 	writeSkill(t, filepath.Join(multi, "execute"), "execute", nil)
 
-	m, err := load(t, src, dest, Source{Name: "konveyor", SubPath: "plan"})
+	m, err := load(t, src, dest, Source{Name: srcKonveyor, SubPath: skillPlan})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if got := names(m); len(got) != 1 || got[0] != "plan" {
+	if got := names(m); len(got) != 1 || got[0] != skillPlan {
 		t.Fatalf("got %v, want [plan]", got)
 	}
-	if _, err := os.Stat(filepath.Join(dest, "plan", SkillFile)); err != nil {
+	if _, err := os.Stat(filepath.Join(dest, skillPlan, SkillFile)); err != nil {
 		t.Errorf("not assembled one level deep: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dest, "plan", "references", "phases.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(dest, skillPlan, "references", "phases.md")); err != nil {
 		t.Errorf("supporting file not copied: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dest, "execute")); err == nil {
@@ -140,12 +150,12 @@ func TestLoadSubPathSelectsOneSkill(t *testing.T) {
 func TestLoadTwoSubPathsFromOneImage(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
 	for _, stage := range []string{"skill-plan", "skill-execute"} {
-		writeSkill(t, filepath.Join(src, stage, "plan"), "plan", nil)
+		writeSkill(t, filepath.Join(src, stage, skillPlan), skillPlan, nil)
 		writeSkill(t, filepath.Join(src, stage, "execute"), "execute", nil)
 	}
 
 	m, err := load(t, src, dest,
-		Source{Name: "skill-plan", SubPath: "plan", Type: TypeRule},
+		Source{Name: "skill-plan", SubPath: skillPlan, Type: TypeRule},
 		Source{Name: "skill-execute", SubPath: "execute"})
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -153,16 +163,16 @@ func TestLoadTwoSubPathsFromOneImage(t *testing.T) {
 	if len(m.Skills) != 2 {
 		t.Fatalf("got %v, want plan and execute", names(m))
 	}
-	if len(m.Rules) != 1 || m.Rules[0] != "plan" {
+	if len(m.Rules) != 1 || m.Rules[0] != skillPlan {
 		t.Errorf("rules = %v, want [plan]", m.Rules)
 	}
 }
 
 func TestLoadBadSubPath(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
-	writeSkill(t, filepath.Join(src, "konveyor", "plan"), "plan", nil)
+	writeSkill(t, filepath.Join(src, srcKonveyor, skillPlan), skillPlan, nil)
 
-	_, err := load(t, src, dest, Source{Name: "konveyor", SubPath: "nope"})
+	_, err := load(t, src, dest, Source{Name: srcKonveyor, SubPath: "nope"})
 	if err == nil || !strings.Contains(err.Error(), "subPath") {
 		t.Fatalf("want a subPath error, got %v", err)
 	}
@@ -190,20 +200,20 @@ func TestLoadUsesFrontmatterNameNotDirectoryName(t *testing.T) {
 // every prompt.
 func TestLoadRulesListComesFromTheSource(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
-	writeSkill(t, filepath.Join(src, "plan"), "plan", nil)
-	writeSkill(t, filepath.Join(src, "javaee"), "javaee", nil)
+	writeSkill(t, filepath.Join(src, skillPlan), skillPlan, nil)
+	writeSkill(t, filepath.Join(src, skillJavaee), skillJavaee, nil)
 
 	m, err := load(t, src, dest,
-		Source{Name: "plan", Type: TypeRule},
-		Source{Name: "javaee"})
+		Source{Name: skillPlan, Type: TypeRule},
+		Source{Name: skillJavaee})
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(m.Rules) != 1 || m.Rules[0] != "plan" {
+	if len(m.Rules) != 1 || m.Rules[0] != skillPlan {
 		t.Fatalf("rules = %v, want only [plan]", m.Rules)
 	}
 	for _, sk := range m.Skills {
-		if sk.Name != "plan" && sk.Type != TypeSkill {
+		if sk.Name != skillPlan && sk.Type != TypeSkill {
 			t.Errorf("skill %q has type %q, want the default", sk.Name, sk.Type)
 		}
 	}
@@ -245,9 +255,9 @@ func TestLoadRejectsDeclaredButUnstagedSource(t *testing.T) {
 
 func TestLoadRejectsDuplicateFrontmatterNames(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
-	// Two sources, each shipping a skill that calls itself "plan".
-	writeSkill(t, filepath.Join(src, "konveyor"), "plan", nil)
-	writeSkill(t, filepath.Join(src, "vendor"), "plan", nil)
+	// Two sources, each shipping a skill that calls itself skillPlan.
+	writeSkill(t, filepath.Join(src, srcKonveyor), skillPlan, nil)
+	writeSkill(t, filepath.Join(src, "vendor"), skillPlan, nil)
 
 	_, err := load(t, src, dest)
 	if err == nil {
@@ -257,7 +267,7 @@ func TestLoadRejectsDuplicateFrontmatterNames(t *testing.T) {
 		t.Fatalf("error should name the collision, got: %v", err)
 	}
 	// Both origins named, so the message is actionable.
-	for _, want := range []string{"konveyor", "vendor"} {
+	for _, want := range []string{srcKonveyor, "vendor"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q, got: %v", want, err)
 		}
@@ -330,7 +340,7 @@ func TestLoadIsAllOrNothing(t *testing.T) {
 // source mount is gone.
 func TestLoadResolvesConfigMapSymlinkFarm(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
-	cm := filepath.Join(src, "house-rules")
+	cm := filepath.Join(src, skillHouse)
 	data := filepath.Join(cm, "..2026_08_13_12_00_00.123456")
 	if err := os.MkdirAll(data, 0o755); err != nil {
 		t.Fatal(err)
@@ -350,12 +360,12 @@ func TestLoadResolvesConfigMapSymlinkFarm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if got := names(m); len(got) != 1 || got[0] != "house-rules" {
+	if got := names(m); len(got) != 1 || got[0] != skillHouse {
 		t.Fatalf("got %v, want [house-rules]", got)
 	}
 
 	// The assembled file is real content, not a link.
-	out := filepath.Join(dest, "house-rules", SkillFile)
+	out := filepath.Join(dest, skillHouse, SkillFile)
 	info, err := os.Lstat(out)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
@@ -372,7 +382,7 @@ func TestLoadResolvesConfigMapSymlinkFarm(t *testing.T) {
 	}
 
 	// The kubelet's bookkeeping entries do not become skills or stray files.
-	entries, err := os.ReadDir(filepath.Join(dest, "house-rules"))
+	entries, err := os.ReadDir(filepath.Join(dest, skillHouse))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,12 +395,12 @@ func TestLoadResolvesConfigMapSymlinkFarm(t *testing.T) {
 
 func TestLoadWritesManifest(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
-	writeSkill(t, filepath.Join(src, "plan"), "plan", nil)
-	writeSkill(t, filepath.Join(src, "javaee"), "javaee", nil)
+	writeSkill(t, filepath.Join(src, skillPlan), skillPlan, nil)
+	writeSkill(t, filepath.Join(src, skillJavaee), skillJavaee, nil)
 
 	if _, err := load(t, src, dest,
-		Source{Name: "plan", Type: TypeRule},
-		Source{Name: "javaee"}); err != nil {
+		Source{Name: skillPlan, Type: TypeRule},
+		Source{Name: skillJavaee}); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 
@@ -405,7 +415,7 @@ func TestLoadWritesManifest(t *testing.T) {
 	if len(m.Skills) != 2 {
 		t.Errorf("manifest lists %d skills, want 2", len(m.Skills))
 	}
-	if len(m.Rules) != 1 || m.Rules[0] != "plan" {
+	if len(m.Rules) != 1 || m.Rules[0] != skillPlan {
 		t.Errorf("manifest rules = %v, want [plan]", m.Rules)
 	}
 	// The source is recorded, so the shadowing check has something to compare
@@ -461,15 +471,15 @@ func TestLoadRefusesASymlinkOutOfTheSource(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("SUPER-SECRET"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeSkill(t, filepath.Join(src, "acme"), "acme", nil)
-	if err := os.Symlink(secret, filepath.Join(src, "acme", "notes.md")); err != nil {
+	writeSkill(t, filepath.Join(src, srcAcme), srcAcme, nil)
+	if err := os.Symlink(secret, filepath.Join(src, srcAcme, "notes.md")); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := load(t, src, dest, Source{Name: "acme"}); err == nil {
+	if _, err := load(t, src, dest, Source{Name: srcAcme}); err == nil {
 		t.Fatal("want an error when a skill links outside its source")
 	}
-	if b, err := os.ReadFile(filepath.Join(dest, "acme", "notes.md")); err == nil {
+	if b, err := os.ReadFile(filepath.Join(dest, srcAcme, "notes.md")); err == nil {
 		t.Fatalf("the linked content was copied anyway: %q", b)
 	}
 }
@@ -478,16 +488,16 @@ func TestLoadRefusesASymlinkOutOfTheSource(t *testing.T) {
 // arrive. filepath.WalkDir never descends into one.
 func TestLoadFollowsASymlinkedDirectoryInsideTheSource(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
-	skill := filepath.Join(src, "acme")
-	writeSkill(t, skill, "acme", map[string]string{"shared/patterns.md": "# patterns"})
+	skill := filepath.Join(src, srcAcme)
+	writeSkill(t, skill, srcAcme, map[string]string{"shared/patterns.md": "# patterns"})
 	if err := os.Symlink(filepath.Join(skill, "shared"), filepath.Join(skill, "references")); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := load(t, src, dest, Source{Name: "acme"}); err != nil {
+	if _, err := load(t, src, dest, Source{Name: srcAcme}); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	b, err := os.ReadFile(filepath.Join(dest, "acme", "references", "patterns.md"))
+	b, err := os.ReadFile(filepath.Join(dest, srcAcme, "references", "patterns.md"))
 	if err != nil {
 		t.Fatalf("the symlinked directory arrived empty: %v", err)
 	}
@@ -501,19 +511,19 @@ func TestLoadFollowsASymlinkedDirectoryInsideTheSource(t *testing.T) {
 // in it.
 func TestLoadDoesNotCopyGitMetadata(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
-	skill := filepath.Join(src, "acme")
-	writeSkill(t, skill, "acme", map[string]string{
+	skill := filepath.Join(src, srcAcme)
+	writeSkill(t, skill, srcAcme, map[string]string{
 		".git/config":   "[remote \"origin\"]\n\turl = https://x-access-token:SECRET@example.com/o/r\n",
 		"references.md": "# refs",
 	})
 
-	if _, err := load(t, src, dest, Source{Name: "acme"}); err != nil {
+	if _, err := load(t, src, dest, Source{Name: srcAcme}); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dest, "acme", ".git")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dest, srcAcme, ".git")); !os.IsNotExist(err) {
 		t.Error(".git was copied into the skills root")
 	}
-	if _, err := os.Stat(filepath.Join(dest, "acme", "references.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(dest, srcAcme, "references.md")); err != nil {
 		t.Errorf("ordinary supporting files should still arrive: %v", err)
 	}
 }
@@ -544,83 +554,9 @@ func TestLoadRemovesASkillTheSourcesNoLongerDeclare(t *testing.T) {
 // boundary, so it has to be one path segment.
 func TestLoadRejectsATraversingSourceName(t *testing.T) {
 	src, dest := t.TempDir(), t.TempDir()
-	writeSkill(t, filepath.Join(src, "acme"), "acme", nil)
+	writeSkill(t, filepath.Join(src, srcAcme), srcAcme, nil)
 
 	if _, err := load(t, src, dest, Source{Name: "../../etc"}); err == nil {
 		t.Fatal("want an error when a source name escapes the staging directory")
-	}
-}
-
-func TestRuleContentRoundTripsWhatLoadAssembled(t *testing.T) {
-	src, dest := t.TempDir(), t.TempDir()
-	writeSkill(t, filepath.Join(src, "house", "house-rules"), "house-rules", nil)
-	writeSkill(t, filepath.Join(src, "tools", "planner"), "planner", nil)
-
-	if _, err := load(t, src, dest,
-		Source{Name: "house", Type: TypeRule},
-		Source{Name: "tools"},
-	); err != nil {
-		t.Fatalf("load: %v", err)
-	}
-
-	m, err := ReadManifest(dest)
-	if err != nil {
-		t.Fatalf("read manifest: %v", err)
-	}
-	rules, err := RuleContent(dest, m)
-	if err != nil {
-		t.Fatalf("rule content: %v", err)
-	}
-
-	if len(rules) != 1 || rules[0].Name != "house-rules" {
-		t.Fatalf("rules = %+v, want only house-rules", rules)
-	}
-	// The frontmatter is loader bookkeeping; the model should see the prose.
-	if strings.Contains(rules[0].Body, "description:") {
-		t.Errorf("frontmatter leaked into the prompt body: %q", rules[0].Body)
-	}
-	if !strings.Contains(rules[0].Body, "# house-rules") {
-		t.Errorf("body = %q, want the skill's content", rules[0].Body)
-	}
-}
-
-func TestReadManifestTreatsAMissingFileAsNoSkills(t *testing.T) {
-	m, err := ReadManifest(t.TempDir())
-	if err != nil {
-		t.Fatalf("a missing manifest should not be an error: %v", err)
-	}
-	if len(m.Skills) != 0 || len(m.Rules) != 0 {
-		t.Errorf("manifest = %+v, want empty", m)
-	}
-}
-
-func TestReadManifestRejectsAnUnparseableFile(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ManifestFile), []byte("{not json"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ReadManifest(dir); err == nil {
-		t.Fatal("want an error for an unparseable manifest")
-	}
-}
-
-func TestRuleContentFailsOnAMissingRule(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := RuleContent(dir, &Manifest{Rules: []string{"gone"}}); err == nil {
-		t.Fatal("want an error when a manifest rule has no SKILL.md")
-	}
-}
-
-func TestRuleContentPreservesManifestOrder(t *testing.T) {
-	dir := t.TempDir()
-	for _, n := range []string{"alpha", "beta"} {
-		writeSkill(t, filepath.Join(dir, n), n, nil)
-	}
-	rules, err := RuleContent(dir, &Manifest{Rules: []string{"beta", "alpha"}})
-	if err != nil {
-		t.Fatalf("rule content: %v", err)
-	}
-	if len(rules) != 2 || rules[0].Name != "beta" || rules[1].Name != "alpha" {
-		t.Errorf("rules = %+v, want manifest order", rules)
 	}
 }

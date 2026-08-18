@@ -7,24 +7,24 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 
 	"github.com/konveyor/agentic-controller/api/skill"
-	"github.com/konveyor/migration-harness/internal/logging"
 )
 
-const (
-	// ManifestFile records what the loader assembled, written into the skills
-	// root. A dotfile rather than a sibling directory: the root is already
-	// shared with the agent container, and runtimes discover skills by looking
-	// for SKILL.md, so a dotfile is inert to them. It gives the harness the
-	// rules list without re-walking, and gives the repo-shadowing check
-	// something authoritative to compare against.
-	ManifestFile = ".konveyor-skills.json"
+// The manifest is the contract with the harness, so its shape lives in
+// api/skill next to the frontmatter rules rather than here.
+const ManifestFile = skill.ManifestFile
+
+type (
+	// Loaded is one assembled skill.
+	Loaded = skill.Loaded
+	// Manifest is what this package writes for the harness to read.
+	Manifest = skill.Manifest
 )
 
 // Source and GitSource are the controller's declaration of what it staged.
@@ -51,26 +51,6 @@ type Options struct {
 }
 
 // Loaded is one assembled skill.
-type Loaded struct {
-	// Name is the frontmatter name, and also the directory under DestDir.
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Type        string `json:"type"`
-	// Source is the staging directory it came from, the SkillCard name.
-	Source string `json:"source"`
-	// SourcePath is where inside that source it was found. Empty for a
-	// single-skill source, the subdirectory name for one out of a bundle.
-	SourcePath string `json:"sourcePath,omitempty"`
-}
-
-// Manifest is what the loader wrote, recorded at DestDir/.konveyor-skills.json.
-type Manifest struct {
-	Skills []Loaded `json:"skills"`
-	// Rules lists the names of skills with type: rule, in assembly order. The
-	// harness injects these into every prompt.
-	Rules []string `json:"rules"`
-}
-
 // candidate is a skill directory found in a source, before validation.
 type candidate struct {
 	dir        string // absolute path on disk
@@ -179,7 +159,7 @@ func check(candidates []candidate) ([]Loaded, map[string]candidate, error) {
 		// the runtime's own view of a skill's name, into one, so a collision
 		// is a real collision rather than a silent walk-order choice.
 		if base := filepath.Base(c.dir); base != fm.Name {
-			logging.Info("skill %q arrived as %s, assembling it under its frontmatter name", fm.Name, c.label())
+			logf("skill %q arrived as %s, assembling it under its frontmatter name", fm.Name, c.label())
 		}
 
 		// Load policy comes from the SkillCard, never from content. Validate
@@ -300,7 +280,7 @@ func collect(ctx context.Context, opts Options) ([]candidate, func(), error) {
 			for _, f := range found {
 				names = append(names, f.sourcePath)
 			}
-			sort.Strings(names)
+			slices.Sort(names)
 			return nil, cleanup, fmt.Errorf(
 				"source %q holds %d skills (%s); set subPath to select one, or use a SkillCollection",
 				s.Name, len(found), strings.Join(names, ", "))
@@ -312,7 +292,7 @@ func collect(ctx context.Context, opts Options) ([]candidate, func(), error) {
 		candidates = append(candidates, found...)
 	}
 
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].label() < candidates[j].label() })
+	slices.SortFunc(candidates, func(a, b candidate) int { return strings.Compare(a.label(), b.label()) })
 	return candidates, cleanup, nil
 }
 
@@ -377,7 +357,7 @@ func discover(dir, sourceName string) ([]candidate, error) {
 
 func clone(ctx context.Context, name string, g GitSource, dest string) error {
 	if g.Ref == "" {
-		logging.Info("git source %q has no ref, cloning the default branch of %s, so this run is not reproducible", name, g.URL)
+		logf("git source %q has no ref, cloning the default branch of %s, so this run is not reproducible", name, g.URL)
 	}
 	opts := &gogit.CloneOptions{URL: g.URL, Depth: 1, SingleBranch: true}
 	if g.Ref != "" {
@@ -552,7 +532,7 @@ func prune(destDir string, keep map[string]bool) error {
 		if err := os.RemoveAll(filepath.Join(destDir, e.Name())); err != nil {
 			return fmt.Errorf("removing stale skill %q: %w", e.Name(), err)
 		}
-		logging.Info("removed %s, it is no longer in the sources", e.Name())
+		logf("removed %s, it is no longer in the sources", e.Name())
 	}
 	return nil
 }
@@ -581,49 +561,4 @@ func isKubernetesInternal(name string) bool {
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-// ReadManifest loads what the loader recorded for this pod.
-//
-// The harness reads it to find the always-loaded rules. Skills are optional
-// (#82), so a missing manifest means a run with no skills rather than an
-// error: the loader writes one whenever it runs, and a pod that never ran it
-// has nothing to inject.
-func ReadManifest(skillsDir string) (*Manifest, error) {
-	raw, err := os.ReadFile(filepath.Join(skillsDir, ManifestFile))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &Manifest{}, nil
-		}
-		return nil, fmt.Errorf("reading %s: %w", ManifestFile, err)
-	}
-	var m Manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", ManifestFile, err)
-	}
-	return &m, nil
-}
-
-// RuleContent returns the body of every always-loaded rule, in manifest order,
-// keyed for the prompt by skill name.
-//
-// ADR 0014: no runtime feature guarantees content reaches the model, so a rule
-// is injected rather than left for the agent to load. The body is read from the
-// assembled root, which is the same content the runtime would have served.
-func RuleContent(skillsDir string, m *Manifest) ([]Rule, error) {
-	out := make([]Rule, 0, len(m.Rules))
-	for _, name := range m.Rules {
-		body, err := os.ReadFile(filepath.Join(skillsDir, name, SkillFile))
-		if err != nil {
-			return nil, fmt.Errorf("reading rule %q: %w", name, err)
-		}
-		out = append(out, Rule{Name: name, Body: skill.Body(string(body))})
-	}
-	return out, nil
-}
-
-// Rule is one always-loaded skill, ready to place in a prompt.
-type Rule struct {
-	Name string
-	Body string
 }

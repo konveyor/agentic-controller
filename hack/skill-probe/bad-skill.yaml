@@ -18,7 +18,7 @@ spec:
     - name: skill-loader
       image: localhost/harness-test:dev
       imagePullPolicy: IfNotPresent
-      args: ["skills", "load"]
+      args: ["load"]
       env:
         - name: KONVEYOR_SKILL_SOURCES
           value: '[{"name":"konveyor","subPath":"plan"},{"name":"broken"}]'

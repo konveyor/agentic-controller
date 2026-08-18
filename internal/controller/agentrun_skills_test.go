@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -49,6 +50,9 @@ const (
 	// The skill testInlineSkill declares, which is also the SkillCard name the
 	// tests give it.
 	testInlineName = "house-rules"
+
+	// testLoaderImage stands in for the controller's own image.
+	testLoaderImage = "quay.io/konveyor/agentic-controller:v1"
 )
 
 func skillScheme(t *testing.T) *runtime.Scheme {
@@ -58,6 +62,10 @@ func skillScheme(t *testing.T) *runtime.Scheme {
 		t.Fatal(err)
 	}
 	if err := konveyoriov1alpha1.AddToScheme(s); err != nil {
+		t.Fatal(err)
+	}
+	// createSandbox writes a Sandbox, so the fake client has to know the type.
+	if err := sandboxv1beta1.AddToScheme(s); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -495,22 +503,17 @@ func TestResolveSkillVolumesForwardsGitRefAndSubPath(t *testing.T) {
 // that owns validation.
 func TestSkillLoaderContainerAlwaysPresent(t *testing.T) {
 	empty := &skillSources{inline: map[string]string{}}
-	c := skillLoaderContainer("quay.io/konveyor/agent-java:latest", empty, nil)
+	c := skillLoaderContainer(testLoaderImage, empty, nil)
 
 	if c.Name != skillLoaderContainerName {
 		t.Errorf("name = %q", c.Name)
 	}
-	// The agent's own image: the loader is a harness subcommand, so this adds
-	// no image to build, version or mirror.
-	if c.Image != "quay.io/konveyor/agent-java:latest" {
-		t.Errorf("image = %q, want the agent image", c.Image)
-	}
-	// The binary is named rather than left to the image's ENTRYPOINT, which an
-	// agent image is free to wrap in a script that ignores its arguments.
-	if len(c.Command) != 1 || c.Command[0] != harnessBinary {
+	// The binary is named rather than left to the image's ENTRYPOINT, and it is
+	// an absolute path because the controller image is distroless.
+	if len(c.Command) != 1 || c.Command[0] != loaderBinary {
 		t.Errorf("command = %v, want the harness binary", c.Command)
 	}
-	if len(c.Args) < 2 || c.Args[0] != harnessSkillsCmd || c.Args[1] != "load" {
+	if len(c.Args) < 1 || c.Args[0] != "load" {
 		t.Errorf("args = %v", c.Args)
 	}
 	// Both directories explicit: their defaults come from the harness's own
@@ -625,5 +628,50 @@ func TestCreateInlineSkillConfigMapsUpdatesChangedContent(t *testing.T) {
 	}
 	if cm.Data["SKILL.md"] != edited {
 		t.Errorf("SKILL.md = %q, want the edited content", cm.Data["SKILL.md"])
+	}
+}
+
+// The loader runs the controller's image, never the agent's. Using the agent's
+// would make "carries our harness binary" a requirement of every agent image,
+// and the failure when one does not is an init container that cannot start,
+// with no log to say why.
+func TestSkillLoaderUsesTheControllerImageNotTheAgents(t *testing.T) {
+	card := skillCard(testInlineName, func(sc *konveyoriov1alpha1.SkillCard) {
+		sc.Spec.Inline = testInlineSkill
+	})
+	agent := agentWithCards(testInlineName)
+	agent.Spec.Image = "quay.io/example/someones-own-agent:v1"
+
+	run := agentRun("run")
+	r := newSkillReconciler(t, card, run, agent)
+	r.SkillLoaderImage = testLoaderImage
+	ctx := context.Background()
+
+	if _, err := r.createSandbox(ctx, run, agent); err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	var sandbox sandboxv1beta1.Sandbox
+	if err := r.Get(ctx, client.ObjectKey{Namespace: skillTestNS, Name: run.Name}, &sandbox); err != nil {
+		t.Fatalf("sandbox not created: %v", err)
+	}
+
+	var loader *corev1.Container
+	for i := range sandbox.Spec.PodTemplate.Spec.InitContainers {
+		if sandbox.Spec.PodTemplate.Spec.InitContainers[i].Name == skillLoaderContainerName {
+			loader = &sandbox.Spec.PodTemplate.Spec.InitContainers[i]
+		}
+	}
+	if loader == nil {
+		t.Fatal("no skill-loader init container")
+	}
+	if loader.Image != testLoaderImage {
+		t.Errorf("loader image = %q, want the controller image %q", loader.Image, testLoaderImage)
+	}
+	if loader.Image == agent.Spec.Image {
+		t.Error("loader is running the agent's image")
+	}
+	// The agent container still runs the agent's image.
+	if got := sandbox.Spec.PodTemplate.Spec.Containers[0].Image; got != agent.Spec.Image {
+		t.Errorf("agent container image = %q, want %q", got, agent.Spec.Image)
 	}
 }

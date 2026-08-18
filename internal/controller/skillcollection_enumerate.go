@@ -268,9 +268,9 @@ func (r *SkillCollectionReconciler) createEnumerationJob(
 						// Named rather than left to the image's ENTRYPOINT,
 						// which an agent image may wrap in a script that
 						// ignores its arguments.
-						Command: []string{harnessBinary},
+						Command: []string{loaderBinary},
 						Args: []string{
-							harnessSkillsCmd, materializeSubcommand, enumerationSrcDir,
+							materializeSubcommand, enumerationSrcDir,
 						},
 						Env: []corev1.EnvVar{
 							{Name: "KONVEYOR_COLLECTION_NAME", Value: collection.Name},

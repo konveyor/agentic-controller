@@ -235,3 +235,19 @@ patches:
 #     fieldPath: .metadata.name
 #   targets: # Do not remove or uncomment the following scaffold marker; required to generate code for target CRD.
 # +kubebuilder:scaffold:crdkustomizecainjectionname
+
+# Keep SKILL_LOADER_IMAGE equal to the manager's own image. The loader and the
+# enumeration Job run the controller's image, and `kustomize edit set image`
+# only rewrites the image field, so without this the env var would keep the
+# placeholder while the container moved.
+replacements:
+- source:
+    kind: Deployment
+    name: controller-manager
+    fieldPath: spec.template.spec.containers.[name=manager].image
+  targets:
+  - select:
+      kind: Deployment
+      name: controller-manager
+    fieldPaths:
+    - spec.template.spec.containers.[name=manager].env.[name=SKILL_LOADER_IMAGE].value

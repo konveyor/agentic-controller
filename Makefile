@@ -286,13 +286,13 @@ skill-push: skill-build ## Build and push the skill bundle image.
 # A skill is one directory deep, so a directory of directories is not itself a
 # bundle and its contents are not seen. skills/examples/ is therefore named
 # separately rather than being silently skipped.
-SKILL_TREES ?= ../skills ../skills/examples
+SKILL_TREES ?= skills skills/examples
 
 .PHONY: skill-validate
 skill-validate: ## Check every SKILL.md frontmatter parses and is complete.
-	@cd harness && for tree in $(SKILL_TREES); do \
+	@for tree in $(SKILL_TREES); do \
 		echo "Validating $${tree}" ;\
-		go run ./cmd/migration-harness skills validate "$${tree}" || exit 1 ;\
+		go run ./cmd/skill-loader validate "$${tree}" || exit 1 ;\
 	done
 
 ##@ Changelog

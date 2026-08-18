@@ -26,7 +26,7 @@
 #   CONTAINER_TOOL    podman or docker (default: podman)
 #   PLATFORM          image platform (default: linux/arm64)
 #   NS                namespace to work in (default: default)
-#   AGENT_IMAGE       image carrying the harness, for the collision probe
+#   AGENT_IMAGE       any agent image, for the collision probe
 #   GATEWAY           name of an existing Ready Gateway, for the collision probe
 #
 # Probe 3 needs an Agent, so it needs an image and a gateway. Set both or it is
