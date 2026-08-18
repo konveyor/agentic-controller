@@ -192,6 +192,8 @@ func main() {
 	if err := (&controller.SkillCollectionReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		// Any agent image carries the harness binary that does the walk.
+		EnumerationImage: os.Getenv("ENUMERATION_IMAGE"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "SkillCollection")
 		os.Exit(1)

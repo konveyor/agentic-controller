@@ -9,6 +9,12 @@ resources:
 - role_binding.yaml
 - leader_election_role.yaml
 - leader_election_role_binding.yaml
+# The identity the skill enumeration Job runs as. Separate from the manager's,
+# and namespace-scoped to SkillCards, because that Job's pod mounts a
+# user-supplied image.
+- skill_enumerator_service_account.yaml
+- skill_enumerator_role.yaml
+- skill_enumerator_role_binding.yaml
 # The following RBAC configurations are used to protect
 # the metrics endpoint with authn/authz. These configurations
 # ensure that only authorized users and service accounts

@@ -165,7 +165,10 @@ var _ = Describe("SkillCollection Controller", func() {
 	Context("when a skill uses a git source", func() {
 		const collName = "scol-ctrl-git-source"
 
-		It("should be NotReady with Phase 3 message", func() {
+		// Nothing to resolve, the same as for a SkillCard with a git source:
+		// the loader clones it at pod start and settles there whether the
+		// repository holds a usable skill.
+		It("should be Ready, since the loader clones it at pod start", func() {
 			scol := &konveyoriov1alpha1.SkillCollection{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      collName,
@@ -186,8 +189,8 @@ var _ = Describe("SkillCollection Controller", func() {
 
 				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
 				g.Expect(readyCond).NotTo(BeNil())
-				g.Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
-				g.Expect(readyCond.Message).To(ContainSubstring("Phase 3"))
+				g.Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(readyCond.Reason).To(Equal(reasonAllSkillsResolved))
 			}, timeout, interval).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, scol)).To(Succeed())

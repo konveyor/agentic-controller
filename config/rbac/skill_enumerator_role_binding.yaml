@@ -1,0 +1,16 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: agentic-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: skill-enumerator-rolebinding
+  namespace: system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: skill-enumerator-role
+subjects:
+- kind: ServiceAccount
+  name: skill-enumerator
+  namespace: system
