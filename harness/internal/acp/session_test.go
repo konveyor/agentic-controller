@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -290,6 +291,12 @@ func TestInitializeDeclaresGooseCustomNotifications(t *testing.T) {
 	if goose["customNotifications"] != true {
 		t.Fatalf("initialize params missing clientCapabilities._meta.goose.customNotifications=true: %v", params)
 	}
+	// Form elicitation must be advertised or goose cancels the agent's
+	// ask_user questions itself instead of relaying them.
+	elicitation, _ := caps["elicitation"].(map[string]any)
+	if _, ok := elicitation["form"]; !ok {
+		t.Fatalf("initialize params missing clientCapabilities.elicitation.form: %v", params)
+	}
 }
 
 type stubForwarder struct {
@@ -303,6 +310,99 @@ func (f *stubForwarder) ForwardPermission(params json.RawMessage) (json.RawMessa
 		f.asked <- params
 	}
 	return f.result, f.outcome
+}
+
+func (f *stubForwarder) ForwardElicitation(params json.RawMessage) (json.RawMessage, PermissionForwardOutcome) {
+	if f.asked != nil {
+		f.asked <- params
+	}
+	return f.result, f.outcome
+}
+
+const elicitAsk = `{"jsonrpc":"2.0","id":"elic-1","method":"elicitation/create","params":{` +
+	`"sessionId":"s1","mode":"form","message":"Which database should the migration target?",` +
+	`"requestedSchema":{"type":"object","properties":{"answer":{"type":"string","enum":["postgres","mysql"]}},"required":["answer"]}}}`
+
+// runElicitationScenario drives one prompt during which the agent asks
+// the human a question, and returns the harness's reply to that ask.
+func runElicitationScenario(t *testing.T, fwd PermissionForwarder) map[string]any {
+	t.Helper()
+	s := newDemuxServer(t)
+	c := s.dial(t)
+	sc := NewSessionClient(c)
+	if fwd != nil {
+		sc.SetPermissionForwarder(fwd)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	promptDone := make(chan error, 1)
+	go func() {
+		_, err := sc.SendPrompt(ctx, "s1", []ContentBlock{{Type: "text", Text: "go"}}, 0)
+		promptDone <- err
+	}()
+
+	promptReq := s.next()
+	promptID := int64(promptReq["id"].(float64))
+
+	s.push(elicitAsk)
+	reply := s.next()
+
+	s.push(`{"jsonrpc":"2.0","id":` + jsonInt(promptID) + `,"result":{"stopReason":"end_turn"}}`)
+	if err := <-promptDone; err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if got, _ := reply["id"].(string); got != "elic-1" {
+		t.Fatalf("reply to id %v, want elic-1", reply["id"])
+	}
+	return reply
+}
+
+func elicitationAction(t *testing.T, reply map[string]any) (string, map[string]any) {
+	t.Helper()
+	result, ok := reply["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("no result in reply %v", reply)
+	}
+	action, _ := result["action"].(string)
+	content, _ := result["content"].(map[string]any)
+	return action, content
+}
+
+// The human's answer to a question is relayed verbatim.
+func TestElicitationForwardAnswered(t *testing.T) {
+	fwd := &stubForwarder{
+		result:  json.RawMessage(`{"action":"accept","content":{"answer":"postgres"}}`),
+		outcome: ForwardAnswered,
+		asked:   make(chan json.RawMessage, 1),
+	}
+	reply := runElicitationScenario(t, fwd)
+	action, content := elicitationAction(t, reply)
+	if action != "accept" || content["answer"] != "postgres" {
+		t.Fatalf("viewer answer not relayed verbatim: %s %v", action, content)
+	}
+	params := <-fwd.asked
+	if !strings.Contains(string(params), "Which database") {
+		t.Fatalf("forwarder saw wrong params: %s", params)
+	}
+}
+
+// Nobody to answer — or nobody answering in time — cancels the question;
+// the harness never answers on the human's behalf.
+func TestElicitationFailsClosed(t *testing.T) {
+	for name, fwd := range map[string]PermissionForwarder{
+		"no viewers":   &stubForwarder{outcome: ForwardNoViewers},
+		"timeout":      &stubForwarder{outcome: ForwardTimeout},
+		"no forwarder": nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			action, _ := elicitationAction(t, runElicitationScenario(t, fwd))
+			if action != "cancel" {
+				t.Fatalf("expected cancel, got %q", action)
+			}
+		})
+	}
 }
 
 const permAsk = `{"jsonrpc":"2.0","id":900,"method":"session/request_permission","params":{` +

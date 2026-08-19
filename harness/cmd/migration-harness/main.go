@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/konveyor/migration-harness/internal/acp"
+	"github.com/konveyor/migration-harness/internal/askuser"
 	"github.com/konveyor/migration-harness/internal/config"
 	"github.com/konveyor/migration-harness/internal/git"
 	"github.com/konveyor/migration-harness/internal/goose"
@@ -36,8 +37,30 @@ var runCmd = &cobra.Command{
 	RunE:  runStage,
 }
 
+// askUserCmd is the stdio MCP server goose spawns for the ask_user tool
+// (listed in session/new mcpServers by runStage). It never loads the
+// harness config — it only speaks MCP on stdin/stdout.
+var askUserCmd = &cobra.Command{
+	Use:    askuser.Subcommand,
+	Short:  "Serve the ask_user MCP tool over stdio (started by goose, not by hand)",
+	Hidden: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		srv := askuser.New(os.Stdout, func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format+"\n", args...)
+		})
+		err := srv.Serve(ctx, os.Stdin)
+		if err == context.Canceled {
+			return nil
+		}
+		return err
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(askUserCmd)
 }
 
 func main() {
@@ -214,9 +237,29 @@ func runStage(cmd *cobra.Command, args []string) error {
 	defer wsClient.Close()
 
 	session := acp.NewSessionClient(wsClient)
-	sessionID, err := session.CreateSession(ctx, cloneDir, nil)
+	// ask_user: the harness binary doubles as a stdio MCP server giving the
+	// agent one tool whose questions reach attached viewers (through the
+	// tee) and block the turn until answered — the in-turn "stop and
+	// confirm" the transcript otherwise cannot express.
+	var mcpServers []acp.MCPServer
+	if cfg.HITLAsk {
+		if self, err := os.Executable(); err == nil {
+			mcpServers = append(mcpServers, acp.MCPServer{
+				Name:    askuser.ToolName,
+				Command: self,
+				Args:    []string{askuser.Subcommand},
+				Env:     []acp.EnvVar{},
+			})
+		} else {
+			logging.Warn("ask_user tool disabled: cannot resolve harness executable: %v", err)
+		}
+	}
+	sessionID, err := session.CreateSession(ctx, cloneDir, mcpServers)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
+	}
+	if len(mcpServers) > 0 {
+		logging.Ok("ask_user tool mounted (questions reach attached viewers; HARNESS_HITL_ASK=off to disable)")
 	}
 
 	// 6b. Expose the run: tee listener on the pod ACP port. Viewers get
@@ -299,6 +342,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 		AgentPrompt:   cfg.AgentPrompt,
 		WorkflowGuide: cfg.WorkflowGuide,
 		StageTask:     cfg.StageInstructions,
+		AskUser:       len(mcpServers) > 0,
 	})
 
 	// 8. Start filesystem watcher BEFORE blocking prompt

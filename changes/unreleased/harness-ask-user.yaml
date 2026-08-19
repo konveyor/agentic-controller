@@ -1,0 +1,12 @@
+kind: enhancement
+
+description: >
+  Harness gives the agent an ask_user tool (a stdio MCP server that is the
+  harness binary itself) whose questions reach attached viewers through
+  the ACP tee as elicitation/create asks and block the turn until a human
+  answers — the in-turn "stop and confirm" a prose question cannot
+  express. The harness advertises clientCapabilities.elicitation.form so
+  goose relays the ask; the answer rides back verbatim; nobody watching,
+  or no answer within HARNESS_HITL_TIMEOUT_SECONDS, cancels the question
+  (never answered on the human's behalf). A viewer attaching mid-question
+  is shown the pending ask. HARNESS_HITL_ASK=off leaves the tool out.

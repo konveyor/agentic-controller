@@ -25,7 +25,7 @@ func TestSendPromptAnswersAgentRequests(t *testing.T) {
 		method string
 		body   map[string]any
 	}
-	replies := make(chan reply, 2)
+	replies := make(chan reply, 3)
 
 	upgrader := websocket.Upgrader{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +70,8 @@ func TestSendPromptAnswersAgentRequests(t *testing.T) {
 		_ = json.Unmarshal(data, &permReply)
 		replies <- reply{method: "session/request_permission", body: permReply}
 
-		// Agent-initiated request the harness does not implement.
+		// The agent asks the human a question; headless, it is cancelled
+		// (never answered on the human's behalf).
 		elic := `{"jsonrpc":"2.0","id":901,"method":"elicitation/create","params":{` +
 			`"message":"Which broker?","requestedSchema":{"type":"object"}}}`
 		if err := conn.WriteMessage(websocket.TextMessage, []byte(elic)); err != nil {
@@ -85,6 +86,21 @@ func TestSendPromptAnswersAgentRequests(t *testing.T) {
 		var elicReply map[string]any
 		_ = json.Unmarshal(data, &elicReply)
 		replies <- reply{method: "elicitation/create", body: elicReply}
+
+		// Agent-initiated request the harness does not implement.
+		fsReq := `{"jsonrpc":"2.0","id":902,"method":"fs/read_text_file","params":{"path":"/etc/passwd"}}`
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(fsReq)); err != nil {
+			t.Errorf("send fs request: %v", err)
+			return
+		}
+		_, data, err = conn.ReadMessage()
+		if err != nil {
+			t.Errorf("read fs reply: %v", err)
+			return
+		}
+		var fsReply map[string]any
+		_ = json.Unmarshal(data, &fsReply)
+		replies <- reply{method: "fs/read_text_file", body: fsReply}
 
 		// Finish the turn.
 		done := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"stopReason":"end_turn"}}`, promptReq.ID)
@@ -130,12 +146,22 @@ func TestSendPromptAnswersAgentRequests(t *testing.T) {
 		t.Errorf("permission reply should select reject_once, got: %v", r.body["result"])
 	}
 
-	// Unsupported request must get a method-not-found error, not silence.
+	// A question with nobody to answer it is cancelled, never answered
+	// for the human.
 	r = <-replies
 	if id, _ := r.body["id"].(float64); id != 901 {
 		t.Errorf("elicitation reply id = %v, want 901", r.body["id"])
 	}
+	if !strings.Contains(fmt.Sprintf("%v", r.body["result"]), "cancel") {
+		t.Errorf("headless elicitation reply should cancel, got: %v", r.body)
+	}
+
+	// Unsupported request must get a method-not-found error, not silence.
+	r = <-replies
+	if id, _ := r.body["id"].(float64); id != 902 {
+		t.Errorf("fs reply id = %v, want 902", r.body["id"])
+	}
 	if r.body["error"] == nil {
-		t.Errorf("elicitation reply should be a JSON-RPC error, got: %v", r.body)
+		t.Errorf("fs reply should be a JSON-RPC error, got: %v", r.body)
 	}
 }

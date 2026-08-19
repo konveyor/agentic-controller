@@ -36,7 +36,20 @@ type Layers struct {
 	WorkflowGuide string
 	// StageTask is the task for this stage.
 	StageTask string
+	// AskUser: the session mounts the harness's ask_user tool, so the
+	// guidelines tell the model to use it (and not to ask in prose).
+	AskUser bool
 }
+
+// askUserGuideline is appended to the working guidelines when the ask_user
+// tool is mounted. It has to pre-empt the model's habit of asking in prose:
+// nothing reads an assistant message until the run is over, and a turn that
+// ends on a question is a finished run.
+const askUserGuideline = "A human may be watching this run. When you need a decision only a human can make — " +
+	"a missing prerequisite, an ambiguous requirement, a choice between approaches, anything destructive — " +
+	"call the `ask_user` tool and wait for its answer. Do not ask questions in prose: nobody reads your " +
+	"messages until the run is over, and ending your turn on a question ends the run. " +
+	"If `ask_user` reports that nobody answered, say what you needed and stop.\n\n"
 
 // Build composes the stage prompt. The harness's environment rules always come
 // first, so a skill cannot be read as overriding them.
@@ -59,6 +72,9 @@ func Build(l Layers) string {
 
 	b.WriteString("## Working Guidelines\n\n")
 	b.WriteString("Commit your changes to git with a descriptive message when your work is complete.\n\n")
+	if l.AskUser {
+		b.WriteString(askUserGuideline)
+	}
 
 	if l.StageTask != "" {
 		b.WriteString("## Stage Task\n\n")

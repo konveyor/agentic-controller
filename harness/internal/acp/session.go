@@ -44,11 +44,14 @@ const (
 	ForwardTimeout
 )
 
-// PermissionForwarder relays a session/request_permission ask to attached
-// human viewers (the ACP tee). Implementations must be safe for concurrent
-// use and must not block past their own timeout.
+// PermissionForwarder relays the asks goose raises toward the client —
+// session/request_permission (tool approval) and elicitation/create (a
+// question from the agent, e.g. the ask_user tool) — to attached human
+// viewers (the ACP tee). Implementations must be safe for concurrent use
+// and must not block past their own timeout.
 type PermissionForwarder interface {
 	ForwardPermission(params json.RawMessage) (json.RawMessage, PermissionForwardOutcome)
+	ForwardElicitation(params json.RawMessage) (json.RawMessage, PermissionForwardOutcome)
 }
 
 // SetPermissionForwarder installs the viewer relay consulted before the
@@ -76,7 +79,11 @@ type InitParams struct {
 }
 
 type ClientCapabilities struct {
-	Meta map[string]any `json:"_meta,omitempty"`
+	// Elicitation advertises form-mode elicitation support: goose then
+	// relays an MCP server's elicitation/create (the harness's own
+	// ask_user tool) to us instead of cancelling it on the agent's behalf.
+	Elicitation map[string]any `json:"elicitation,omitempty"`
+	Meta        map[string]any `json:"_meta,omitempty"`
 }
 
 type ClientInfo struct {
@@ -107,7 +114,11 @@ func (c *SessionClient) Initialize(ctx context.Context) (*InitResult, error) {
 		// customNotifications turns on goose's `_goose/unstable/session/update`
 		// stream: usage_update (live token/context spend) and status_message
 		// (notices + progress). The tee forwards both to attached viewers.
+		// elicitation.form makes goose route an agent's question
+		// (elicitation/create) to the harness, which offers it to viewers
+		// like a permission ask — and fails closed (cancel) with nobody there.
 		ClientCapabilities: ClientCapabilities{
+			Elicitation: map[string]any{"form": map[string]any{}},
 			Meta: map[string]any{
 				"goose": map[string]any{"customNotifications": true},
 			},
@@ -133,11 +144,20 @@ type SessionNewParams struct {
 	MCPServers []MCPServer `json:"mcpServers"`
 }
 
-// MCPServer describes an MCP tool server for a session.
+// MCPServer describes a stdio MCP tool server for a session (ACP
+// McpServerStdio: name, command, args, env as a LIST of name/value pairs —
+// a map is rejected by goose's untagged-enum parse with -32602).
 type MCPServer struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	Env     map[string]string `json:"env,omitempty"`
+	Name    string   `json:"name"`
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+	Env     []EnvVar `json:"env"`
+}
+
+// EnvVar is one environment variable handed to an MCP server.
+type EnvVar struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // SessionNewResult is the response from session/new.
@@ -315,6 +335,11 @@ type PermissionOption struct {
 func (c *SessionClient) answerAgentRequest(msg *RPCResponse) {
 	id := msg.ID
 
+	if msg.Method == "elicitation/create" {
+		c.answerElicitation(msg)
+		return
+	}
+
 	if msg.Method != "session/request_permission" {
 		logging.Warn("agent request %q unsupported — rejecting (method not found)", msg.Method)
 		if err := c.ws.SendResponse(id, nil, &RPCError{Code: -32601, Message: "method not supported by harness"}); err != nil {
@@ -371,6 +396,45 @@ func (c *SessionClient) answerAgentRequest(msg *RPCResponse) {
 	logging.Warn("goose asked permission for %q — headless harness denies it", params.ToolCall.Title)
 	if err := c.ws.SendResponse(id, map[string]any{"outcome": outcome}, nil); err != nil {
 		logging.Warn("reply to permission request: %v", err)
+	}
+}
+
+// answerElicitation handles the agent asking the human a question
+// (elicitation/create — from the harness's ask_user tool or any MCP server
+// the session mounts). Offered to attached viewers first; with nobody
+// there, or nobody answering in time, the ask is cancelled — goose reports
+// that back to the tool, which tells the model no human answered. Never
+// answered on the human's behalf.
+func (c *SessionClient) answerElicitation(msg *RPCResponse) {
+	id := msg.ID
+	var params struct {
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(msg.Params, &params)
+	title := params.Message
+	if len(title) > 80 {
+		title = title[:77] + "..."
+	}
+
+	if f := c.permissionForwarder(); f != nil {
+		result, outcome := f.ForwardElicitation(msg.Params)
+		switch outcome {
+		case ForwardAnswered:
+			logging.Info("question %q answered by attached viewer", title)
+			if err := c.ws.SendResponse(id, result, nil); err != nil {
+				logging.Warn("relay elicitation answer: %v", err)
+			}
+			return
+		case ForwardTimeout:
+			logging.Warn("question %q unanswered by viewer — cancelling (fail closed)", title)
+		case ForwardNoViewers:
+			// fall through to the headless cancel
+		}
+	}
+
+	logging.Warn("agent asked %q — headless harness cancels it (no human to answer)", title)
+	if err := c.ws.SendResponse(id, map[string]any{"action": "cancel"}, nil); err != nil {
+		logging.Warn("reply to elicitation: %v", err)
 	}
 }
 

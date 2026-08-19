@@ -23,7 +23,10 @@
 //   - a session/request_permission ask on the run connection is offered
 //     to attached viewers under a harness-allocated "kperm-<n>" string id
 //     (disjoint from the pipe's verbatim numeric ids); the viewer's
-//     answer is intercepted and relayed to goose
+//     answer is intercepted and relayed to goose. An elicitation/create
+//     ask — the agent's own question, e.g. its ask_user tool — travels
+//     the same road under "kask-<n>", and a pending ask is replayed to a
+//     viewer that attaches while it waits.
 //   - redirection: a viewer frame naming the RUN session is routed onto
 //     the run connection instead of the viewer's private pipe —
 //     `_goose/unstable/session/steer` (inject guidance into the active
@@ -134,7 +137,10 @@ type Server struct {
 	mu      sync.Mutex
 	viewers map[*viewer]struct{}
 	perms   map[string]chan json.RawMessage
-	stopped bool
+	// pendingAsks keeps each outstanding ask's frame so a viewer attaching
+	// mid-ask (typical for a question that waits minutes) still sees it.
+	pendingAsks map[string][]byte
+	stopped     bool
 
 	// done is closed by Stop so anything parked on a viewer answer
 	// (ForwardPermission) fails closed immediately instead of waiting
@@ -180,10 +186,11 @@ func New(cfg Config) *Server {
 		// No credential in the URL: the key rides the X-Secret-Key
 		// header on dial, so an error that echoes the URL cannot leak it
 		// into container logs.
-		upstream: fmt.Sprintf("ws://%s/acp", cfg.UpstreamAddr),
-		viewers:  make(map[*viewer]struct{}),
-		perms:    make(map[string]chan json.RawMessage),
-		done:     make(chan struct{}),
+		upstream:    fmt.Sprintf("ws://%s/acp", cfg.UpstreamAddr),
+		viewers:     make(map[*viewer]struct{}),
+		perms:       make(map[string]chan json.RawMessage),
+		pendingAsks: make(map[string][]byte),
+		done:        make(chan struct{}),
 	}
 }
 
@@ -358,15 +365,29 @@ func (s *Server) emitRunFrame(method string, update any) {
 // ForwardPermission implements acp.PermissionForwarder: broadcast the ask
 // to every attached viewer under a kperm-<n> id, first answer wins.
 func (s *Server) ForwardPermission(params json.RawMessage) (json.RawMessage, acp.PermissionForwardOutcome) {
-	id := fmt.Sprintf("kperm-%d", s.permSeq.Add(1))
+	return s.forwardAsk("kperm", "session/request_permission", params)
+}
+
+// ForwardElicitation implements acp.PermissionForwarder for the agent's
+// questions (elicitation/create): same relay under a kask-<n> id. The
+// answer is the viewer's {action, content} object, relayed verbatim.
+func (s *Server) ForwardElicitation(params json.RawMessage) (json.RawMessage, acp.PermissionForwardOutcome) {
+	return s.forwardAsk("kask", "elicitation/create", params)
+}
+
+// forwardAsk offers an agent→client request to every attached viewer under
+// a harness-allocated string id; first answer wins; a viewer attaching while
+// the ask is pending receives it on attach.
+func (s *Server) forwardAsk(prefix, method string, params json.RawMessage) (json.RawMessage, acp.PermissionForwardOutcome) {
+	id := fmt.Sprintf("%s-%d", prefix, s.permSeq.Add(1))
 	frame, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"id":      id,
-		"method":  "session/request_permission",
+		"method":  method,
 		"params":  params,
 	})
 	if err != nil {
-		logging.Warn("tee: marshal permission forward: %v", err)
+		logging.Warn("tee: marshal %s forward: %v", method, err)
 		return nil, acp.ForwardNoViewers
 	}
 
@@ -385,6 +406,7 @@ func (s *Server) ForwardPermission(params json.RawMessage) (json.RawMessage, acp
 		return nil, acp.ForwardNoViewers
 	}
 	s.perms[id] = ch
+	s.pendingAsks[id] = frame
 	s.mu.Unlock()
 
 	targets := s.snapshotViewers()
@@ -396,10 +418,11 @@ func (s *Server) ForwardPermission(params json.RawMessage) (json.RawMessage, acp
 	defer func() {
 		s.mu.Lock()
 		delete(s.perms, id)
+		delete(s.pendingAsks, id)
 		s.mu.Unlock()
 	}()
 
-	logging.Info("tee: permission ask %s offered to %d viewer(s)", id, n)
+	logging.Info("tee: %s %s offered to %d viewer(s)", method, id, n)
 	// Explicit timer, not time.After: an answered ask must release its
 	// timer immediately rather than pinning it for the full window.
 	timer := time.NewTimer(s.cfg.HITLTimeout)
@@ -526,6 +549,11 @@ func (s *Server) serveViewer(client *websocket.Conn) {
 	// via session/load).
 	s.mu.Lock()
 	backlog := append([][]byte(nil), s.replay...)
+	// Outstanding asks go after the status frames: a viewer arriving in
+	// the middle of an unanswered question is exactly who should see it.
+	for _, f := range s.pendingAsks {
+		backlog = append(backlog, f)
+	}
 	s.mu.Unlock()
 	for _, f := range backlog {
 		v.enqueue(outFrame{websocket.TextMessage, f})
@@ -634,15 +662,15 @@ func (s *Server) serveViewer(client *websocket.Conn) {
 	}()
 
 	// Client reader: client → goose, verbatim — except frames that belong
-	// to the run connection, not this pipe: answers to kperm-* asks, and
-	// steer/cancel/prompt frames naming the run session.
+	// to the run connection, not this pipe: answers to kperm-*/kask-* asks,
+	// and steer/cancel/prompt frames naming the run session.
 	for {
 		mt, data, err := client.ReadMessage()
 		if err != nil {
 			return
 		}
-		if id, result, ok := kpermAnswer(data); ok {
-			s.resolvePermission(id, result)
+		if id, result, ok := harnessAskAnswer(data); ok {
+			s.resolveAsk(id, result)
 			continue
 		}
 		if s.interceptRunFrame(v, data) {
@@ -813,11 +841,11 @@ func (s *Server) broadcast(frame []byte) {
 	}
 }
 
-// kpermAnswer reports whether the frame is a JSON-RPC *response* to a
-// harness-allocated kperm-* permission ask, and extracts its result.
-// Error responses are not answers — the ask stays pending for another
-// viewer or the timeout.
-func kpermAnswer(frame []byte) (string, json.RawMessage, bool) {
+// harnessAskAnswer reports whether the frame is a JSON-RPC *response* to a
+// harness-allocated ask (kperm-* permission, kask-* elicitation), and
+// extracts its result. Error responses are not answers — the ask stays
+// pending for another viewer or the timeout.
+func harnessAskAnswer(frame []byte) (string, json.RawMessage, bool) {
 	var probe struct {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
@@ -833,19 +861,19 @@ func kpermAnswer(frame []byte) (string, json.RawMessage, bool) {
 	if err := json.Unmarshal(probe.ID, &id); err != nil {
 		return "", nil, false
 	}
-	if !strings.HasPrefix(id, "kperm-") {
+	if !strings.HasPrefix(id, "kperm-") && !strings.HasPrefix(id, "kask-") {
 		return "", nil, false
 	}
 	if len(probe.Result) == 0 {
-		logging.Warn("tee: viewer errored permission ask %s — leaving it pending", id)
+		logging.Warn("tee: viewer errored ask %s — leaving it pending", id)
 		return id, nil, true // consumed (never forwarded upstream), but not resolved
 	}
 	return id, probe.Result, true
 }
 
-func (s *Server) resolvePermission(id string, result json.RawMessage) {
-	// Any kperm frame — even a late or error answer — proves a human is
-	// at the controls; resume forwarding asks.
+func (s *Server) resolveAsk(id string, result json.RawMessage) {
+	// Any kperm/kask frame — even a late or error answer — proves a human
+	// is at the controls; resume forwarding asks.
 	s.responsive.Store(true)
 	if result == nil {
 		return
