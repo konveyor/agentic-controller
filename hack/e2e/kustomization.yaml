@@ -6,3 +6,19 @@ images:
 - name: controller
   newName: quay.io/konveyor/agentic-controller
   newTag: e2e
+
+# Repeat the base's replacement. An `images:` transformer in an overlay runs
+# after the base's replacements, so without this the env keeps the base's
+# placeholder while the container moves, and the loader init container fails
+# to pull. Any overlay that retags the controller image needs this too.
+replacements:
+- source:
+    kind: Deployment
+    name: controller-manager
+    fieldPath: spec.template.spec.containers.[name=manager].image
+  targets:
+  - select:
+      kind: Deployment
+      name: controller-manager
+    fieldPaths:
+    - spec.template.spec.containers.[name=manager].env.[name=SKILL_LOADER_IMAGE].value

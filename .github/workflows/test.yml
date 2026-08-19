@@ -28,6 +28,12 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
+      # An overlay that retags the controller without repeating the base's
+      # replacement leaves the loader pointing at a placeholder, which shows up
+      # as ErrImagePull on an init container rather than anything readable.
+      - name: Verify the loader image matches the manager's
+        run: make verify-loader-image
+
       - name: Running Tests
         run: make test
 

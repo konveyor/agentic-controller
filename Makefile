@@ -85,6 +85,10 @@ e2e: e2e-setup e2e-run ## Full e2e: create cluster, deploy, test.
 e2e-cleanup: ## Tear down the Kind cluster used for e2e tests.
 	kind delete cluster --name $(KIND_CLUSTER)
 
+.PHONY: verify-loader-image
+verify-loader-image: kustomize ## Check every overlay keeps SKILL_LOADER_IMAGE equal to the manager's image.
+	KUSTOMIZE="$(KUSTOMIZE)" hack/verify-loader-image.sh
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	"$(GOLANGCI_LINT)" run
