@@ -122,7 +122,7 @@ GOARCH ?= $(shell go env GOARCH)
 .PHONY: harness-build
 harness-build: ## Build the migration-harness binary for local use (GOOS/GOARCH override to cross-compile; the agent images always build it for linux inside their Containerfile).
 	mkdir -p harness/bin
-	cd harness && GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o bin/migration-harness ./cmd/migration-harness/
+	cd harness && CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o bin/migration-harness ./cmd/migration-harness/
 	if [ "$(GOOS)" = "windows" ]; then mv harness/bin/migration-harness harness/bin/migration-harness.exe; fi
 
 .PHONY: controller-agent-build
@@ -168,16 +168,15 @@ agent-images-push: agent-images-build ## Build and push all agent images.
 # --platform + --manifest, then manifest push.
 #
 # Each image is first built under a "localhost/..." tag, not its real
-# quay.io tag. quay.io/konveyor/agent-base:latest etc. are real,
-# already-published images; if a language image's Containerfile is built
-# with BASE_IMAGE pointed at that real name, podman's build resolves the
-# per-platform FROM by pulling the (single-arch) published image instead of
-# using the multi-arch manifest just built locally under the same name — it
-# only warns ("image platform (linux/amd64) does not match the expected
-# platform (linux/arm64)") and silently continues, baking the wrong
-# architecture's base into the arm64 build. A "localhost/..." reference has
-# no real registry behind it, forcing strictly local, per-platform-correct
-# resolution. The real tags are only ever attached at push time.
+# quay.io tag. --platform forces podman's pull policy to "newer" for any
+# name that resolves to a real registry, so pointing BASE_IMAGE at the real
+# quay.io/konveyor/agent-base:latest would silently pull that
+# already-published image instead of using the multi-arch manifest just
+# built locally under the same name, baking the wrong (or merely stale)
+# base into the language build. A "localhost/..." reference has no real
+# registry behind it, forcing strictly local, per-platform-correct
+# resolution; --pull=never on the language builds makes that explicit. The
+# real tags are only ever attached at push time.
 AGENT_BASE_LOCALHOST := localhost/agent-base:latest
 AGENT_JAVA_LOCALHOST := localhost/agent-java:latest
 AGENT_GO_LOCALHOST := localhost/agent-go:latest
@@ -194,7 +193,7 @@ agent-images-multiarch-build: ## Build agent-base + all agent images as multi-ar
 		echo "--- $$lang ($$img) ---"; \
 		podman manifest rm $$img >/dev/null 2>&1 || true; \
 		podman rmi $$img >/dev/null 2>&1 || true; \
-		podman build --platform=$(AGENT_PLATFORMS) --build-arg BASE_IMAGE=$(AGENT_BASE_LOCALHOST) --manifest $$img -f images/$$lang/Containerfile . || exit 1; \
+		podman build --pull=never --platform=$(AGENT_PLATFORMS) --build-arg BASE_IMAGE=$(AGENT_BASE_LOCALHOST) --manifest $$img -f images/$$lang/Containerfile . || exit 1; \
 	done
 
 .PHONY: agent-images-multiarch-push

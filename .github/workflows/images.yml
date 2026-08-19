@@ -24,6 +24,10 @@ on:
       - 'go.sum'
   workflow_dispatch: {}
 
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions: {}
 
 jobs:
@@ -56,7 +60,8 @@ jobs:
   # PR-time only: build agent-base + all four language images natively for
   # amd64 and arm64, and upload each as a downloadable workflow artifact
   # instead of pushing (no credentials needed). Uses Konveyor's shared
-  # build-image action — the same one analyzer-lsp's demo-testing.yml uses.
+  # build-image action — the same one analyzer-lsp's demo-testing.yml uses,
+  # transitively, via e2e-image-build.yaml.
   # The real multi-arch build+push happens in agent-base-multiarch/
   # agent-lang-images-multiarch below, on push/dispatch only.
   agent-base-artifact:
@@ -179,6 +184,8 @@ jobs:
       containerfile: ${{ matrix.images.containerfile }}
       context: "."
       architectures: '["amd64", "arm64"]'
+      extra-args: |
+        --build-arg BASE_IMAGE=quay.io/konveyor/agent-base:${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
     secrets:
       registry_username: ${{ vars.QUAY_USERNAME }}
       registry_password: ${{ secrets.QUAY_PASSWORD }}
