@@ -232,12 +232,70 @@ func TestPushWithoutCredsToStrippedRemoteFails(t *testing.T) {
 	_ = err
 }
 
+func TestConfigureAuthor(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+	_, repo := cloneLocal(t, remoteDir)
+
+	if err := ConfigureAuthor(repo, "Jane Dev", "jane@example.com"); err != nil {
+		t.Fatalf("ConfigureAuthor: %v", err)
+	}
+
+	cfg, err := repo.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if cfg.User.Name != "Jane Dev" {
+		t.Errorf("user.name = %q, want %q", cfg.User.Name, "Jane Dev")
+	}
+	if cfg.User.Email != "jane@example.com" {
+		t.Errorf("user.email = %q, want %q", cfg.User.Email, "jane@example.com")
+	}
+}
+
+// TestConfigureAuthorAppliesToCommit verifies the configured identity is
+// what go-git writes as the commit author and committer.
+func TestConfigureAuthorAppliesToCommit(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+	cloneDir, repo := cloneLocal(t, remoteDir)
+
+	if err := ConfigureAuthor(repo, "Jane Dev", "jane@example.com"); err != nil {
+		t.Fatalf("ConfigureAuthor: %v", err)
+	}
+	if err := CheckoutBranch(repo, "test-author-commit"); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+
+	os.WriteFile(filepath.Join(cloneDir, ".gitignore"), []byte("*.tmp\n"), 0644)
+	if err := CommitFiles(repo, []string{".gitignore"}, "harness: author test"); err != nil {
+		t.Fatalf("CommitFiles: %v", err)
+	}
+
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		t.Fatalf("CommitObject: %v", err)
+	}
+	if commit.Author.Name != "Jane Dev" || commit.Author.Email != "jane@example.com" {
+		t.Errorf("author = %q <%q>, want %q <%q>",
+			commit.Author.Name, commit.Author.Email, "Jane Dev", "jane@example.com")
+	}
+	if commit.Committer.Name != "Jane Dev" || commit.Committer.Email != "jane@example.com" {
+		t.Errorf("committer = %q <%q>, want %q <%q>",
+			commit.Committer.Name, commit.Committer.Email, "Jane Dev", "jane@example.com")
+	}
+}
+
 func TestCommitFiles(t *testing.T) {
 	remoteDir, _ := setupBareRemote(t)
 	seedBareRepo(t, remoteDir)
 	cloneDir, repo := cloneLocal(t, remoteDir)
 
-	if err := ConfigureAuthor(repo); err != nil {
+	if err := ConfigureAuthor(repo, "migration-agent", "migration-agent@konveyor.io"); err != nil {
 		t.Fatalf("ConfigureAuthor: %v", err)
 	}
 	if err := CheckoutBranch(repo, "test-commit-files"); err != nil {
@@ -285,7 +343,7 @@ func TestCommitFilesNoChanges(t *testing.T) {
 	seedBareRepo(t, remoteDir)
 	_, repo := cloneLocal(t, remoteDir)
 
-	if err := ConfigureAuthor(repo); err != nil {
+	if err := ConfigureAuthor(repo, "migration-agent", "migration-agent@konveyor.io"); err != nil {
 		t.Fatalf("ConfigureAuthor: %v", err)
 	}
 	if err := CheckoutBranch(repo, "test-no-changes"); err != nil {

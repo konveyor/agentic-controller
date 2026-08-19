@@ -75,6 +75,23 @@ spec:
                 x-kubernetes-list-map-keys:
                 - ref
                 x-kubernetes-list-type: map
+              gitConfig:
+                description: |-
+                  GitConfig sets the default git commit identity for the agent's
+                  commits. An AgentRun may override it per run. When unset, commits
+                  use the harness default identity.
+                properties:
+                  userEmail:
+                    description: UserEmail maps to git config user.email for the agent's
+                      commits.
+                    minLength: 1
+                    type: string
+                  userName:
+                    description: UserName maps to git config user.name for the agent's
+                      commits.
+                    minLength: 1
+                    type: string
+                type: object
               image:
                 description: Image is the container image carrying the agent runtime
                   and toolchains.

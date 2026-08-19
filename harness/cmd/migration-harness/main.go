@@ -110,7 +110,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("clone: %w", err)
 	}
 
-	if err := git.ConfigureAuthor(repo); err != nil {
+	if err := git.ConfigureAuthor(repo, cfg.GitAuthorName, cfg.GitAuthorEmail); err != nil {
 		return fmt.Errorf("configure git author: %w", err)
 	}
 

@@ -60,6 +60,24 @@ type AgentParam struct {
 	Required bool `json:"required,omitempty"`
 }
 
+// GitConfig customizes the git commit identity (user.name / user.email)
+// the harness sets before the agent commits. It controls commit
+// authorship only; push credentials are resolved separately from the
+// application's git identity and never leave the harness. Each field is
+// independently optional — an unset field falls back to the next level
+// (AgentRun override, then Agent default, then the harness default).
+type GitConfig struct {
+	// UserName maps to git config user.name for the agent's commits.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	UserName string `json:"userName,omitempty"`
+
+	// UserEmail maps to git config user.email for the agent's commits.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	UserEmail string `json:"userEmail,omitempty"`
+}
+
 // AgentGatewayRef references a Gateway by name.
 type AgentGatewayRef struct {
 	// Ref is the name of a Gateway CR in the same namespace.
@@ -116,6 +134,12 @@ type AgentSpec struct {
 	// +listType=map
 	// +listMapKey=name
 	Params []AgentParam `json:"params,omitempty"`
+
+	// GitConfig sets the default git commit identity for the agent's
+	// commits. An AgentRun may override it per run. When unset, commits
+	// use the harness default identity.
+	// +optional
+	GitConfig *GitConfig `json:"gitConfig,omitempty"`
 }
 
 // AgentStatus defines the observed state of an Agent.
