@@ -23,9 +23,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # kind v0.27's default node image is v1.32, where ImageVolume is alpha and
+      # off, so a skill source mounts empty. README requires 1.33+ for exactly
+      # this reason. v0.32 defaults to a node image well past that.
       - name: Install kind
         env:
-          KIND_VERSION: v0.27.0
+          KIND_VERSION: v0.32.0
         run: |
           curl -fLo ./kind --retry 5 --retry-delay 10 --retry-all-errors \
             "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-$(go env GOARCH)"
