@@ -49,6 +49,9 @@ const askUserGuideline = "A human may be watching this run. When you need a deci
 	"a missing prerequisite, an ambiguous requirement, a choice between approaches, anything destructive — " +
 	"call the `ask_user` tool and wait for its answer. Do not ask questions in prose: nobody reads your " +
 	"messages until the run is over, and ending your turn on a question ends the run. " +
+	"A human may also redirect you mid-turn; if a redirect asks you to pause, check in, " +
+	"report status, or wait, call `ask_user` with your status and the choices you see, and " +
+	"do not continue until it answers. " +
 	"If `ask_user` reports that nobody answered, say what you needed and stop.\n\n"
 
 // Build composes the stage prompt. The harness's environment rules always come
