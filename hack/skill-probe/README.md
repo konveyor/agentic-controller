@@ -13,6 +13,12 @@ Everything below envtest lives here because envtest has no kubelet, so nothing
 about ImageVolumes, init containers or `$HOME` isolation is reachable from
 `make test`.
 
+Each run creates its own namespace and deletes it on exit. That is not tidiness:
+an enumeration probe once passed against a hand-made ServiceAccount left in
+`default` from an earlier session, while the code that should have created it
+did not exist. A run in a namespace nothing else has touched is the only one
+whose result means what it says.
+
 ## Cluster
 
 The ImageVolume feature gate is beta in 1.34 and must be on. Measured against
@@ -64,7 +70,7 @@ and note its id.
 ```sh
 AGENT_IMAGE=<agent image> \
 SKILL_IMAGE=<skill bundle image> \
-GATEWAY=<name of a Ready Gateway> \
+LLM_API_KEY=<a real key> \
 HUB_BASE_URL=http://tackle-hub.konveyor-hub.svc:8080 \
 APP_ID=1 \
   hack/skill-probe/run-rule-probe.sh

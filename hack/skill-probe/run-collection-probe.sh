@@ -27,7 +27,6 @@
 #   PLATFORM          image platform (default: linux/arm64)
 #   NS                namespace to work in (default: default)
 #   AGENT_IMAGE       any agent image, for the collision probe
-#   GATEWAY           name of an existing Ready Gateway, for the collision probe
 #
 # Probe 3 needs an Agent, so it needs an image and a gateway. Set both or it is
 # skipped, and the script says so rather than quietly covering less.
@@ -37,13 +36,20 @@ set -euo pipefail
 KUBE_CONTEXT="${KUBE_CONTEXT:-agentic-dev}"
 CONTAINER_TOOL="${CONTAINER_TOOL:-podman}"
 PLATFORM="${PLATFORM:-linux/arm64}"
-NS="${NS:-default}"
+# A run gets its own namespace, created here and deleted on exit. Reusing one
+# is how a probe comes to pass on leftovers: an earlier hand-made
+# ServiceAccount made the enumeration probe pass while the code that should
+# have created it was missing entirely. A namespace nothing else has touched
+# is the only way the result means what it says.
+NS="${NS:-skill-probe-$(date +%s)-$$}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
 kc() { kubectl --context "${KUBE_CONTEXT}" -n "${NS}" "$@"; }
+kubectl --context "${KUBE_CONTEXT}" create namespace "${NS}" >/dev/null
+echo "==> namespace ${NS}"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -66,6 +72,9 @@ await() {
 
 card_count_is() { [ "$(cards "$1" | grep -c . || true)" = "$2" ]; }
 no_cards()      { [ -z "$(cards "$1")" ]; }
+gateway_ready() {
+    [ "$(kc get gateway "$1" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = True ]
+}
 card_ready()    {
     [ "$(kc get skillcard "$1" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = True ]
 }
@@ -98,12 +107,15 @@ for tag in probe-full probe-small; do
 done
 
 cleanup_objects() {
+    kubectl --context "${KUBE_CONTEXT}" delete namespace "${NS}" --wait=false >/dev/null 2>&1 || true
     kc delete skillcollection probe-bundle --ignore-not-found >/dev/null 2>&1 || true
     kc delete skillcard probe-hand-written --ignore-not-found >/dev/null 2>&1 || true
     kc delete agentrun probe-collision --ignore-not-found >/dev/null 2>&1 || true
     kc delete agent probe-agent --ignore-not-found >/dev/null 2>&1 || true
 }
-cleanup_objects
+# Nothing to clear up front: the namespace was created moments ago. Calling the
+# cleanup here would delete it and everything after would fail on a terminating
+# namespace.
 trap 'cleanup_objects; rm -rf "${WORK}"' EXIT
 
 echo
@@ -136,11 +148,30 @@ echo "--- cards: $(cards probe-bundle | tr '\n' ' ')"
 
 echo
 echo "==> 3/4 a hand-written card duplicating a generated one fails the pod"
-if [ -z "${AGENT_IMAGE:-}" ] || [ -z "${GATEWAY:-}" ]; then
-    echo "--- SKIPPED: set AGENT_IMAGE and GATEWAY to run this probe"
+if [ -z "${AGENT_IMAGE:-}" ]; then
+    echo "--- SKIPPED: set AGENT_IMAGE to run this probe"
     SKIPPED_COLLISION=1
 fi
 if [ -z "${SKIPPED_COLLISION:-}" ]; then
+# An Agent needs a Ready Gateway, and this namespace is new, so make one. The
+# key is never used: verification only checks the endpoint answers.
+GATEWAY=probe-gw
+kc apply -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Secret
+metadata: {name: probe-gw-creds}
+stringData: {API_KEY: unused-by-this-probe}
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Gateway
+metadata: {name: ${GATEWAY}}
+spec:
+  provider: anthropic
+  endpoint: https://api.anthropic.com
+  model: {name: claude-sonnet-5, contextWindow: 200000}
+  credentialRef: {secretName: probe-gw-creds, key: API_KEY}
+EOF
+await 120 gateway_ready "${GATEWAY}" || fail "gateway never became Ready"
 kc patch skillcollection probe-bundle --type=merge \
     -p '{"spec":{"image":"localhost/konveyor-skills:probe-full"}}' >/dev/null
 await 180 card_count_is probe-bundle 4 || fail "collection did not re-enumerate"

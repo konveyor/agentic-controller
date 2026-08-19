@@ -25,7 +25,11 @@
 #   NS              namespace (default: default)
 #   AGENT_IMAGE     image carrying the harness (required)
 #   SKILL_IMAGE     skill bundle image (required)
-#   GATEWAY         name of an existing, Ready Gateway (required)
+#   LLM_API_KEY     a real key for the gateway below (required; the whole
+#                   point is a live model, so there is nothing to fake)
+#   LLM_ENDPOINT    default https://api.anthropic.com
+#   LLM_PROVIDER    default anthropic
+#   LLM_MODEL       default claude-sonnet-5
 #   HUB_BASE_URL    Hub the harness resolves the application from (required)
 #   APP_ID          Hub application id (required)
 #   TARGET_BRANCH   branch the harness would push to (default: skill-rule-probe)
@@ -33,27 +37,57 @@
 set -euo pipefail
 
 KUBE_CONTEXT="${KUBE_CONTEXT:-agentic-dev}"
-NS="${NS:-default}"
+# A run gets its own namespace, created here and deleted on exit. Reusing one
+# is how a probe comes to pass on leftovers: an earlier hand-made
+# ServiceAccount made the enumeration probe pass while the code that should
+# have created it was missing entirely. A namespace nothing else has touched
+# is the only way the result means what it says.
+NS="${NS:-skill-probe-$(date +%s)-$$}"
 TARGET_BRANCH="${TARGET_BRANCH:-skill-rule-probe}"
 MARKER="KONVEYOR-RULE-ACK"
 
-for v in AGENT_IMAGE SKILL_IMAGE GATEWAY HUB_BASE_URL APP_ID; do
+LLM_ENDPOINT="${LLM_ENDPOINT:-https://api.anthropic.com}"
+LLM_PROVIDER="${LLM_PROVIDER:-anthropic}"
+LLM_MODEL="${LLM_MODEL:-claude-sonnet-5}"
+GATEWAY=probe-rule-gw
+
+for v in AGENT_IMAGE SKILL_IMAGE LLM_API_KEY HUB_BASE_URL APP_ID; do
     [ -n "${!v:-}" ] || { echo "ERROR: ${v} must be set. See the header." >&2; exit 1; }
 done
 
 kc() { kubectl --context "${KUBE_CONTEXT}" -n "${NS}" "$@"; }
+kubectl --context "${KUBE_CONTEXT}" create namespace "${NS}" >/dev/null
+echo "==> namespace ${NS}"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 cleanup() {
+    kubectl --context "${KUBE_CONTEXT}" delete namespace "${NS}" --wait=false >/dev/null 2>&1 || true
     kc delete agentrun probe-rule-on probe-rule-off --ignore-not-found >/dev/null 2>&1 || true
     kc delete agent probe-rule-agent --ignore-not-found >/dev/null 2>&1 || true
     kc delete skillcard probe-rule --ignore-not-found >/dev/null 2>&1 || true
     kc delete skillcollection probe-rule-bundle --ignore-not-found >/dev/null 2>&1 || true
 }
-cleanup
+# Only on exit: the namespace is new, and cleaning up front would delete it.
 trap cleanup EXIT
 
 # The rule asks for something no reasonable task would produce on its own.
+# This namespace is new, so the gateway comes with it.
+kc create secret generic probe-rule-creds --from-literal=API_KEY="${LLM_API_KEY}" >/dev/null
+kc apply -f - >/dev/null <<EOF
+apiVersion: konveyor.io/v1alpha1
+kind: Gateway
+metadata: {name: ${GATEWAY}}
+spec:
+  provider: ${LLM_PROVIDER}
+  endpoint: ${LLM_ENDPOINT}
+  model: {name: ${LLM_MODEL}, contextWindow: 200000}
+  credentialRef: {secretName: probe-rule-creds, key: API_KEY}
+EOF
+for _ in $(seq 1 40); do
+    [ "$(kc get gateway "${GATEWAY}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = True ] && break
+    sleep 3
+done
+
 echo "==> Creating a rule that asks for a command the task never mentions"
 kc apply -f - >/dev/null <<EOF
 apiVersion: konveyor.io/v1alpha1

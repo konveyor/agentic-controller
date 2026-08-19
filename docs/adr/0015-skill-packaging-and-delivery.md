@@ -344,8 +344,9 @@ single-skill image nothing outside the image knows that name, so the
 controller cannot compose the list. It forwards each source's `type` and the
 loader resolves names to it, which also removes a hazard 0014 raises against
 itself: a harness shipping before the controller would read an unset variable
-and "every rule silently stops reaching the prompt". Loader and harness are
-one binary in one image, so no release ordering remains to get wrong.
+and "every rule silently stops reaching the prompt". There is no variable to be
+unset. The manifest is the one thing crossing images, and §5's revision note
+records what that costs.
 
 ## The probe
 
@@ -414,19 +415,17 @@ acted on them.
 - **Inline skills cannot ship supporting files.** A ConfigMap key cannot hold
   a path separator, so inline is a single `SKILL.md`. Anything needing
   `references/` must be an image or a git source.
-- **`spec.type` changes meaning and loses its default.** A stored card
-  defaulted to `skill` now pins every skill from that source to on-demand
-  until cleared. Visible in the object rather than silent, but it needs a
-  release note.
+- **`spec.type` changes meaning.** It keeps its `skill` default, so a stored
+  card pins every skill from that source to on-demand until cleared. Visible
+  in the object rather than silent, but it needs a release note.
 - **Git sources are unauthenticated and not air-gap capable.** `spec.ref` and
   `spec.subPath` allow pinning and location, but there is no credential path,
   so private repos are unsupported. The air-gap and latency cost is the price
   of 4a, bounded to `spec.source` and to the runs that use one. A git host
   outage becomes a pod start failure for those runs.
-- **Frontmatter is parsed in two places.** The loader is in the harness module
-  and the controller cannot import it. They can drift; the controller's copy
-  is deliberately the looser, since the loader has the last word. Worth
-  collapsing into a shared package if a third caller appears.
+- **Frontmatter is parsed in one place.** Decision 6 puts it in `api/skill`,
+  which the controller, the loader and CI all import, so there is no looser
+  copy to drift.
 - **One inline ConfigMap per run per SkillCard**, so runs do not share them
   and one cannot be reused across a workflow's stages.
 - **The assembled root is read-only to the agent.** It is an emptyDir and
