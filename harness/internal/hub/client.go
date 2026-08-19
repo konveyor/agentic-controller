@@ -1,13 +1,41 @@
 package hub
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/konveyor/tackle2-hub/shared/api"
 	"github.com/konveyor/tackle2-hub/shared/binding"
 	"github.com/konveyor/tackle2-hub/shared/binding/auth"
 )
+
+// ErrUnsupportedSourceSCM marks a source repository the harness cannot
+// handle. Only git is supported for dev-preview; non-git sources (e.g.
+// subversion) are out of scope (see issue #143).
+var ErrUnsupportedSourceSCM = errors.New("unsupported source SCM")
+
+// ValidateSourceRepository rejects repositories the harness cannot clone.
+// Only git is supported: Hub reports subversion as Kind=="subversion" and
+// git as "" or "git". SVN can also be served over https, so the Kind field
+// — not the URL scheme — is the authoritative signal. A nil repository or an
+// empty URL is always invalid. Returned errors wrap ErrUnsupportedSourceSCM.
+func ValidateSourceRepository(repo *api.Repository) error {
+	if repo == nil || repo.URL == "" {
+		return fmt.Errorf("%w: source repository has no URL", ErrUnsupportedSourceSCM)
+	}
+	switch strings.ToLower(strings.TrimSpace(repo.Kind)) {
+	case "", "git":
+		return nil
+	default:
+		return fmt.Errorf(
+			"%w: source repository %q uses SCM kind %q; only git is supported "+
+				"(non-git sources are out of scope for dev-preview)",
+			ErrUnsupportedSourceSCM, repo.URL, repo.Kind)
+	}
+}
 
 // Client wraps the Hub RichClient for the subset of operations the harness needs.
 type Client struct {
