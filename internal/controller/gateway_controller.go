@@ -283,9 +283,9 @@ func (r *GatewayReconciler) createVerificationJob(
 			Name:      jobName,
 			Namespace: gateway.Namespace,
 			Labels: map[string]string{
-				labelManagedBy:                managedByLabel,
-				"app.kubernetes.io/component": "gateway-verification",
-				"konveyor.io/gateway":         gateway.Name,
+				labelManagedBy:        managedByLabel,
+				labelComponent:        "gateway-verification",
+				"konveyor.io/gateway": gateway.Name,
 			},
 		},
 		Spec: batchv1.JobSpec{

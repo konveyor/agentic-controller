@@ -23,11 +23,10 @@ import (
 // LabelSkillCollection marks SkillCards a collection generated, so that
 // pruning finds them without guessing from names.
 //
-// It lives here because it is written by the enumeration Job in the harness
-// module and read by the controller in the root module, and a label the two
-// only agree on by string equality drifts silently: the controller's List
-// comes back empty and every generated card is orphaned instead of pruned,
-// with nothing to compile against.
+// It lives here because the enumeration Job writes it and the controller
+// prunes by it. A label the two agreed on only by string equality would drift
+// silently: the List comes back empty and every generated card is orphaned
+// instead of pruned, with nothing to compile against.
 const LabelSkillCollection = "konveyor.io/skillcollection"
 
 // SkillCollectionSkillRef references a skill by SkillCard CR name,

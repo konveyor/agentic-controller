@@ -186,10 +186,16 @@ func main() {
 	// The loader and the enumeration Job run this image, set by kustomize to
 	// match the manager's own. The controller cannot read its own image
 	// without `pods get`, which it does not have.
+	// Refuse to start rather than warn. The loader init container is on every
+	// AgentRun pod, so an empty image is rejected by the API server for every
+	// run, with or without skills, and the reason lands on the Sandbox rather
+	// than anywhere an operator is looking.
 	skillLoaderImage := os.Getenv("SKILL_LOADER_IMAGE")
 	if skillLoaderImage == "" {
-		setupLog.Info("SKILL_LOADER_IMAGE is unset; AgentRuns with skills and " +
-			"image-sourced SkillCollections will not start")
+		setupLog.Error(nil, "SKILL_LOADER_IMAGE is required: it is the image carrying "+
+			"/skill-loader, normally the controller's own. config/default sets it from "+
+			"the manager's image; a custom overlay has to do the same.")
+		os.Exit(1)
 	}
 
 	if err := (&controller.SkillCardReconciler{

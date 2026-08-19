@@ -65,13 +65,13 @@ const (
 	// binding ship in config/rbac/skill_enumerator_*.yaml.
 	defaultEnumerationServiceAccount = "skill-enumerator"
 
-	// DefaultEnumerationImage carries the harness binary the Job runs. The
-	// agent base image is the one we publish that has it.
-	DefaultEnumerationImage = "quay.io/konveyor/agent-base:latest"
-
 	// reasonAllSkillsResolved marks a collection whose skills are all
 	// accounted for, however they were resolved.
 	reasonAllSkillsResolved = "AllSkillsResolved"
+
+	// reasonEnumerationFailed covers anything that stops the Job producing an
+	// answer: a bad source, a missing identity, a misconfigured image.
+	reasonEnumerationFailed = "EnumerationFailed"
 )
 
 // reconcileImageSource enumerates an image and materializes a SkillCard per
@@ -87,7 +87,7 @@ func (r *SkillCollectionReconciler) reconcileImageSource(
 			Type:               ConditionTypeReady,
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: collection.Generation,
-			Reason:             "EnumerationFailed",
+			Reason:             reasonEnumerationFailed,
 			Message:            err.Error(),
 		})
 		return r.patchCollectionStatus(ctx, collection, original)
@@ -144,6 +144,16 @@ func (r *SkillCollectionReconciler) enumerateImage(
 	var job batchv1.Job
 	switch err := r.Get(ctx, key, &job); {
 	case errors.IsNotFound(err):
+		// The Job runs in this collection's namespace, so its identity has to
+		// exist there. Provision it, then check: a cluster that refuses the
+		// controller RBAC still gets a message naming the manifests to apply,
+		// instead of a collection reading Enumerating forever.
+		if err := r.ensureEnumeratorRBAC(ctx, collection.Namespace); err != nil {
+			return nil, err
+		}
+		if err := r.enumeratorRBACReady(ctx, collection.Namespace); err != nil {
+			return nil, err
+		}
 		if err := r.createEnumerationJob(ctx, collection, image, name); err != nil {
 			return nil, err
 		}
@@ -183,8 +193,12 @@ func (r *SkillCollectionReconciler) deleteStaleEnumerationJobs(
 		if jobs.Items[i].Name == current {
 			continue
 		}
+		// Foreground, so the old pod is gone before the next generation's runs.
+		// Both prune SkillCards by collection label alone, with no notion of
+		// which generation wrote them, so two overlapping materializations
+		// delete each other's cards for skills unique to their own image.
 		if err := r.Delete(ctx, &jobs.Items[i],
-			client.PropagationPolicy(metav1.DeletePropagationBackground)); client.IgnoreNotFound(err) != nil {
+			client.PropagationPolicy(metav1.DeletePropagationForeground)); client.IgnoreNotFound(err) != nil {
 			return fmt.Errorf("deleting stale enumeration job %q: %w", jobs.Items[i].Name, err)
 		}
 	}
@@ -228,15 +242,16 @@ func (r *SkillCollectionReconciler) createEnumerationJob(
 			strings.Join(errs, "; "))
 	}
 
-	// The enumerator is the harness binary, which already knows how to walk a
-	// source. EnumerationImage is the agent base image carrying it.
-	//
-	// Not DefaultVerificationImage: that is the stub the Gateway curls with,
-	// and it carries no harness, so a Job built on it would run to nothing and
-	// leave the collection reading "Enumerating" forever.
+	// The Job runs /skill-loader, which ships only in the controller's image,
+	// so there is no other image this could sensibly default to. An empty one
+	// is a deployment mistake rather than something to paper over: the pod
+	// would be rejected for a missing image, or exec nothing if some other
+	// image were substituted.
 	runner := r.EnumerationImage
 	if runner == "" {
-		runner = DefaultEnumerationImage
+		return fmt.Errorf(
+			"no enumeration image configured: set SKILL_LOADER_IMAGE (or ENUMERATION_IMAGE) " +
+				"on the controller to an image carrying /skill-loader")
 	}
 
 	backoff := int32(0)

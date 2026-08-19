@@ -560,3 +560,35 @@ func TestLoadRejectsATraversingSourceName(t *testing.T) {
 		t.Fatal("want an error when a source name escapes the staging directory")
 	}
 }
+
+// A rerun against a reused destination has to reflect the source as it is now.
+// Copying only adds and overwrites, so without clearing first, a file the
+// source has since dropped survives and is still served as part of the skill.
+func TestLoadDropsFilesTheSourceNoLongerHas(t *testing.T) {
+	src, dest := t.TempDir(), t.TempDir()
+	writeSkill(t, filepath.Join(src, skillPlan), skillPlan, map[string]string{
+		"references/old.md": "stale guidance",
+	})
+	if _, err := load(t, src, dest, Source{Name: skillPlan}); err != nil {
+		t.Fatalf("first load: %v", err)
+	}
+	stale := filepath.Join(dest, skillPlan, "references", "old.md")
+	if _, err := os.Stat(stale); err != nil {
+		t.Fatalf("first load did not produce the file: %v", err)
+	}
+
+	// The source drops it, the way an edited ConfigMap or a moved git ref would.
+	if err := os.RemoveAll(filepath.Join(src, skillPlan, "references")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := load(t, src, dest, Source{Name: skillPlan}); err != nil {
+		t.Fatalf("second load: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("%s survived a rerun whose source no longer has it", stale)
+	}
+	// The skill itself is still assembled.
+	if _, err := os.Stat(filepath.Join(dest, skillPlan, SkillFile)); err != nil {
+		t.Errorf("the skill went missing: %v", err)
+	}
+}

@@ -41,9 +41,10 @@ type SkillCollectionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
-	// EnumerationImage runs `skills enumerate` when a collection names an
-	// image source. Any agent image carries the harness binary; defaults to
-	// DefaultVerificationImage.
+	// EnumerationImage runs `skill-loader materialize` when a collection names
+	// an image source. That binary ships only in the controller's own image,
+	// so this is normally SKILL_LOADER_IMAGE. There is no default: an image
+	// without it produces a pod that cannot exec.
 	EnumerationImage string
 
 	// EnumerationServiceAccount is the identity the enumeration Job runs as.
@@ -57,7 +58,11 @@ type SkillCollectionReconciler struct {
 // +kubebuilder:rbac:groups=konveyor.io,resources=skillcollections/finalizers,verbs=update
 // +kubebuilder:rbac:groups=konveyor.io,resources=skillcards,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;delete
-// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch
+// The enumeration Job runs in the collection's namespace and needs an identity
+// there. Kubernetes forbids granting what the granter lacks, so the Role this
+// creates can only ever carry the SkillCard permissions above.
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch
 
 // Reconcile handles SkillCollection reconciliation.
 //

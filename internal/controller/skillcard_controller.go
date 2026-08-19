@@ -70,6 +70,9 @@ func (r *SkillCardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		r.reconcileInline(&skillCard)
 	default:
 		skillCard.Status.ResolvedImage = ""
+		// Otherwise a card that loses its source keeps reporting how it used
+		// to be delivered, while Ready correctly flips to False.
+		skillCard.Status.DeliveryMode = ""
 		meta.SetStatusCondition(&skillCard.Status.Conditions, metav1.Condition{
 			Type:               ConditionTypeReady,
 			Status:             metav1.ConditionFalse,

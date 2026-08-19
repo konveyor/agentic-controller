@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -102,6 +103,12 @@ func Load(ctx context.Context, opts Options) (*Manifest, error) {
 	for _, l := range loaded {
 		src := byName[l.Name].dir
 		dst := filepath.Join(opts.DestDir, l.Name)
+		// Replace rather than copy over. A copy only adds and overwrites, so a
+		// file the source no longer has would survive a rerun against a reused
+		// directory and go on being served as part of the skill.
+		if err := os.RemoveAll(dst); err != nil {
+			return nil, fmt.Errorf("clearing %s before assembling %q: %w", dst, l.Name, err)
+		}
 		if err := copyTree(src, dst); err != nil {
 			return nil, fmt.Errorf("assembling skill %q from %s: %w", l.Name, src, err)
 		}
@@ -355,7 +362,16 @@ func discover(dir, sourceName string) ([]candidate, error) {
 	return out, nil
 }
 
+// CloneTimeout bounds a single git source. Without it an unreachable host
+// leaves the init container running until something else kills it, and because
+// anything short of Finished reads as Running, the AgentRun says the agent is
+// working with nothing to say otherwise.
+var CloneTimeout = 3 * time.Minute
+
 func clone(ctx context.Context, name string, g GitSource, dest string) error {
+	ctx, cancel := context.WithTimeout(ctx, CloneTimeout)
+	defer cancel()
+
 	if g.Ref == "" {
 		logf("git source %q has no ref, cloning the default branch of %s, so this run is not reproducible", name, g.URL)
 	}

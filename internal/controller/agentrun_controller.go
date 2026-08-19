@@ -459,10 +459,10 @@ func (r *AgentRunReconciler) createSandbox(
 			Name:      sandboxName,
 			Namespace: run.Namespace,
 			Labels: map[string]string{
-				labelManagedBy:                managedByLabel,
-				"app.kubernetes.io/component": "agent-sandbox",
-				labelAgentRun:                 run.Name,
-				labelAgent:                    agent.Name,
+				labelManagedBy: managedByLabel,
+				labelComponent: "agent-sandbox",
+				labelAgentRun:  run.Name,
+				labelAgent:     agent.Name,
 			},
 		},
 		Spec: sandboxv1beta1.SandboxSpec{
@@ -901,31 +901,23 @@ func (r *AgentRunReconciler) createInlineSkillConfigMaps(
 	inline map[string]string,
 ) error {
 	for name, content := range inline {
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      inlineSkillConfigMapName(run.Name, name),
-				Namespace: run.Namespace,
-				Labels: map[string]string{
-					labelManagedBy: managedByLabel,
-					labelAgentRun:  run.Name,
-				},
-			},
+		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name:      inlineSkillConfigMapName(run.Name, name),
+			Namespace: run.Namespace,
+		}}
+		if _, err := ctrl.CreateOrUpdate(ctx, r.Client, cm, func() error {
+			cm.Labels = map[string]string{
+				labelManagedBy: managedByLabel,
+				labelAgentRun:  run.Name,
+			}
 			// A ConfigMap key cannot contain a path separator, so an inline
 			// skill is a single SKILL.md and cannot ship supporting files.
 			// Anything needing references/ has to be an image or a git source.
-			Data: map[string]string{"SKILL.md": content},
-		}
-		// Owned by the run, so it is garbage collected with it.
-		if err := ctrl.SetControllerReference(run, cm, r.Scheme); err != nil {
-			return fmt.Errorf("setting ConfigMap owner reference for skill %q: %w", name, err)
-		}
-		if err := r.Create(ctx, cm); err != nil {
-			if !errors.IsAlreadyExists(err) {
-				return fmt.Errorf("creating ConfigMap for inline skill %q: %w", name, err)
-			}
-			if err := r.Update(ctx, cm); err != nil {
-				return fmt.Errorf("updating ConfigMap for inline skill %q: %w", name, err)
-			}
+			cm.Data = map[string]string{"SKILL.md": content}
+			// Owned by the run, so it is collected with it.
+			return ctrl.SetControllerReference(run, cm, r.Scheme)
+		}); err != nil {
+			return fmt.Errorf("writing ConfigMap for inline skill %q: %w", name, err)
 		}
 	}
 	return nil
@@ -945,6 +937,10 @@ func skillLoaderContainer(image string, sources *skillSources, mounts []corev1.V
 		Name:    skillLoaderContainerName,
 		Image:   image,
 		Command: []string{loaderBinary},
+		// The loader writes the one line that matters to stderr. This lifts it
+		// into the pod's status, so `kubectl describe pod` says which skill was
+		// wrong without needing log access to a container that already exited.
+		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 		Args: []string{
 			"load",
 			"--src-dir", skillsSrcDir,

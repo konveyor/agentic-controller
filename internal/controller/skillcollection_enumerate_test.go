@@ -18,13 +18,17 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -294,7 +298,7 @@ func TestReconcileImageSourceReportsEnumerationFailure(t *testing.T) {
 	if _, err := r.reconcileImageSource(context.Background(), col, col.DeepCopy()); err != nil {
 		t.Fatalf("a failed job should be reported in status, not returned: %v", err)
 	}
-	if got := conditionReason(col); got != "EnumerationFailed" {
+	if got := conditionReason(col); got != reasonEnumerationFailed {
 		t.Fatalf("reason = %q, want EnumerationFailed", got)
 	}
 }
@@ -306,4 +310,123 @@ func conditionReason(c *konveyoriov1alpha1.SkillCollection) string {
 		}
 	}
 	return ""
+}
+
+// The Job runs /skill-loader, which ships only in the controller's image.
+// There is no other image to fall back to, so an unconfigured one has to say
+// so on the collection rather than schedule a pod that cannot exec.
+func TestEnumerateImageWithoutARunnerImageFails(t *testing.T) {
+	col := collection("konveyor", nil)
+	r := newCollectionReconciler(t, col)
+	r.EnumerationImage = ""
+
+	_, err := r.reconcileImageSource(context.Background(), col, col.DeepCopy())
+	if err != nil {
+		t.Fatalf("a misconfiguration belongs in status, not returned: %v", err)
+	}
+	if got := conditionReason(col); got != reasonEnumerationFailed {
+		t.Fatalf("reason = %q, want EnumerationFailed", got)
+	}
+	msg := conditionMessage(col)
+	if !strings.Contains(msg, "SKILL_LOADER_IMAGE") {
+		t.Errorf("message should name the env var to set, got: %s", msg)
+	}
+	// And no Job, since there is nothing runnable to put in it.
+	var jobs batchv1.JobList
+	if err := r.List(context.Background(), &jobs); err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs.Items) != 0 {
+		t.Errorf("scheduled %d job(s) with no runner image", len(jobs.Items))
+	}
+}
+
+func conditionMessage(c *konveyoriov1alpha1.SkillCollection) string {
+	for _, cond := range c.Status.Conditions {
+		if cond.Type == ConditionTypeReady {
+			return cond.Message
+		}
+	}
+	return ""
+}
+
+// The Job runs in the collection's namespace, so its identity has to exist
+// there. Shipping one in the operator's namespace only ever served collections
+// that happened to live there.
+func TestEnumerationProvisionsItsIdentityInTheCollectionsNamespace(t *testing.T) {
+	col := collection("konveyor", nil)
+	r := newCollectionReconciler(t, col)
+	ctx := context.Background()
+
+	if _, err := r.enumerateImage(ctx, col, enumTestImage); err != nil {
+		t.Fatalf("enumerate: %v", err)
+	}
+
+	var sa corev1.ServiceAccount
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: skillTestNS, Name: r.enumerationServiceAccount(),
+	}, &sa); err != nil {
+		t.Fatalf("no ServiceAccount in the collection's namespace: %v", err)
+	}
+	var role rbacv1.Role
+	if err := r.Get(ctx, client.ObjectKey{Namespace: skillTestNS, Name: enumeratorRoleName}, &role); err != nil {
+		t.Fatalf("no Role: %v", err)
+	}
+	// Only SkillCards. The controller cannot grant more than it holds, and the
+	// blast radius of a pod that mounted a user's image should stay here.
+	if len(role.Rules) != 1 || len(role.Rules[0].Resources) != 1 ||
+		role.Rules[0].Resources[0] != "skillcards" {
+		t.Errorf("role grants more than skillcards: %+v", role.Rules)
+	}
+	var binding rbacv1.RoleBinding
+	if err := r.Get(ctx, client.ObjectKey{Namespace: skillTestNS, Name: enumeratorRoleName}, &binding); err != nil {
+		t.Fatalf("no RoleBinding: %v", err)
+	}
+	if len(binding.Subjects) != 1 || binding.Subjects[0].Namespace != skillTestNS {
+		t.Errorf("binding does not name this namespace's account: %+v", binding.Subjects)
+	}
+	// Not owned by the collection: several collections here share one identity,
+	// and collecting it with whichever was deleted first breaks the others.
+	if len(sa.OwnerReferences) != 0 {
+		t.Errorf("ServiceAccount is owned by %+v, so it dies with one collection", sa.OwnerReferences)
+	}
+}
+
+// A cluster may refuse the controller permission to write RBAC. That is a
+// legitimate way to run it, and it has to read as an instruction rather than a
+// collection stuck on Enumerating.
+func TestEnumerationReportsWhenItMayNotCreateRBAC(t *testing.T) {
+	col := collection("konveyor", nil)
+	r := newCollectionReconciler(t, col)
+	r.Client = forbidWrites{Client: r.Client, on: kindServiceAccount}
+
+	_, err := r.reconcileImageSource(context.Background(), col, col.DeepCopy())
+	if err != nil {
+		t.Fatalf("a permission problem belongs in status, not returned: %v", err)
+	}
+	if got := conditionReason(col); got != reasonEnumerationFailed {
+		t.Fatalf("reason = %q, want EnumerationFailed", got)
+	}
+	msg := conditionMessage(col)
+	for _, want := range []string{"skill_enumerator", skillTestNS} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message should name %q so it can be acted on, got: %s", want, msg)
+		}
+	}
+}
+
+// forbidWrites refuses to create one kind, the way a cluster that withholds
+// RBAC from the controller would.
+type forbidWrites struct {
+	client.Client
+	on string
+}
+
+func (f forbidWrites) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if _, ok := obj.(*corev1.ServiceAccount); ok && f.on == kindServiceAccount {
+		return apierrors.NewForbidden(
+			schema.GroupResource{Resource: "serviceaccounts"}, obj.GetName(),
+			errors.New("not permitted"))
+	}
+	return f.Client.Create(ctx, obj, opts...)
 }

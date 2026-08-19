@@ -1,10 +1,12 @@
 package skills
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -363,5 +365,46 @@ func TestLoadGitSourceAtMissingRefFails(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q, got: %v", want, err)
 		}
+	}
+}
+
+// A host that never answers must fail the pod rather than leave it in
+// Init:0/1, which reads as "the agent is running" with nothing to say why.
+func TestLoadGitSourceTimesOutOnAnUnresponsiveHost(t *testing.T) {
+	// Accept the connection and then say nothing, which is what a black-holed
+	// host looks like to the client.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn // hold it open, never respond
+		}
+	}()
+
+	original := CloneTimeout
+	CloneTimeout = 2 * time.Second
+	defer func() { CloneTimeout = original }()
+
+	src, dest := t.TempDir(), t.TempDir()
+	url := "http://" + ln.Addr().String() + "/repo.git"
+
+	start := time.Now()
+	_, err = load(t, src, dest, Source{Name: srcAcme, Git: &GitSource{URL: url, Ref: "v1"}})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("want an error for a host that never answers")
+	}
+	// The fallback chain is branch, then a full clone. Without the deadline
+	// being checked between them this would pay the timeout twice.
+	if elapsed > 2*CloneTimeout {
+		t.Errorf("took %s, want roughly one timeout of %s", elapsed, CloneTimeout)
 	}
 }
