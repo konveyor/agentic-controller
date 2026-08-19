@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -22,6 +23,7 @@ import (
 	"github.com/konveyor/migration-harness/internal/logging"
 	"github.com/konveyor/migration-harness/internal/prompt"
 	"github.com/konveyor/migration-harness/internal/tee"
+	"github.com/konveyor/migration-harness/internal/termination"
 	"github.com/konveyor/migration-harness/internal/watcher"
 )
 
@@ -42,8 +44,22 @@ func init() {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
+		// Surface a machine-readable reason on the pod termination log so
+		// the failure reaches AgentRunStatus, not solely the logs (#143).
+		_ = termination.Write(termination.Data{
+			Reason:  classifyReason(err),
+			Message: err.Error(),
+		})
 		os.Exit(1)
 	}
+}
+
+// classifyReason maps a harness failure to a short status reason code.
+func classifyReason(err error) string {
+	if errors.Is(err, hub.ErrUnsupportedSourceSCM) {
+		return "UnsupportedSourceSCM"
+	}
+	return "StageFailed"
 }
 
 func runStage(cmd *cobra.Command, args []string) error {
@@ -467,6 +483,12 @@ func resolveFromHub(cfg *config.Config, hubClient *hub.Client) (*git.Credentials
 		return nil, fmt.Errorf("fetch app: %w", err)
 	}
 	logging.Ok("app: %s (id=%d), repo: %s", app.Name, app.ID, app.Repository.URL)
+
+	// Fail fast on non-git sources instead of attempting the clone and
+	// failing later with a confusing go-git error (issue #143).
+	if err := hub.ValidateSourceRepository(app.Repository); err != nil {
+		return nil, err
+	}
 
 	identity, err := hubClient.FetchGitCreds(appID)
 	if err != nil {

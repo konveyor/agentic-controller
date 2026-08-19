@@ -118,6 +118,11 @@ type AgentRunStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// TerminationData is the opaque termination payload the harness wrote
+	// to the pod's termination log, copied verbatim without interpretation.
+	// +optional
+	TerminationData string `json:"terminationData,omitempty"`
 }
 
 // +kubebuilder:object:root=true

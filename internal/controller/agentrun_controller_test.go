@@ -469,4 +469,87 @@ var _ = Describe("AgentRun Controller", func() {
 			Expect(k8sClient.Delete(ctx, agent)).To(Succeed())
 		})
 	})
+
+	Context("when the Sandbox finishes with a failed pod", func() {
+		const (
+			name       = "ar-ctrl-termination"
+			agentName  = "ar-ctrl-agent-term"
+			gwName     = "ar-prov-term"
+			secretName = "ar-secret-term"
+		)
+
+		It("should copy the pod termination message onto status", func() {
+			cleanup := makeReadyGateway(gwName, secretName)
+			defer cleanup()
+
+			agent := &konveyoriov1alpha1.Agent{
+				ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.AgentSpec{
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+			waitForAgentReady(agentName)
+
+			run := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+				Spec:       konveyoriov1alpha1.AgentRunSpec{AgentRef: agentName, Gateway: gwName},
+			}
+			Expect(k8sClient.Create(ctx, run)).To(Succeed())
+
+			runKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			var fetchedRun konveyoriov1alpha1.AgentRun
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, runKey, &fetchedRun)).To(Succeed())
+				g.Expect(fetchedRun.Status.SandboxName).NotTo(BeEmpty())
+			}, timeout, interval).Should(Succeed())
+
+			By("simulating a failed agent pod with a termination message")
+			const terminationMsg = `{"reason":"UnsupportedSourceSCM","message":"unsupported source SCM: only git is supported"}`
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name + "-pod",
+					Namespace: testNamespace,
+					Labels:    map[string]string{labelAgentRun: name},
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers:    []corev1.Container{{Name: agentContainerName, Image: testAgentImage}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+				Name: agentContainerName,
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{Message: terminationMsg, ExitCode: 1},
+				},
+			}}
+			Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+
+			By("marking the Sandbox Finished with a non-success reason")
+			var sandbox sandboxv1beta1.Sandbox
+			sandboxKey := types.NamespacedName{Name: fetchedRun.Status.SandboxName, Namespace: testNamespace}
+			Expect(k8sClient.Get(ctx, sandboxKey, &sandbox)).To(Succeed())
+			sandbox.Status.Conditions = append(sandbox.Status.Conditions, metav1.Condition{
+				Type:               "Finished",
+				Status:             metav1.ConditionTrue,
+				Reason:             "PodFailed",
+				Message:            "pod failed",
+				LastTransitionTime: metav1.Now(),
+			})
+			Expect(k8sClient.Status().Update(ctx, &sandbox)).To(Succeed())
+
+			By("verifying the termination payload is surfaced on AgentRun status")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, runKey, &fetchedRun)).To(Succeed())
+				g.Expect(fetchedRun.Status.Phase).To(Equal(konveyoriov1alpha1.AgentRunPhaseFailed))
+				g.Expect(fetchedRun.Status.TerminationData).To(Equal(terminationMsg))
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, pod)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, agent)).To(Succeed())
+		})
+	})
 })

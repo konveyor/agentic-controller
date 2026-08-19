@@ -1,9 +1,40 @@
 package hub
 
 import (
+	"errors"
 	"os"
 	"testing"
+
+	"github.com/konveyor/tackle2-hub/shared/api"
 )
+
+func TestValidateSourceRepository(t *testing.T) {
+	tests := []struct {
+		name    string
+		repo    *api.Repository
+		wantErr bool
+	}{
+		{"git kind", &api.Repository{Kind: "git", URL: "https://github.com/acme/app.git"}, false},
+		{"empty kind defaults to git", &api.Repository{Kind: "", URL: "https://github.com/acme/app.git"}, false},
+		{"git kind uppercase", &api.Repository{Kind: "GIT", URL: "https://github.com/acme/app.git"}, false},
+		{"git kind padded", &api.Repository{Kind: " git ", URL: "https://github.com/acme/app.git"}, false},
+		{"subversion rejected", &api.Repository{Kind: "subversion", URL: "https://svn.example/repo"}, true},
+		{"unknown kind rejected", &api.Repository{Kind: "mercurial", URL: "https://hg.example/repo"}, true},
+		{"empty URL rejected", &api.Repository{Kind: "git", URL: ""}, true},
+		{"nil repository rejected", nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSourceRepository(tt.repo)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateSourceRepository() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !errors.Is(err, ErrUnsupportedSourceSCM) {
+				t.Errorf("error %v does not wrap ErrUnsupportedSourceSCM", err)
+			}
+		})
+	}
+}
 
 func TestParseAppID(t *testing.T) {
 	tests := []struct {

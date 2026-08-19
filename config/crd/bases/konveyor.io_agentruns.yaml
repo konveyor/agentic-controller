@@ -427,6 +427,11 @@ spec:
                 description: StartTime is the time the Sandbox started running.
                 format: date-time
                 type: string
+              terminationData:
+                description: |-
+                  TerminationData is the opaque termination payload the harness wrote
+                  to the pod's termination log, copied verbatim without interpretation.
+                type: string
             type: object
         type: object
     served: true

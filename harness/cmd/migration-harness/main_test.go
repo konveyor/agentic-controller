@@ -1,13 +1,42 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/konveyor/migration-harness/internal/config"
+	"github.com/konveyor/migration-harness/internal/hub"
 )
+
+func TestClassifyReason(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "unsupported SCM sentinel",
+			err:  fmt.Errorf("hub resolution: %w", hub.ErrUnsupportedSourceSCM),
+			want: "UnsupportedSourceSCM",
+		},
+		{
+			name: "generic failure",
+			err:  errors.New("clone: boom"),
+			want: "StageFailed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyReason(tt.err); got != tt.want {
+				t.Errorf("classifyReason(%v) = %q, want %q", tt.err, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestDiscoverSkills_NoSkills(t *testing.T) {
 	dir := t.TempDir()
