@@ -1,0 +1,8 @@
+kind: feature
+description: >
+  Fail fast with a clear, human-readable error when an AgentRun's source
+  repository is not git (only git is supported for dev-preview; Hub reports
+  subversion as Kind=="subversion"). The harness validates the source SCM
+  before cloning and writes the failure message to the pod termination log,
+  which the controller surfaces on the AgentRun's Ready condition so the
+  reason is visible via kubectl describe, not solely in logs.

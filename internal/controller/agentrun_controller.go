@@ -47,6 +47,9 @@ const (
 	// secretKeyLength is the length of the generated ACP secret key in bytes.
 	secretKeyLength = 32
 
+	// agentContainerName is the name of the agent container in the Sandbox pod.
+	agentContainerName = "agent"
+
 	// workspaceVolumeName is the name of the EmptyDir volume for the agent workspace.
 	workspaceVolumeName = "workspace"
 
@@ -71,6 +74,7 @@ type AgentRunReconciler struct {
 // +kubebuilder:rbac:groups=konveyor.io,resources=agentruns/finalizers,verbs=update
 // +kubebuilder:rbac:groups=agents.x-k8s.io,resources=sandboxes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 
 // Reconcile handles AgentRun reconciliation.
 //
@@ -206,7 +210,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Update AgentRun phase from Sandbox conditions.
-	r.updatePhaseFromSandbox(&run, &sandbox)
+	r.updatePhaseFromSandbox(ctx, &run, &sandbox)
 
 	return r.patchRunStatus(ctx, &run, original)
 }
@@ -389,7 +393,7 @@ func (r *AgentRunReconciler) createSandbox(
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
-							Name:  "agent",
+							Name:  agentContainerName,
 							Image: agent.Spec.Image,
 							Env:   env,
 							// User-specified sources last: for duplicate
@@ -398,6 +402,12 @@ func (r *AgentRunReconciler) createSandbox(
 							// credentials.
 							EnvFrom:      append(envFrom, run.Spec.EnvFrom...),
 							VolumeMounts: volumeMounts,
+							// The harness writes a machine-readable failure
+							// payload to the default termination-log path; the
+							// controller lifts it onto AgentRunStatus. Fall back
+							// to the last log lines if the harness dies before
+							// writing (#143).
+							TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 						},
 					},
 					Volumes: volumes,
@@ -612,6 +622,7 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 
 // updatePhaseFromSandbox updates the AgentRun phase based on the Sandbox status.
 func (r *AgentRunReconciler) updatePhaseFromSandbox(
+	ctx context.Context,
 	run *konveyoriov1alpha1.AgentRun,
 	sandbox *sandboxv1beta1.Sandbox,
 ) {
@@ -636,12 +647,20 @@ func (r *AgentRunReconciler) updatePhaseFromSandbox(
 				})
 			} else {
 				run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
+				// Prefer the harness's human-readable failure message from the
+				// pod termination log so the reason is visible on the AgentRun's
+				// Ready condition (e.g. a non-git source; #143). Fall back to
+				// the generic Sandbox reason when no message is available.
+				message := fmt.Sprintf("Sandbox finished with reason: %s", cond.Reason)
+				if msg := r.lookupTerminationMessage(ctx, run); msg != "" {
+					message = msg
+				}
 				meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
 					Type:               ConditionTypeReady,
 					Status:             metav1.ConditionFalse,
 					ObservedGeneration: run.Generation,
 					Reason:             "Failed",
-					Message:            fmt.Sprintf("Sandbox finished with reason: %s", cond.Reason),
+					Message:            message,
 				})
 			}
 			return
@@ -661,6 +680,43 @@ func (r *AgentRunReconciler) updatePhaseFromSandbox(
 			Message:            "Agent is running",
 		})
 	}
+}
+
+// lookupTerminationMessage lists the run's pods and returns the agent
+// container's terminated-state message, or "" if none is available. Errors
+// listing pods are swallowed — the termination payload is best-effort detail
+// and must never block the phase update.
+func (r *AgentRunReconciler) lookupTerminationMessage(
+	ctx context.Context,
+	run *konveyoriov1alpha1.AgentRun,
+) string {
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods,
+		client.InNamespace(run.Namespace),
+		client.MatchingLabels{labelAgentRun: run.Name},
+	); err != nil {
+		log.FromContext(ctx).V(1).Info("listing pods for termination message failed",
+			"agentRun", run.Name, "error", err)
+		return ""
+	}
+	return podTerminationMessage(pods.Items)
+}
+
+// podTerminationMessage returns the "agent" container's terminated-state
+// message across the given pods, or "" if no such terminated container is
+// found. It is a pure function to keep the extraction logic unit-testable.
+func podTerminationMessage(pods []corev1.Pod) string {
+	for i := range pods {
+		for _, cs := range pods[i].Status.ContainerStatuses {
+			if cs.Name != agentContainerName {
+				continue
+			}
+			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
+				return cs.State.Terminated.Message
+			}
+		}
+	}
+	return ""
 }
 
 // patchRunStatus patches the AgentRun status.
