@@ -100,6 +100,10 @@ const (
 	// agentContainerName is the container that runs the agent itself.
 	agentContainerName = "agent"
 
+	// skillFileKey is the ConfigMap key an inline skill's markdown lands under,
+	// and the filename the loader expects to find once mounted.
+	skillFileKey = "SKILL.md"
+
 	// skillSourcesEnv declares every skill source to the loader as JSON:
 	// which are staged, which must be cloned, and any load policy the
 	// SkillCard imposes on what they carry.
@@ -913,7 +917,7 @@ func (r *AgentRunReconciler) createInlineSkillConfigMaps(
 			// A ConfigMap key cannot contain a path separator, so an inline
 			// skill is a single SKILL.md and cannot ship supporting files.
 			// Anything needing references/ has to be an image or a git source.
-			cm.Data = map[string]string{"SKILL.md": content}
+			cm.Data = map[string]string{skillFileKey: content}
 			// Owned by the run, so it is collected with it.
 			return ctrl.SetControllerReference(run, cm, r.Scheme)
 		}); err != nil {

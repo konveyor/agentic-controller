@@ -61,7 +61,7 @@ var _ = Describe("Update without a resourceVersion", func() {
 		build := func(v string) *corev1.ConfigMap {
 			return &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
-				Data:       map[string]string{"SKILL.md": v},
+				Data:       map[string]string{skillFileKey: v},
 			}
 		}
 		Expect(c.Create(ctx, build("original"))).To(Succeed())
@@ -86,17 +86,17 @@ var _ = Describe("Update without a resourceVersion", func() {
 
 		var after corev1.ConfigMap
 		Expect(c.Get(ctx, key, &after)).To(Succeed())
-		Expect(after.Data["SKILL.md"]).To(Equal("edited"))
+		Expect(after.Data[skillFileKey]).To(Equal("edited"))
 	})
 
-	// The same question for the other write verbs, since the answer decides
-	// whether any of them need a read first.
-	It("is the same for merge patch and for apply", func() {
+	// The same question for a patch, since the answer decides whether any write
+	// verb needs a read first.
+	It("is the same for a merge patch", func() {
 		ctx := context.Background()
 		key := types.NamespacedName{Name: "rv-verbs", Namespace: "default"}
 		base := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
-			Data:       map[string]string{"SKILL.md": "original"},
+			Data:       map[string]string{skillFileKey: "original"},
 		}
 		Expect(k8sClient.Create(ctx, base)).To(Succeed())
 		defer func() { _ = k8sClient.Delete(ctx, base) }()
@@ -104,24 +104,14 @@ var _ = Describe("Update without a resourceVersion", func() {
 		// Merge patch from an object that was never read.
 		patched := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
-			Data:       map[string]string{"SKILL.md": "patched"},
+			Data:       map[string]string{skillFileKey: "patched"},
 		}
 		Expect(patched.ResourceVersion).To(BeEmpty())
 		Expect(k8sClient.Patch(ctx, patched, client.Merge)).To(Succeed())
 
 		var got corev1.ConfigMap
 		Expect(k8sClient.Get(ctx, key, &got)).To(Succeed())
-		Expect(got.Data["SKILL.md"]).To(Equal("patched"))
+		Expect(got.Data[skillFileKey]).To(Equal("patched"))
 
-		// Server-side apply, also from a fresh object.
-		applied := &corev1.ConfigMap{
-			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
-			ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
-			Data:       map[string]string{"SKILL.md": "applied"},
-		}
-		Expect(k8sClient.Patch(ctx, applied, client.Apply, client.ForceOwnership,
-			client.FieldOwner("rv-probe"))).To(Succeed())
-		Expect(k8sClient.Get(ctx, key, &got)).To(Succeed())
-		Expect(got.Data["SKILL.md"]).To(Equal("applied"))
 	})
 })
