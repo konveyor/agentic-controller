@@ -126,13 +126,22 @@ func (r *AgentWorkflowRunReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		pbRun.Status.Phase = konveyoriov1alpha1.AgentRunPhasePending
 	}
 
-	// Initialize stage statuses if empty.
+	// Initialize the run from a snapshot of the workflow definition
+	// (#87). The controller executes from this snapshot, not the live
+	// workflow spec, so a mid-run edit to the workflow (stage agent,
+	// instructions, execution, guide, or params) cannot change stages
+	// that have already been planned.
 	if len(pbRun.Status.Stages) == 0 {
+		pbRun.Status.Guide = workflow.Spec.Guide
+		pbRun.Status.Params = workflow.Spec.Params
 		pbRun.Status.Stages = make([]konveyoriov1alpha1.AgentWorkflowRunStageStatus, len(workflow.Spec.Stages))
 		for i, stage := range workflow.Spec.Stages {
 			pbRun.Status.Stages[i] = konveyoriov1alpha1.AgentWorkflowRunStageStatus{
-				Name:  stage.Name,
-				Phase: konveyoriov1alpha1.AgentRunPhasePending,
+				Name:         stage.Name,
+				Phase:        konveyoriov1alpha1.AgentRunPhasePending,
+				AgentRef:     stage.AgentRef,
+				Instructions: stage.Instructions,
+				Execution:    stage.Execution,
 			}
 		}
 	}
@@ -158,29 +167,15 @@ func (r *AgentWorkflowRunReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return r.patchRunStatus(ctx, &pbRun, original)
 	}
 
-	// Look up the stage definition from the workflow by name
-	// (matching the snapshotted status entry).
+	// Read the stage definition from the snapshot captured at init
+	// (#87), not the live workflow — so a mid-run edit cannot change a
+	// planned stage. Reconstruct the stage from the snapshotted fields.
 	stageStatus := &pbRun.Status.Stages[stageIndex]
-	var stage *konveyoriov1alpha1.AgentWorkflowStage
-	for i := range workflow.Spec.Stages {
-		if workflow.Spec.Stages[i].Name == stageStatus.Name {
-			stage = &workflow.Spec.Stages[i]
-			break
-		}
-	}
-	if stage == nil {
-		// The workflow was modified and no longer has this stage.
-		pbRun.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
-		now := metav1.Now()
-		pbRun.Status.CompletionTime = &now
-		meta.SetStatusCondition(&pbRun.Status.Conditions, metav1.Condition{
-			Type:               ConditionTypeReady,
-			Status:             metav1.ConditionFalse,
-			ObservedGeneration: pbRun.Generation,
-			Reason:             "StageNotFound",
-			Message:            fmt.Sprintf("Stage %q no longer exists in AgentWorkflow %q", stageStatus.Name, pbRun.Spec.WorkflowRef),
-		})
-		return r.patchRunStatus(ctx, &pbRun, original)
+	stage := &konveyoriov1alpha1.AgentWorkflowStage{
+		Name:         stageStatus.Name,
+		AgentRef:     stageStatus.AgentRef,
+		Instructions: stageStatus.Instructions,
+		Execution:    stageStatus.Execution,
 	}
 
 	pbRun.Status.CurrentStage = stage.Name
@@ -188,7 +183,7 @@ func (r *AgentWorkflowRunReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// If no AgentRun exists for this stage, create one.
 	if stageStatus.AgentRunName == "" {
-		agentRunName, err := r.createAgentRunForStage(ctx, &pbRun, &workflow, stage, stageIndex, len(pbRun.Status.Stages))
+		agentRunName, err := r.createAgentRunForStage(ctx, &pbRun, stage, stageIndex, len(pbRun.Status.Stages))
 		if err != nil {
 			logger.Error(err, "Failed to create AgentRun for stage",
 				"stage", stage.Name)
@@ -313,7 +308,6 @@ func stageAgentRunName(pbRunName, stageName string) string {
 func (r *AgentWorkflowRunReconciler) createAgentRunForStage(
 	ctx context.Context,
 	pbRun *konveyoriov1alpha1.AgentWorkflowRun,
-	workflow *konveyoriov1alpha1.AgentWorkflow,
 	stage *konveyoriov1alpha1.AgentWorkflowStage,
 	stageIndex int,
 	stageCount int,
@@ -337,7 +331,7 @@ func (r *AgentWorkflowRunReconciler) createAgentRunForStage(
 	// Filter workflow-run params to only those this stage's Agent declares.
 	// Params not declared by the stage Agent are silently dropped — log
 	// and emit an event so typos are debuggable.
-	var stageParams []konveyoriov1alpha1.AgentRunParam
+	var stageParams []konveyoriov1alpha1.ParamValue
 	var skipped []string
 	for _, p := range pbRun.Spec.Params {
 		if declared[p.Name] {
@@ -366,10 +360,25 @@ func (r *AgentWorkflowRunReconciler) createAgentRunForStage(
 
 	// Controller-owned env vars — appended after user env so they
 	// cannot be spoofed.
-	if workflow.Spec.Guide != "" {
+	// Resolve workflow-level params once from the snapshot (#87): coerce
+	// for stamping onto the stage AgentRun (params.json workflow
+	// section) and keep the string form for substituting the guide
+	// (workflow scope only — the guide is ambient across stages and must
+	// not reference stage-agent params). ADR 0009/0018.
+	workflowRaw, workflowStrs, err := coerceWorkflowParams(
+		pbRun.Status.Params, suppliedValues(pbRun.Spec.Params))
+	if err != nil {
+		return "", fmt.Errorf("resolving workflow params: %w", err)
+	}
+
+	if pbRun.Status.Guide != "" {
+		guide, err := substitute(pbRun.Status.Guide, map[string]map[string]string{scopeWorkflow: workflowStrs})
+		if err != nil {
+			return "", fmt.Errorf("workflow guide: %w", err)
+		}
 		env = append(env, corev1.EnvVar{
 			Name:  "KONVEYOR_WORKFLOW_GUIDE",
-			Value: workflow.Spec.Guide,
+			Value: guide,
 		})
 	}
 
@@ -411,6 +420,15 @@ func (r *AgentWorkflowRunReconciler) createAgentRunForStage(
 			Params:       stageParams,
 			Env:          env,
 			EnvFrom:      pbRun.Spec.EnvFrom,
+			// Stamp the stage-resolved execution config (stage override,
+			// else Agent default) onto the stage's AgentRun so the
+			// AgentRun controller — which cannot see the workflow — resolves
+			// and delivers it uniformly (ADR 0018).
+			Execution: resolveExecution(stage.Execution, agent.Spec.Execution),
+			// Stamp coerced workflow params so the AgentRun controller can
+			// write the params.json workflow section and substitute
+			// $(workflow.<name>) without seeing the AgentWorkflow (ADR 0018).
+			WorkflowParams: workflowRaw,
 		},
 	}
 

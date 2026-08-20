@@ -278,8 +278,7 @@ spec:
                 description: Params supplies values for Agent parameters across all
                   stages.
                 items:
-                  description: AgentRunParam supplies a value for a declared Agent
-                    parameter.
+                  description: ParamValue supplies a value for a declared Agent parameter.
                   properties:
                     name:
                       description: Name is the parameter name, matching an Agent param
@@ -379,11 +378,71 @@ spec:
               currentStage:
                 description: CurrentStage is the name of the currently executing stage.
                 type: string
+              guide:
+                description: |-
+                  Guide snapshots the AgentWorkflow guide at initialization time, so
+                  mid-run edits do not change it for stages still to run (#87).
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
                   by the controller.
                 format: int64
                 type: integer
+              params:
+                description: |-
+                  Params snapshots the AgentWorkflow's workflow-level parameter
+                  declarations at initialization time, so coercion of the run's
+                  supplied values stays stable across a mid-run workflow edit (#87).
+                items:
+                  description: |-
+                    Param declares a typed parameter that an Agent or AgentWorkflow
+                    accepts. A run (AgentRun / AgentWorkflowRun) supplies values via
+                    ParamValue. Resolved values are delivered to the Sandbox in
+                    /run/konveyor/params.json (see ADR 0009) and may be referenced in
+                    prompt text with $(agent.<name>) / $(workflow.<name>).
+                  properties:
+                    default:
+                      description: Default is the default value if not supplied by
+                        a run.
+                      type: string
+                    description:
+                      description: Description explains the purpose of the parameter.
+                      type: string
+                    name:
+                      description: |-
+                        Name is the parameter name. Referenced in prompt text as
+                        $(agent.<name>) or $(workflow.<name>) and delivered in
+                        params.json under the corresponding section.
+                      minLength: 1
+                      pattern: ^[a-zA-Z_][a-zA-Z0-9_]*$
+                      type: string
+                    required:
+                      description: |-
+                        Required indicates whether the parameter must be supplied.
+                        A parameter with a default is never required.
+                      type: boolean
+                    type:
+                      default: string
+                      description: |-
+                        Type is the parameter type. Controls JSON coercion in
+                        params.json: number as a JSON number, boolean as a JSON boolean,
+                        string as a JSON string.
+                      enum:
+                      - string
+                      - number
+                      - boolean
+                      type: string
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: a parameter with a default value cannot be required
+                    rule: '!(has(self.required) && self.required && has(self.default)
+                      && size(self.default) > 0)'
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               phase:
                 default: Pending
                 description: Phase is the current phase of the overall workflow run.
@@ -394,15 +453,51 @@ spec:
                 - Failed
                 type: string
               stages:
-                description: Stages tracks the status of each stage.
+                description: |-
+                  Stages tracks the status of each stage, and snapshots each stage's
+                  definition at initialization time (#87).
                 items:
                   description: |-
                     AgentWorkflowRunStageStatus tracks the status of a single stage within
                     a workflow run.
                   properties:
+                    agentRef:
+                      description: AgentRef is the snapshotted Agent name for this
+                        stage.
+                      type: string
                     agentRunName:
                       description: AgentRunName is the name of the AgentRun CR created
                         for this stage.
+                      type: string
+                    execution:
+                      description: Execution is the snapshotted stage execution override.
+                      properties:
+                        maxCost:
+                          description: |-
+                            MaxCost is the maximum cumulative cost in USD before wind-down,
+                            as a decimal string (e.g. "10.00"). USD only: the enforcement
+                            threshold must match the currency of reported usage, which is USD
+                            across the supported runtimes. Reported cost may carry an ISO 4217
+                            currency; this threshold does not.
+                          pattern: ^[0-9]+(\.[0-9]{1,2})?$
+                          type: string
+                        maxTurns:
+                          description: |-
+                            MaxTurns is the maximum number of turns before wind-down. The unit
+                            is runtime-defined (e.g. Goose counts turns without user input).
+                          minimum: 1
+                          type: integer
+                        mode:
+                          description: Mode is the supervision policy for tool calls.
+                            Defaults to auto.
+                          enum:
+                          - auto
+                          - approve
+                          type: string
+                      type: object
+                    instructions:
+                      description: Instructions is the snapshotted stage instruction
+                        text.
                       type: string
                     name:
                       description: Name is the stage name, matching a stage in the

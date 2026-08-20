@@ -58,6 +58,62 @@ spec:
                   Written as a context file in the workspace so each agent understands
                   where its work fits in the bigger picture.
                 type: string
+              params:
+                description: |-
+                  Params declares workflow-level typed parameters. An
+                  AgentWorkflowRun supplies values; the controller renders them into
+                  the workflow section of params.json and into $(workflow.<name>)
+                  references in the guide and stage instructions (ADR 0009).
+                items:
+                  description: |-
+                    Param declares a typed parameter that an Agent or AgentWorkflow
+                    accepts. A run (AgentRun / AgentWorkflowRun) supplies values via
+                    ParamValue. Resolved values are delivered to the Sandbox in
+                    /run/konveyor/params.json (see ADR 0009) and may be referenced in
+                    prompt text with $(agent.<name>) / $(workflow.<name>).
+                  properties:
+                    default:
+                      description: Default is the default value if not supplied by
+                        a run.
+                      type: string
+                    description:
+                      description: Description explains the purpose of the parameter.
+                      type: string
+                    name:
+                      description: |-
+                        Name is the parameter name. Referenced in prompt text as
+                        $(agent.<name>) or $(workflow.<name>) and delivered in
+                        params.json under the corresponding section.
+                      minLength: 1
+                      pattern: ^[a-zA-Z_][a-zA-Z0-9_]*$
+                      type: string
+                    required:
+                      description: |-
+                        Required indicates whether the parameter must be supplied.
+                        A parameter with a default is never required.
+                      type: boolean
+                    type:
+                      default: string
+                      description: |-
+                        Type is the parameter type. Controls JSON coercion in
+                        params.json: number as a JSON number, boolean as a JSON boolean,
+                        string as a JSON string.
+                      enum:
+                      - string
+                      - number
+                      - boolean
+                      type: string
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: a parameter with a default value cannot be required
+                    rule: '!(has(self.required) && self.required && has(self.default)
+                      && size(self.default) > 0)'
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               stages:
                 description: |-
                   Stages is the ordered sequence of stages. Each stage references an
@@ -74,10 +130,41 @@ spec:
                         for this stage.
                       minLength: 1
                       type: string
+                    execution:
+                      description: |-
+                        Execution overrides the stage Agent's default supervision mode and
+                        budget limits. The AgentWorkflowRun controller resolves these
+                        (stage override, else Agent default) and stamps the result onto the
+                        stage's AgentRun (ADR 0018). Unset fields fall back to the Agent.
+                      properties:
+                        maxCost:
+                          description: |-
+                            MaxCost is the maximum cumulative cost in USD before wind-down,
+                            as a decimal string (e.g. "10.00"). USD only: the enforcement
+                            threshold must match the currency of reported usage, which is USD
+                            across the supported runtimes. Reported cost may carry an ISO 4217
+                            currency; this threshold does not.
+                          pattern: ^[0-9]+(\.[0-9]{1,2})?$
+                          type: string
+                        maxTurns:
+                          description: |-
+                            MaxTurns is the maximum number of turns before wind-down. The unit
+                            is runtime-defined (e.g. Goose counts turns without user input).
+                          minimum: 1
+                          type: integer
+                        mode:
+                          description: Mode is the supervision policy for tool calls.
+                            Defaults to auto.
+                          enum:
+                          - auto
+                          - approve
+                          type: string
+                      type: object
                     instructions:
                       description: |-
                         Instructions are task-specific instructions for this stage.
-                        Composed with the Agent's prompt at execution time.
+                        Composed with the Agent's prompt at execution time. Supports
+                        $(agent.<name>) / $(workflow.<name>) substitution.
                       type: string
                     name:
                       description: |-

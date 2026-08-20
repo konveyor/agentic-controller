@@ -274,6 +274,38 @@ spec:
                       x-kubernetes-map-type: atomic
                   type: object
                 type: array
+              execution:
+                description: |-
+                  Execution carries the resolved supervision mode and budget limits
+                  for this run. For a standalone run these are set by the run
+                  creator (mode) and default from the Agent (limits). For a workflow
+                  stage the AgentWorkflowRun controller stamps the stage-resolved
+                  values here (ADR 0018). Unset fields resolve against the Agent's
+                  Execution defaults; mode resolves to auto when unset everywhere.
+                properties:
+                  maxCost:
+                    description: |-
+                      MaxCost is the maximum cumulative cost in USD before wind-down,
+                      as a decimal string (e.g. "10.00"). USD only: the enforcement
+                      threshold must match the currency of reported usage, which is USD
+                      across the supported runtimes. Reported cost may carry an ISO 4217
+                      currency; this threshold does not.
+                    pattern: ^[0-9]+(\.[0-9]{1,2})?$
+                    type: string
+                  maxTurns:
+                    description: |-
+                      MaxTurns is the maximum number of turns before wind-down. The unit
+                      is runtime-defined (e.g. Goose counts turns without user input).
+                    minimum: 1
+                    type: integer
+                  mode:
+                    description: Mode is the supervision policy for tool calls. Defaults
+                      to auto.
+                    enum:
+                    - auto
+                    - approve
+                    type: string
+                type: object
               gateway:
                 description: |-
                   Gateway selects the Gateway (provider/model combination) for this
@@ -283,15 +315,16 @@ spec:
               instructions:
                 description: |-
                   Instructions are task-specific instructions for this run.
-                  Composed with the Agent's prompt at execution time.
+                  Composed with the Agent's prompt at execution time. Supports
+                  $(agent.<name>) / $(workflow.<name>) substitution.
                 type: string
               params:
                 description: |-
                   Params supplies values for the Agent's declared parameters.
-                  Injected as KONVEYOR_PARAM_{NAME} env vars into the Sandbox.
+                  Resolved values are written to /run/konveyor/params.json in the
+                  Sandbox (see ADR 0009); they are not injected as env vars.
                 items:
-                  description: AgentRunParam supplies a value for a declared Agent
-                    parameter.
+                  description: ParamValue supplies a value for a declared Agent parameter.
                   properties:
                     name:
                       description: Name is the parameter name, matching an Agent param
@@ -309,6 +342,17 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              workflowParams:
+                description: |-
+                  WorkflowParams carries the resolved, type-coerced workflow-level
+                  parameters for a stage run, as a JSON object stamped by the
+                  AgentWorkflowRun controller (ADR 0018). The AgentRun controller
+                  writes it verbatim to the "workflow" section of params.json and
+                  uses its values for $(workflow.<name>) substitution. Empty for
+                  standalone runs. Coercion happens in the workflow controller,
+                  which owns the AgentWorkflow param declarations.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
             required:
             - agentRef
             type: object
@@ -328,7 +372,10 @@ spec:
                   AgentRun's state. Ready tracks the run's overall outcome (False
                   while in progress with the current step as its reason, True on
                   success); ACPReady tracks whether the agent's ACP endpoint accepts
-                  connections (see AgentRunConditionACPReady).
+                  connections (see AgentRunConditionACPReady). Succeeded is the
+                  terminal outcome (see AgentRunConditionSucceeded): Unknown while
+                  running, True on clean completion, False with a reason
+                  (Failed, LimitReached) otherwise.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -437,6 +484,15 @@ spec:
                   creation time if the pod finished before the controller saw it run).
                 format: date-time
                 type: string
+              terminationData:
+                description: |-
+                  TerminationData is the raw JSON the harness wrote to the pod's
+                  termination message (/dev/termination-log) on exit — typically a
+                  usage/cost report. The controller copies it verbatim and never
+                  interprets it; platform-specific UIs read the harness's schema
+                  (ADR 0011/0018). Absent if the harness wrote nothing parseable.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
             type: object
         type: object
     served: true
