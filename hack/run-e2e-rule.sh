@@ -20,8 +20,11 @@
 # outcome were a failed run, it would pass for free on any broken cluster.
 #
 # Prerequisites: hack/start-kind.sh, hack/setup-e2e.sh and
-# hack/install-konveyor.sh, plus an agent-base image built and loaded
-# (make agent-base-build, kind load).
+# hack/install-konveyor.sh, plus an agent-base image built and loaded under the
+# tag AGENT_IMAGE names below -- which is not the Makefile's default:
+#
+#   make agent-base-build AGENT_BASE_IMG=quay.io/konveyor/agent-base:e2e
+#   kind load docker-image quay.io/konveyor/agent-base:e2e --name agentic-controller-e2e
 #
 # Environment:
 #   E2E_TIMEOUT   how long to wait on any one condition (default 300s)
@@ -308,7 +311,10 @@ shape_report() {
 
 # assert_marker <run id> <present|absent> <label>
 assert_marker() {
-    local body; body="$(user_message_for "$1")"
+    # `|| true`, because jq exits non-zero on a body it cannot parse and
+    # pipefail would then kill the script here, before the branch below that
+    # exists to report exactly that.
+    local body; body="$(user_message_for "$1" || true)"
     if [ -z "${body}" ]; then
         fail "$3: no turn carrying $1 reached the model endpoint"
         echo "    recorded bodies: $(recorded_bodies | wc -l | tr -d ' ')"

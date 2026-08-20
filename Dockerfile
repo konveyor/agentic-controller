@@ -27,7 +27,12 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 # containers the controller schedules, so they ship here rather than in the
 # agent's image. An agent image is then not required to carry our binary, and
 # the KONVEYOR_SKILL_SOURCES contract cannot skew across versions. ADR 0015.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o skill-loader ./cmd/skill-loader
+#
+# No -a: it shares nearly all of its dependencies with the manager above, which
+# has just compiled them into a build cache this RUN can still see. Repeating
+# -a here recompiles the standard library and client-go a second time for
+# nothing.
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o skill-loader ./cmd/skill-loader
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details

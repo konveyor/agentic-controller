@@ -13,8 +13,7 @@ description: >
   now; its content is injected into every prompt of every Agent that
   references it from this release on. Existing cards typed as rules change
   agent behaviour on upgrade without being edited, so audit them before
-  upgrading: `kubectl get skillcards -A -o custom-columns=NS:.metadata.
-  namespace,NAME:.metadata.name,TYPE:.spec.type`.
+  upgrading with `kubectl get skillcards -A -o wide`, which prints the type.
 
   The skills in this repo now publish as one bundle image,
   quay.io/konveyor/skills:latest, holding plan, execute, verify and

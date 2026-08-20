@@ -226,7 +226,10 @@ agent-images-multiarch-push: agent-images-multiarch-build ## Build and push agen
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+	# The manager refuses to start without this, because the loader init
+	# container is on every AgentRun pod. Running from your host, the value has
+	# to be an image the *cluster* can pull, not one on this machine.
+	SKILL_LOADER_IMAGE="$(IMG)" go run ./cmd/main.go
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.

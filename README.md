@@ -49,8 +49,10 @@ agentic-controller/
   api/v1alpha1/           CRD type definitions (Go structs)
   api/skill/              Agent Skills frontmatter parsing and validation
   internal/controller/    Controller implementations
+  internal/skills/        Skill assembly, and SkillCard materialization
+  cmd/skill-loader/       The init container and enumeration Job binary
   docs/adr/               Architecture Decision Records
-  harness/                In-pod runner: skill loader, prompt assembly, ACP
+  harness/                In-pod runner: git lifecycle, prompt assembly, ACP
   skills/                 Agent skills, both runtime and contributor-facing
   CONTEXT.md              Domain glossary
   AGENTS.md               Agent-facing instructions
