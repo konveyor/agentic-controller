@@ -240,7 +240,7 @@ func parseSources(raw string) ([]skills.Source, error) {
 	}
 	var out []skills.Source
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, fmt.Errorf("expected a JSON array of {name,type,git:{url,ref,subPath}}: %w", err)
+		return nil, fmt.Errorf("expected a JSON array of {name,subPath,type,git:{url,ref}}: %w", err)
 	}
 	for i, s := range out {
 		if s.Name == "" {

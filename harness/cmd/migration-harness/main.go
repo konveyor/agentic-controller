@@ -320,13 +320,9 @@ func runStage(cmd *cobra.Command, args []string) error {
 	emitPlan("completed", "pending", "pending")
 
 	// 7. Build prompt from context layers
-	promptRules := make([]prompt.Rule, 0, len(rules))
-	for _, r := range rules {
-		promptRules = append(promptRules, prompt.Rule{Name: r.Name, Body: r.Body})
-	}
 	stagePrompt := prompt.Build(prompt.Layers{
 		AgentPrompt:   cfg.AgentPrompt,
-		Rules:         promptRules,
+		Rules:         rules,
 		WorkflowGuide: cfg.WorkflowGuide,
 		StageTask:     cfg.StageInstructions,
 	})

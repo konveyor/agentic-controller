@@ -92,6 +92,16 @@ func (r *SkillCollectionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.reconcileImageSource(ctx, &collection, original)
 	}
 
+	// A collection that no longer names an image keeps neither the cards the
+	// enumeration wrote nor a status naming them. Nothing else prunes them --
+	// the Job that would is only created on the image path -- so they would
+	// otherwise stay referenceable for the collection's whole life, pointing at
+	// an image it has stopped pointing at.
+	if err := r.dropEnumeratedSkillCards(ctx, &collection); err != nil {
+		logger.Error(err, "Failed to drop cards from a previous image source")
+		return ctrl.Result{}, err
+	}
+
 	totalSkills := len(collection.Spec.Skills)
 	readyCount := 0
 	var notReadyReasons []string

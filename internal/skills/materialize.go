@@ -18,16 +18,18 @@ import (
 // Creating SkillCards from inside the enumerating pod. ADR 0015 argues the
 // approach; this notes the two boundaries it crosses.
 //
-// MODULE BOUNDARY: this file is why the harness depends on the api module,
-// controller-runtime and client-go. Nothing else in the binary knows what a
-// CustomResource is. Drop this approach and the Kubernetes dependency goes
-// with it.
+// MODULE BOUNDARY: this file is why skill-loader, which is otherwise a
+// filesystem tool, links controller-runtime and client-go. Nothing else in the
+// binary knows what a CustomResource is. Drop this approach and the Kubernetes
+// dependency goes with it. The harness does not carry any of it: it reads the
+// manifest and nothing more (ADR 0015 §5, revised 2026-08-18).
 //
 // TRUST BOUNDARY: this runs in a pod that mounts a user-supplied image and
 // holds a token that can write SkillCards, which name images later mounted
 // into agent pods. Two things narrow it: Image comes from the collection and
-// never from the walk, and the ServiceAccount is scoped to SkillCards in one
-// namespace by config/rbac/skill_enumerator_role.yaml, not by anything here.
+// never from the walk, and the ServiceAccount is bound to a Role covering
+// SkillCards in one namespace, created by the controller in
+// internal/controller/skillcollection_rbac.go rather than by anything here.
 
 // labelSkillCollection marks cards a collection owns, so pruning finds them
 // without guessing from names.
@@ -69,13 +71,17 @@ func Materialize(ctx context.Context, dir string, opts MaterializeOptions) ([]st
 		skillType = TypeSkill
 	}
 
+	// No BlockOwnerDeletion. It buys only deletion ordering, and setting it
+	// requires update on skillcollections/finalizers -- a grant this Job
+	// deliberately does not have, which on any cluster running the
+	// OwnerReferencesPermissionEnforcement admission plugin (OpenShift by
+	// default) makes the API server reject every card written here.
 	owner := metav1.OwnerReference{
-		APIVersion:         konveyoriov1alpha1.GroupVersion.String(),
-		Kind:               "SkillCollection",
-		Name:               opts.Owner.Name,
-		UID:                types.UID(opts.Owner.UID),
-		Controller:         ptr.To(true),
-		BlockOwnerDeletion: ptr.To(true),
+		APIVersion: konveyoriov1alpha1.GroupVersion.String(),
+		Kind:       "SkillCollection",
+		Name:       opts.Owner.Name,
+		UID:        types.UID(opts.Owner.UID),
+		Controller: ptr.To(true),
 	}
 
 	wanted := make(map[string]bool, len(found))
@@ -101,8 +107,15 @@ func Materialize(ctx context.Context, dir string, opts MaterializeOptions) ([]st
 					"SkillCard %q already exists and is not owned by collection %q; "+
 						"rename the collection or the skill", name, opts.Owner.Name)
 			}
-			card.Labels = map[string]string{labelSkillCollection: opts.Owner.Name}
-			card.OwnerReferences = []metav1.OwnerReference{owner}
+			// Merged, not assigned. This runs again on every re-enumeration,
+			// and a whole-map assignment would drop whatever else is on the
+			// card -- an operator's app.kubernetes.io/part-of, Argo CD's
+			// instance label -- every time, so it could never be made to stick.
+			if card.Labels == nil {
+				card.Labels = map[string]string{}
+			}
+			card.Labels[labelSkillCollection] = opts.Owner.Name
+			setControllerRef(card, owner)
 			card.Spec.Image = opts.Image
 			card.Spec.SubPath = s.SourcePath
 			card.Spec.Type = konveyoriov1alpha1.SkillCardType(skillType)
@@ -131,6 +144,24 @@ func Materialize(ctx context.Context, dir string, opts MaterializeOptions) ([]st
 	}
 
 	return names, nil
+}
+
+// setControllerRef makes owner the card's controller, leaving any other
+// reference alone. Assigning the whole slice would drop a second owner on
+// every re-enumeration, so one could never be added to a generated card.
+//
+// A conflicting controller is left for the API server to reject, which it
+// does with a message naming both owners -- better than anything decided here,
+// since Materialize has already refused to touch a card this collection does
+// not own and so has nothing left to say about one.
+func setControllerRef(card *konveyoriov1alpha1.SkillCard, owner metav1.OwnerReference) {
+	for i := range card.OwnerReferences {
+		if card.OwnerReferences[i].UID == owner.UID {
+			card.OwnerReferences[i] = owner
+			return
+		}
+	}
+	card.OwnerReferences = append(card.OwnerReferences, owner)
 }
 
 // cardName scopes a generated card to its collection. Object names stop at 253

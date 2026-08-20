@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -102,7 +103,7 @@ const (
 
 	// skillFileKey is the ConfigMap key an inline skill's markdown lands under,
 	// and the filename the loader expects to find once mounted.
-	skillFileKey = "SKILL.md"
+	skillFileKey = skill.File
 
 	// skillSourcesEnv declares every skill source to the loader as JSON:
 	// which are staged, which must be cloned, and any load policy the
@@ -414,9 +415,16 @@ func (r *AgentRunReconciler) createSandbox(
 	loaderMounts := skillSrc.mounts
 
 	// The assembled skills root: written by the loader, read by the agent.
+	// Bounded like the workspace and /tmp below, because what lands here is
+	// copied out of whatever image or repository a SkillCard names, and an
+	// unbounded EmptyDir fills the node rather than failing the pod.
 	volumes = append(volumes, corev1.Volume{
-		Name:         skillsVolumeName,
-		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		Name: skillsVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{
+				SizeLimit: resource.NewQuantity(1*1024*1024*1024, resource.BinarySI), // 1Gi
+			},
+		},
 	})
 	skillsMount := corev1.VolumeMount{Name: skillsVolumeName, MountPath: skillsDir}
 	loaderMounts = append(loaderMounts, skillsMount)
@@ -720,6 +728,16 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 				"skill source %q is not a usable directory name; it must be a single path segment", name))
 			return false
 		}
+		// A SkillCard name is already a Kubernetes object name; a collection
+		// entry's is only checked for MinLength. The name becomes a mount path
+		// as well as a directory, and the API server rejects a mountPath
+		// containing ':' with an error that names neither the skill nor the
+		// collection it came from, so say it here instead.
+		if problems := validation.IsDNS1123Subdomain(name); len(problems) > 0 {
+			errs = append(errs, fmt.Sprintf(
+				"skill source %q is not a usable directory name: %s", name, strings.Join(problems, "; ")))
+			return false
+		}
 		if prev, dup := seen[name]; dup {
 			if prev != delivery {
 				errs = append(errs, fmt.Sprintf(
@@ -763,7 +781,8 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 			errs = append(errs, fmt.Sprintf("skill %q has no resolved image", name))
 			return
 		}
-		if !claim(name, fmt.Sprintf("image:%s:%s:%s", image, subPath, skillType), subPath, skillType, nil) {
+		if !claim(name, fmt.Sprintf("image:%s:%s:%s", image, subPath, defaultedSkillType(skillType)),
+			subPath, skillType, nil) {
 			return
 		}
 		out.volumes = append(out.volumes, corev1.Volume{
@@ -774,7 +793,8 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 
 	addInline := func(name, skillType, content string) {
 		// Inline content is one SKILL.md, so there is nothing to select into.
-		if !claim(name, fmt.Sprintf("inline:%s:%s", skillType, content), "", skillType, nil) {
+		if !claim(name, fmt.Sprintf("inline:%s:%s", defaultedSkillType(skillType), content),
+			"", skillType, nil) {
 			return
 		}
 		out.inline[name] = content
@@ -791,7 +811,7 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 	}
 
 	addGit := func(name, subPath, skillType string, git skillGitSource) {
-		claim(name, fmt.Sprintf("git:%s:%s:%s:%s", git.URL, git.Ref, subPath, skillType),
+		claim(name, fmt.Sprintf("git:%s:%s:%s:%s", git.URL, git.Ref, subPath, defaultedSkillType(skillType)),
 			subPath, skillType, &git)
 	}
 
@@ -875,6 +895,13 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 					URL: skillRef.Source,
 					Ref: skillRef.Ref,
 				})
+			default:
+				// The CRD requires exactly one of the three to be present, and
+				// a present-but-empty string satisfies it. Falling through
+				// silently would hand the agent a pod missing a skill it was
+				// told it has, with nothing anywhere saying so.
+				errs = append(errs, fmt.Sprintf(
+					"skill %q in collection %q has no source configured", skillRef.Name, ref.Ref))
 			}
 		}
 	}
@@ -883,6 +910,22 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 		return nil, fmt.Errorf("skill resolution failed: %s", strings.Join(errs, "; "))
 	}
 	return out, nil
+}
+
+// defaultedSkillType fills in the load policy the SkillCard CRD defaults and a
+// SkillCollection entry does not.
+//
+// Only for comparing two deliveries, never for what is declared to the loader:
+// an unset type is left unset there so the loader applies the default in one
+// place. But one skill reached both as a card and as a collection entry naming
+// the same image arrives once as "skill" and once as "", and claim would
+// otherwise read that as two sources fighting over one staging directory and
+// fail the run.
+func defaultedSkillType(skillType string) string {
+	if skillType == "" {
+		return string(konveyoriov1alpha1.SkillCardTypeSkill)
+	}
+	return skillType
 }
 
 // inlineSkillConfigMapName names the ConfigMap holding an inline skill's
@@ -1221,15 +1264,30 @@ var volumeNameRegex = regexp.MustCompile(`[^a-z0-9-]`)
 
 // sanitizeVolumeName converts a name to a valid Kubernetes volume name
 // (RFC 1123: lowercase alphanumeric + hyphens, max 63 chars).
+//
+// The result names pod volumes, ConfigMaps and enumeration Jobs, so it has to
+// be injective: rewriting is what makes two inputs one name, and a collision
+// there silently makes two things the same object rather than failing. A name
+// that already satisfies the rules is returned untouched; anything the rewrite
+// touched carries a hash of what it started as. Dots are the case that bites,
+// since they are legal in an object name and the regex collapses them to
+// hyphens, so "my.collection" and "my-collection" would otherwise meet.
 func sanitizeVolumeName(name string) string {
-	name = strings.ToLower(name)
-	name = volumeNameRegex.ReplaceAllString(name, "-")
-	// Trim leading/trailing hyphens.
-	name = strings.Trim(name, "-")
-	if len(name) > 63 {
-		// Truncate and append a short hash to avoid collisions.
-		hash := sha256.Sum256([]byte(name))
-		name = name[:54] + "-" + hex.EncodeToString(hash[:4])
+	sanitized := strings.Trim(volumeNameRegex.ReplaceAllString(strings.ToLower(name), "-"), "-")
+	if sanitized == name && len(name) <= 63 {
+		return name
 	}
-	return name
+	suffix := "-" + hex.EncodeToString(sha256Prefix(name))
+	if sanitized == "" {
+		sanitized = "x"
+	}
+	if len(sanitized)+len(suffix) > 63 {
+		sanitized = strings.TrimRight(sanitized[:63-len(suffix)], "-")
+	}
+	return sanitized + suffix
+}
+
+func sha256Prefix(s string) []byte {
+	sum := sha256.Sum256([]byte(s))
+	return sum[:4]
 }

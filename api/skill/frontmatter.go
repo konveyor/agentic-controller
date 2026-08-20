@@ -74,13 +74,9 @@ var fence = []byte("---")
 func Parse(content []byte) (Frontmatter, error) {
 	var fm Frontmatter
 
-	rest, ok := bytes.CutPrefix(content, append(fence, '\n'))
+	rest, ok := cutOpeningFence(content)
 	if !ok {
-		// Tolerate CRLF, which survives a Windows-authored skill.
-		rest, ok = bytes.CutPrefix(content, append(fence, '\r', '\n'))
-		if !ok {
-			return fm, fmt.Errorf("no YAML frontmatter: file does not start with ---")
-		}
+		return fm, fmt.Errorf("no YAML frontmatter: file does not start with ---")
 	}
 
 	end := findClosingFence(rest)
@@ -189,12 +185,14 @@ func ValidName(name string) error {
 // with no frontmatter is returned unchanged -- it is not valid as a skill, but
 // that is Validate's complaint to make, not this function's.
 func Body(content string) string {
-	rest, ok := strings.CutPrefix(content, "---\n")
+	// The same opening fence Parse accepts, so a file it reads frontmatter out
+	// of cannot be one this hands back whole -- which would put the YAML header
+	// into the prompt as if it were instructions.
+	cut, ok := cutOpeningFence([]byte(content))
 	if !ok {
-		if rest, ok = strings.CutPrefix(content, "---\r\n"); !ok {
-			return content
-		}
+		return content
 	}
+	rest := string(cut)
 	end := findClosingFence([]byte(rest))
 	if end < 0 {
 		return content
@@ -208,6 +206,31 @@ func Body(content string) string {
 		body = ""
 	}
 	return strings.TrimLeft(body, "\r\n")
+}
+
+// bom is what Notepad and some VS Code configurations put in front of the
+// first byte of a UTF-8 file. It is invisible in every editor that writes it.
+var bom = []byte{0xEF, 0xBB, 0xBF}
+
+// cutOpeningFence removes the --- that opens the frontmatter block, returning
+// what follows.
+//
+// It is as forgiving as findClosingFence is about the line that closes the
+// block, and for the same reason: an editor that does not trim on save leaves
+// "--- ", and telling the author their file does not start with --- sends them
+// looking for something they can plainly see. A leading BOM is invisible, so
+// that one is worse again.
+func cutOpeningFence(content []byte) ([]byte, bool) {
+	content = bytes.TrimPrefix(content, bom)
+
+	line, rest, found := bytes.Cut(content, []byte("\n"))
+	if !found {
+		return nil, false
+	}
+	if !bytes.Equal(bytes.TrimRight(line, " \t\r"), fence) {
+		return nil, false
+	}
+	return rest, true
 }
 
 // findClosingFence returns the offset of the line that closes the frontmatter

@@ -90,7 +90,12 @@ type SkillCollectionSpec struct {
 	Type SkillCardType `json:"type,omitempty"`
 
 	// Skills is an explicit list, for grouping skills that already exist.
+	//
+	// MinItems, because the rule above is satisfied by a list that is present
+	// and empty: without it `skills: []` is admitted and the collection is
+	// simply never Ready, where the field used to be rejected outright.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +listType=map
 	// +listMapKey=name
 	Skills []SkillCollectionSkillRef `json:"skills,omitempty"`

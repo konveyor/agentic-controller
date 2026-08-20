@@ -3,8 +3,10 @@ package skills
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -95,6 +97,15 @@ func Load(ctx context.Context, opts Options) (*Manifest, error) {
 	keep := make(map[string]bool, len(loaded))
 	for _, l := range loaded {
 		keep[l.Name] = true
+	}
+	// Drop the previous run's manifest before touching anything it describes.
+	// Validation is all-or-nothing, but the copying below is not -- a symlink
+	// out of a source, or a read error, stops it partway -- and a manifest left
+	// behind would then name directories this run has already deleted. The
+	// harness reads it and fails on the first missing rule, blaming a skill
+	// rather than the assembly that never finished.
+	if err := os.Remove(filepath.Join(opts.DestDir, ManifestFile)); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("clearing the previous manifest: %w", err)
 	}
 	if err := prune(opts.DestDir, keep); err != nil {
 		return nil, err
@@ -296,10 +307,15 @@ func collect(ctx context.Context, opts Options) ([]candidate, func(), error) {
 		for i := range found {
 			found[i].typeName = s.Type
 		}
+		// Sorted within a source, but sources keep the order they were
+		// declared in. The rules list is built from this order and the harness
+		// injects it into the prompt in that order, so a global sort would
+		// silently make rule precedence alphabetical by SkillCard name, with
+		// no way for anyone to say which rule comes first.
+		slices.SortFunc(found, func(a, b candidate) int { return strings.Compare(a.sourcePath, b.sourcePath) })
 		candidates = append(candidates, found...)
 	}
 
-	slices.SortFunc(candidates, func(a, b candidate) int { return strings.Compare(a.label(), b.label()) })
 	return candidates, cleanup, nil
 }
 
@@ -470,8 +486,16 @@ func copyDir(root, dir, dst string, depth int) error {
 		if isKubernetesInternal(name) || name == ".git" {
 			continue
 		}
-		resolved, info, err := resolveWithin(root, filepath.Join(dir, name))
+		resolved, info, err := resolveWithin(root, filepath.Join(dir, name), e)
 		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				// A link with nothing at the other end. That is no more skill
+				// content than the sockets and devices skipped below, and
+				// failing here would take down every run referencing the card
+				// over a supporting file none of them asked for.
+				logf("skipping %s: it points at nothing", filepath.Join(dir, name))
+				continue
+			}
 			return err
 		}
 		switch {
@@ -490,7 +514,19 @@ func copyDir(root, dir, dst string, depth int) error {
 }
 
 // resolveWithin follows path to what it really is, and refuses to leave root.
-func resolveWithin(root, path string) (string, os.FileInfo, error) {
+//
+// entry is what os.ReadDir already reported. Anything that is not a symlink is
+// where it appears to be, and dir is resolved by construction, so the walk of
+// every parent component that EvalSymlinks does is only worth paying for the
+// links the containment check exists for.
+func resolveWithin(root, path string, entry os.DirEntry) (string, os.FileInfo, error) {
+	if entry != nil && entry.Type()&os.ModeSymlink == 0 {
+		info, err := entry.Info()
+		if err != nil {
+			return "", nil, fmt.Errorf("resolving %s: %w", path, err)
+		}
+		return path, info, nil
+	}
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return "", nil, fmt.Errorf("resolving %s: %w", path, err)

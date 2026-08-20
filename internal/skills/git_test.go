@@ -256,13 +256,6 @@ func versionedSkillRepo(t *testing.T) versionedRepo {
 	}
 	commit("on a branch")
 
-	head, err := repo.Head()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := wt.Checkout(&gogit.CheckoutOptions{Branch: head.Name()}); err != nil {
-		t.Fatal(err)
-	}
 	// Back to the default branch and move it on, so its head differs from
 	// both the tag and the side branch.
 	if err := wt.Checkout(&gogit.CheckoutOptions{

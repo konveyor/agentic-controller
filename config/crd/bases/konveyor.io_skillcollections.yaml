@@ -62,8 +62,12 @@ spec:
                   rather than writing a card per skill.
                 type: string
               skills:
-                description: Skills is an explicit list, for grouping skills that
-                  already exist.
+                description: |-
+                  Skills is an explicit list, for grouping skills that already exist.
+
+                  MinItems, because the rule above is satisfied by a list that is present
+                  and empty: without it `skills: []` is admitted and the collection is
+                  simply never Ready, where the field used to be rejected outright.
                 items:
                   description: |-
                     SkillCollectionSkillRef references a skill by SkillCard CR name,
@@ -115,6 +119,7 @@ spec:
                       set
                     rule: '(has(self.skillCardRef) ? 1 : 0) + (has(self.image) ? 1
                       : 0) + (has(self.source) ? 1 : 0) == 1'
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - name

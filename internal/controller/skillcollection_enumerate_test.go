@@ -408,7 +408,10 @@ func TestEnumerationReportsWhenItMayNotCreateRBAC(t *testing.T) {
 		t.Fatalf("reason = %q, want EnumerationFailed", got)
 	}
 	msg := conditionMessage(col)
-	for _, want := range []string{"skill_enumerator", skillTestNS} {
+	// The objects by name, not a manifest to apply: kustomize renders the ones
+	// in config/rbac with a name prefix and the operator's own namespace, so an
+	// operator told to apply them would create something the Job never names.
+	for _, want := range []string{defaultEnumerationServiceAccount, enumeratorRoleName, skillTestNS} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message should name %q so it can be acted on, got: %s", want, msg)
 		}

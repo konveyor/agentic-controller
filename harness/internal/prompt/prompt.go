@@ -6,7 +6,11 @@
 // because they constrain everything after them.
 package prompt
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/konveyor/agentic-controller/api/skill"
+)
 
 // stagingRules apply to every agent and skill. The working directory is the git
 // worktree whose commits the harness pushes on exit, so ephemeral files left
@@ -27,11 +31,10 @@ commits if you stage broadly. This applies even when a skill's instructions do
 not say where to put something.
 `
 
-// Rule is one always-loaded skill, injected into every prompt.
-type Rule struct {
-	Name string
-	Body string
-}
+// Rule is one always-loaded skill, injected into every prompt. An alias, not a
+// copy: it is what skill.RuleContent hands back, and the harness already
+// imports that package to read the loader's manifest.
+type Rule = skill.Rule
 
 // Layers are the context layers composed into a stage prompt, ordered from
 // least to most specific.
