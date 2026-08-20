@@ -882,6 +882,13 @@ func (s *Server) resolveAsk(id string, result json.RawMessage) {
 	ch, ok := s.perms[id]
 	if ok {
 		delete(s.perms, id)
+		// Drop the replay frame in the same critical section that commits
+		// the answer: forwardAsk's deferred cleanup only runs after the
+		// parked goroutine wakes, and a viewer snapshotting the backlog in
+		// that gap would be offered a question whose answer channel is
+		// already gone — its reply would vanish as "late/duplicate". The
+		// deferred cleanup still covers the timeout and shutdown paths.
+		delete(s.pendingAsks, id)
 	}
 	s.mu.Unlock()
 	if !ok {

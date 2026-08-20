@@ -972,3 +972,35 @@ func TestForwardElicitationAndLateViewerReplay(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+// resolveAsk must remove the pending replay frame in the same critical
+// section that commits the answer. forwardAsk's deferred cleanup runs
+// only after the parked goroutine wakes, so a viewer attaching in that
+// gap would otherwise be offered an already-answered question whose
+// reply then vanishes as "late/duplicate" with no feedback.
+func TestResolveAskClearsPendingFrameWithAnswer(t *testing.T) {
+	_, _, s := startTee(t, Config{HITLTimeout: time.Second})
+
+	ch := make(chan json.RawMessage, 1)
+	s.mu.Lock()
+	s.perms["kask-9"] = ch
+	s.pendingAsks["kask-9"] = []byte(`{"id":"kask-9"}`)
+	s.mu.Unlock()
+
+	s.resolveAsk("kask-9", json.RawMessage(`{"action":"accept"}`))
+
+	s.mu.Lock()
+	_, stillPending := s.pendingAsks["kask-9"]
+	s.mu.Unlock()
+	if stillPending {
+		t.Fatal("answered ask still in pendingAsks — a viewer attaching now would be offered a dead question")
+	}
+	select {
+	case r := <-ch:
+		if !strings.Contains(string(r), "accept") {
+			t.Fatalf("wrong answer delivered: %s", r)
+		}
+	default:
+		t.Fatal("answer never delivered to the waiting forwardAsk")
+	}
+}

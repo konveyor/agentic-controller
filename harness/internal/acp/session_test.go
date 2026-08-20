@@ -370,6 +370,23 @@ func elicitationAction(t *testing.T, reply map[string]any) (string, map[string]a
 	return action, content
 }
 
+// mcpServers rides goose's untagged-enum parse, proven only against
+// args/env present as arrays — nil slices must never marshal as null.
+func TestMCPServerMarshalNilSlicesAsEmptyArrays(t *testing.T) {
+	b, err := json.Marshal(SessionNewParams{
+		CWD:        "/w",
+		MCPServers: []MCPServer{{Name: "ask", Command: "/bin/harness"}},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"args":[]`, `"env":[]`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("wire shape lost %s: %s", want, b)
+		}
+	}
+}
+
 // The human's answer to a question is relayed verbatim.
 func TestElicitationForwardAnswered(t *testing.T) {
 	fwd := &stubForwarder{

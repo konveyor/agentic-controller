@@ -160,6 +160,24 @@ type EnvVar struct {
 	Value string `json:"value"`
 }
 
+// MarshalJSON keeps args and env present-and-array on the wire even when
+// nil: goose's untagged-enum parse of mcpServers is only proven against
+// that exact shape, and a nil slice would marshal as null — risking the
+// same -32602 the name/value list exists to avoid. Whether an absent
+// field matches the stdio variant is equally unproven, so nil normalizes
+// to [] rather than relying on omitempty.
+func (m MCPServer) MarshalJSON() ([]byte, error) {
+	type mcpServerNoMethods MCPServer
+	w := mcpServerNoMethods(m)
+	if w.Args == nil {
+		w.Args = []string{}
+	}
+	if w.Env == nil {
+		w.Env = []EnvVar{}
+	}
+	return json.Marshal(w)
+}
+
 // SessionNewResult is the response from session/new.
 type SessionNewResult struct {
 	SessionID string          `json:"sessionId"`
@@ -412,8 +430,10 @@ func (c *SessionClient) answerElicitation(msg *RPCResponse) {
 	}
 	_ = json.Unmarshal(msg.Params, &params)
 	title := params.Message
-	if len(title) > 80 {
-		title = title[:77] + "..."
+	// Truncate on rune boundaries: byte slicing a non-ASCII message would
+	// split a UTF-8 sequence mid-rune.
+	if r := []rune(title); len(r) > 80 {
+		title = string(r[:77]) + "..."
 	}
 
 	if f := c.permissionForwarder(); f != nil {
