@@ -1,4 +1,4 @@
-# ADR 0016: In-turn human questions via the ask_user tool and ACP elicitation
+# ADR 0017: In-turn human questions via the ask_user tool and ACP elicitation
 
 - **Status:** proposed
 - **Date:** 2026-08-20
