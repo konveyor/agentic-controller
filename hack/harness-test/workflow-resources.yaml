@@ -1,5 +1,5 @@
 # Example resources for testing the AgentWorkflow + AgentWorkflowRun flow.
-# Migrates the coolstore Java EE app to Quarkus using 3 stages.
+# Migrates the coolstore Java EE app to Quarkus using 4 stages.
 #
 # Prerequisites:
 #   - Gateway "gcp-vertex-ai" from resources.yaml
@@ -13,12 +13,30 @@
 apiVersion: konveyor.io/v1alpha1
 kind: SkillCard
 metadata:
+  name: questionnaire
+spec:
+  image: quay.io/konveyor/skills:questionnaire
+  displayName: Questionnaire Stage
+  version: "1.0.0"
+  description: >
+    Detects the source application's tech stack and gathers migration decisions.
+    Produces .konveyor/questionnaire.json consumed by the plan stage.
+  type: skill
+  tags:
+    - migration
+    - questionnaire
+    - detect
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
   name: plan
 spec:
   image: quay.io/konveyor/skills:plan
   displayName: Plan Stage
   version: "1.0.0"
-  description: Reads a project and produces PLAN.md with migration steps.
+  description: Analyzes a project and produces .konveyor/spec.md and .konveyor/implementation.md with migration steps.
   type: skill
   tags:
     - migration
@@ -33,7 +51,7 @@ spec:
   image: quay.io/konveyor/skills:execute
   displayName: Execute Stage
   version: "1.0.0"
-  description: Reads PLAN.md and executes each migration step sequentially.
+  description: Reads .konveyor/implementation.md and executes each migration step sequentially.
   type: skill
   tags:
     - migration
@@ -73,6 +91,22 @@ spec:
     - javaee
     - quarkus
     - migration
+
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: migration-questionnaire-agent
+spec:
+  image: quay.io/konveyor/agent-java:dev
+  providers:
+    - ref: gcp-vertex-ai
+  skillCards:
+    - ref: questionnaire
+  params:
+    - name: max_turns
+      type: number
+      default: "50"
 
 ---
 apiVersion: konveyor.io/v1alpha1
@@ -124,9 +158,6 @@ spec:
     - name: max_turns
       type: number
       default: "200"
-    - name: max_fix_iterations
-      type: number
-      default: "3"
 
 ---
 apiVersion: konveyor.io/v1alpha1
@@ -136,15 +167,18 @@ metadata:
 spec:
   guide: "Migrate a Java EE application to Quarkus 3"
   stages:
+    - name: questionnaire
+      agentRef: migration-questionnaire-agent
+      instructions: "Load the questionnaire skill and follow its SKILL.md exactly. Analyze the source application to detect its tech stack, validate the migration prompt, and gather migration decisions. Use the output schema defined in SKILL.md as the exact structure for .konveyor/questionnaire.json — reproduce every required field. Do not invent your own output format."
     - name: plan
       agentRef: migration-plan-agent
-      instructions: "Analyze the project structure using graphify and produce PLAN.md with migration steps"
+      instructions: "Load the plan skill and follow its SKILL.md exactly. Read .konveyor/questionnaire.json and run graphify for grounding. Use the output schemas defined in SKILL.md as the exact structure for .konveyor/spec.md and .konveyor/implementation.md — reproduce every required section and field. Do not invent your own document structure."
     - name: execute
       agentRef: migration-execute-agent
-      instructions: "Execute each step in PLAN.md to migrate the code from Java EE to Quarkus"
+      instructions: "Load the execute skill and follow its SKILL.md exactly. Execute each step in .konveyor/implementation.md to migrate the code from Java EE to Quarkus. Use the output schema defined in SKILL.md as the exact structure for .konveyor/execute.json — reproduce every required field verbatim. Do not invent your own output format."
     - name: verify
       agentRef: migration-verify-agent
-      instructions: "Run mvn clean compile, fix any compilation errors, then run tests"
+      instructions: "Load the verify skill and follow its SKILL.md exactly. Run the build, fix any compilation errors, then run tests. Use the output schema defined in SKILL.md as the exact structure for .konveyor/verify.json — reproduce every required field verbatim. Do not invent your own output format."
 
 ---
 apiVersion: konveyor.io/v1alpha1

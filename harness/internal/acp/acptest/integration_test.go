@@ -104,10 +104,6 @@ func TestACPIntegrationFreePort(t *testing.T) {
 	}
 
 	t.Logf("Stop reason: %s, Chunks: %v", result.StopReason, result.Chunks)
-	if result.Usage != nil {
-		t.Logf("Tokens: %d total (%d in, %d out)",
-			result.Usage.TotalTokens, result.Usage.InputTokens, result.Usage.OutputTokens)
-	}
 
 	if result.StopReason != "end_turn" {
 		t.Errorf("expected 'end_turn', got %q", result.StopReason)

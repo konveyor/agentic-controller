@@ -44,10 +44,15 @@ echo ""
 echo "=== Building skill images ==="
 
 SKILL_IMAGE="quay.io/konveyor/skills"
-SKILL_DIRS=(plan execute verify javaee-to-quarkus)
+SKILL_DIRS=(questionnaire plan execute verify javaee-to-quarkus)
 
 for SKILL in "${SKILL_DIRS[@]}"; do
-    SKILL_PATH="$REPO_ROOT/skills/$SKILL"
+    # Stage skills live in harness/skills/; domain skills in the repo-root skills/.
+    if [ -d "$REPO_ROOT/harness/skills/$SKILL" ]; then
+        SKILL_PATH="$REPO_ROOT/harness/skills/$SKILL"
+    else
+        SKILL_PATH="$REPO_ROOT/skills/$SKILL"
+    fi
     if [ ! -d "$SKILL_PATH" ]; then
         echo "  WARN: skill dir $SKILL_PATH not found, skipping"
         continue
@@ -92,9 +97,12 @@ done
 
 echo ""
 echo "=== Applying resources ==="
-GCP_PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
+# Prefer the Vertex project that actually hosts the Claude models
+# (ANTHROPIC_VERTEX_PROJECT_ID, same one Claude Code uses); the gcloud
+# default project may lack access to the anthropic publisher models.
+GCP_PROJECT_ID="${ANTHROPIC_VERTEX_PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 if [ -z "$GCP_PROJECT_ID" ]; then
-    echo "ERROR: No GCP project set. Run: gcloud config set project <project-id>"
+    echo "ERROR: No GCP project set. Set ANTHROPIC_VERTEX_PROJECT_ID or run: gcloud config set project <project-id>"
     exit 1
 fi
 echo "  GCP project: (set)"
@@ -111,4 +119,4 @@ echo ""
 echo "=== Done ==="
 echo "Watch the run: kubectl get agentworkflowrun coolstore-migration-$TIMESTAMP -w"
 echo "Check pods:    kubectl get pods"
-echo "View logs:     kubectl logs -f coolstore-migration-${TIMESTAMP}-plan -c agent"
+echo "View logs:     kubectl logs -f coolstore-migration-${TIMESTAMP}-questionnaire -c agent"
