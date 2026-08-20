@@ -1,0 +1,68 @@
+name: Build and Push Agent Images (Multi-Arch)
+
+# Dedicated workflow for publishing multi-arch agent images. Kept separate
+# from images.yml (which carries a paths: filter for PR and dev builds)
+# because GitHub gates push events on BOTH tags:/branches: AND paths: —
+# tag pushes would not reliably fire under a paths: filter. This is the
+# same split tackle2-hub and tackle2-ui use.
+
+on:
+  push:
+    branches:
+      - main
+      - 'release-*'
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+concurrency:
+  group: march-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  agent-base:
+    permissions:
+      contents: read
+    name: Build and push agent-base (multi-arch)
+    uses: konveyor/release-tools/.github/workflows/build-push-images.yaml@4cf4ec7e8a15336b88c3e5ba2ee126f4082f53f2 # main
+    with:
+      registry: "quay.io/konveyor"
+      image_name: agent-base
+      containerfile: images/agent-base/Containerfile
+      context: "."
+      architectures: '["amd64", "arm64"]'
+    secrets:
+      registry_username: ${{ vars.QUAY_USERNAME }}
+      registry_password: ${{ secrets.QUAY_PASSWORD }}
+
+  agent-lang-images:
+    needs: agent-base
+    permissions:
+      contents: read
+    name: Build and push ${{ matrix.images.name }} (multi-arch)
+    strategy:
+      fail-fast: false
+      matrix:
+        images:
+          - name: agent-go
+            containerfile: images/agent-go/Containerfile
+          - name: agent-java
+            containerfile: images/agent-java/Containerfile
+          - name: agent-csharp
+            containerfile: images/agent-csharp/Containerfile
+          - name: agent-nodejs
+            containerfile: images/agent-nodejs/Containerfile
+    uses: konveyor/release-tools/.github/workflows/build-push-images.yaml@4cf4ec7e8a15336b88c3e5ba2ee126f4082f53f2 # main
+    with:
+      registry: "quay.io/konveyor"
+      image_name: ${{ matrix.images.name }}
+      containerfile: ${{ matrix.images.containerfile }}
+      context: "."
+      architectures: '["amd64", "arm64"]'
+      extra-args: |
+        --build-arg BASE_IMAGE=quay.io/konveyor/agent-base:${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
+    secrets:
+      registry_username: ${{ vars.QUAY_USERNAME }}
+      registry_password: ${{ secrets.QUAY_PASSWORD }}

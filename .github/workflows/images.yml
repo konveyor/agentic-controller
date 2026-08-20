@@ -62,8 +62,8 @@ jobs:
   # instead of pushing (no credentials needed). Uses Konveyor's shared
   # build-image action — the same one analyzer-lsp's demo-testing.yml uses,
   # transitively, via e2e-image-build.yaml.
-  # The real multi-arch build+push happens in agent-base-multiarch/
-  # agent-lang-images-multiarch below, on push/dispatch only.
+  # The real multi-arch build+push lives in image-build-push.yml
+  # (filter-free so tag pushes fire reliably).
   agent-base-artifact:
     if: github.event_name == 'pull_request'
     permissions:
@@ -136,59 +136,6 @@ jobs:
           build_context: "."
           base_image: agent-base--pr${{ github.event.pull_request.number }}-${{ matrix.arch_info.arch }}
           base_image_arg: BASE_IMAGE
-
-  # Multi-arch (amd64/arm64) build+push, via Konveyor's shared reusable
-  # workflow: each arch builds natively (arm64 gets a real ARM runner) and
-  # pushes under an arch-suffixed tag, then a final job assembles those into
-  # a manifest list under the real tag. agent-base publishes first so the
-  # language images' "FROM quay.io/konveyor/agent-base" resolves against an
-  # already-published, genuinely multi-arch manifest.
-  agent-base-multiarch:
-    if: github.event_name != 'pull_request'
-    permissions:
-      contents: read
-    name: Build and push agent-base (multi-arch)
-    uses: konveyor/release-tools/.github/workflows/build-push-images.yaml@4cf4ec7e8a15336b88c3e5ba2ee126f4082f53f2 # main
-    with:
-      registry: "quay.io/konveyor"
-      image_name: agent-base
-      containerfile: images/agent-base/Containerfile
-      context: "."
-      architectures: '["amd64", "arm64"]'
-    secrets:
-      registry_username: ${{ vars.QUAY_USERNAME }}
-      registry_password: ${{ secrets.QUAY_PASSWORD }}
-
-  agent-lang-images-multiarch:
-    needs: agent-base-multiarch
-    if: github.event_name != 'pull_request'
-    permissions:
-      contents: read
-    name: Build and push ${{ matrix.images.name }} (multi-arch)
-    strategy:
-      fail-fast: false
-      matrix:
-        images:
-          - name: agent-go
-            containerfile: images/agent-go/Containerfile
-          - name: agent-java
-            containerfile: images/agent-java/Containerfile
-          - name: agent-csharp
-            containerfile: images/agent-csharp/Containerfile
-          - name: agent-nodejs
-            containerfile: images/agent-nodejs/Containerfile
-    uses: konveyor/release-tools/.github/workflows/build-push-images.yaml@4cf4ec7e8a15336b88c3e5ba2ee126f4082f53f2 # main
-    with:
-      registry: "quay.io/konveyor"
-      image_name: ${{ matrix.images.name }}
-      containerfile: ${{ matrix.images.containerfile }}
-      context: "."
-      architectures: '["amd64", "arm64"]'
-      extra-args: |
-        --build-arg BASE_IMAGE=quay.io/konveyor/agent-base:${{ github.ref == 'refs/heads/main' && 'latest' || github.ref_name }}
-    secrets:
-      registry_username: ${{ vars.QUAY_USERNAME }}
-      registry_password: ${{ secrets.QUAY_PASSWORD }}
 
   controller:
     permissions:

@@ -50,12 +50,26 @@ end-to-end Sandbox clusters running on arm64.
 In CI, all five images (agent-base + the four language images) build for
 `linux/amd64` and `linux/arm64` via
 [konveyor/release-tools](https://github.com/konveyor/release-tools)
-shared `build-push-images.yaml` reusable workflow (see `images.yml`): each
-arch builds natively on its own runner and pushes under an arch-suffixed
-tag, then a final job assembles those into a manifest list under the real
-tag. agent-base publishes first so the language images' `FROM
+shared `build-push-images.yaml` reusable workflow: each arch builds
+natively on its own runner and pushes under an arch-suffixed tag, then a
+final job assembles those into a manifest list under the real tag.
+agent-base publishes first so the language images' `FROM
 quay.io/konveyor/agent-base` resolves against an already-published,
 genuinely multi-arch manifest.
+
+Publishing lives in `image-build-push.yml`, a dedicated workflow
+with no `paths:` filter. This is separate from `images.yml` because
+GitHub gates `push` events on both `tags:`/`branches:` and `paths:` — tag
+pushes would not reliably fire under a `paths:` filter. The workflow
+triggers on pushes to `main`, `release-*` branches, and `v*` tags:
+
+- **`main`** pushes tag images as `:latest`.
+- **`v*`** tag pushes tag images with the version (e.g. `:v0.11.0`) —
+  the reusable workflow derives the tag from `github.ref_name`.
+- **`release-*`** branch pushes tag images with the branch name.
+
+`images.yml` keeps the `paths:`-filtered PR artifact builds and the
+controller/controller-agent build+push jobs.
 
 For local testing without pushing to CI, the same two platforms can be
 built with podman directly (Linux hosts need `qemu-user-static` installed
