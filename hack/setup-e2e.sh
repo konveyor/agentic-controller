@@ -67,7 +67,14 @@ fi
 
 echo ""
 echo "=== Building and loading skill images ==="
-make skill-build
+# Not :latest. Kubernetes defaults imagePullPolicy to Always for that tag, so
+# the kubelet ignores the image loaded into the node and tries to pull a bundle
+# that only exists locally.
+SKILL_BUNDLE_IMG="quay.io/konveyor/skills:e2e"
+# CONTAINER_TOOL has to be passed: the Makefile defaults it to docker, while
+# this script auto-detects and picks podman where both exist, and the bundle
+# would then be built into one tool's store and saved from the other's.
+make skill-build SKILL_IMAGE="${SKILL_BUNDLE_IMG}" CONTAINER_TOOL="${CONTAINER_TOOL}"
 # Build a FROM-scratch OCI image for each skill and load into Kind.
 # skillctl builds to its own OCI store; we need container images for Kind.
 # Use the skill content directly in a simple container image.
@@ -89,6 +96,9 @@ done
 # Load skill images into Kind.
 if [ "${CONTAINER_TOOL}" = "podman" ]; then
     SKILL_TMP=$(mktemp -d)
+    echo "Saving ${SKILL_BUNDLE_IMG} to tarball..."
+    ${CONTAINER_TOOL} save "${SKILL_BUNDLE_IMG}" -o "${SKILL_TMP}/bundle.tar"
+    kind load image-archive "${SKILL_TMP}/bundle.tar" --name "${KIND_CLUSTER}"
     for dir in skills/examples/*/; do
         name=$(basename "${dir}")
         skill_img="quay.io/konveyor/skills:${name}"
@@ -98,6 +108,7 @@ if [ "${CONTAINER_TOOL}" = "podman" ]; then
     done
     rm -rf "${SKILL_TMP}"
 else
+    kind load docker-image "${SKILL_BUNDLE_IMG}" --name "${KIND_CLUSTER}"
     for dir in skills/examples/*/; do
         name=$(basename "${dir}")
         kind load docker-image "quay.io/konveyor/skills:${name}" --name "${KIND_CLUSTER}"

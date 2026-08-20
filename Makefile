@@ -78,8 +78,12 @@ harness-test: ## Build, load, and deploy the harness agent in Kind (requires e2e
 e2e-run: ## Run the e2e test (cluster must be set up with e2e-setup).
 	hack/run-e2e.sh
 
+.PHONY: e2e-skills
+e2e-skills: ## Run the skill delivery scenarios (cluster must be set up with e2e-setup).
+	hack/run-e2e-skills.sh
+
 .PHONY: e2e
-e2e: e2e-setup e2e-run ## Full e2e: create cluster, deploy, test.
+e2e: e2e-setup e2e-run e2e-skills ## Full e2e: create cluster, deploy, test.
 
 .PHONY: e2e-cleanup
 e2e-cleanup: ## Tear down the Kind cluster used for e2e tests.
