@@ -70,6 +70,9 @@ func (r *SkillCardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		r.reconcileInline(&skillCard)
 	default:
 		skillCard.Status.ResolvedImage = ""
+		// Otherwise a card that loses its source keeps reporting how it used
+		// to be delivered, while Ready correctly flips to False.
+		skillCard.Status.DeliveryMode = ""
 		meta.SetStatusCondition(&skillCard.Status.Conditions, metav1.Condition{
 			Type:               ConditionTypeReady,
 			Status:             metav1.ConditionFalse,
@@ -89,11 +92,16 @@ func (r *SkillCardReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 // reconcileImage handles SkillCards with an OCI image source.
-// For POC, the image ref is accepted at face value. Actual OCI registry
-// validation is deferred — the real validation happens when the Sandbox
-// tries to mount the ImageVolume.
+//
+// The ref is accepted at face value. Proving it resolves would need a registry
+// client, pull secrets and network egress in the reconciler, and would still
+// not prove the image holds a usable skill — the frontmatter that decides that
+// is only readable once the volume is mounted. So this is checked at pod init
+// by the skill loader, where the bytes actually are, and a bad ref fails the
+// pod there rather than being reported here.
 func (r *SkillCardReconciler) reconcileImage(sc *konveyoriov1alpha1.SkillCard) {
 	sc.Status.ResolvedImage = sc.Spec.Image
+	sc.Status.DeliveryMode = "image"
 	meta.SetStatusCondition(&sc.Status.Conditions, metav1.Condition{
 		Type:               ConditionTypeReady,
 		Status:             metav1.ConditionTrue,
@@ -104,30 +112,54 @@ func (r *SkillCardReconciler) reconcileImage(sc *konveyoriov1alpha1.SkillCard) {
 }
 
 // reconcileSource handles SkillCards with a git source URL.
-// Deferred to Phase 3 — requires skillimage integration and an
-// in-cluster OCI registry.
+//
+// Nothing is built: the skill loader clones the repository at pod start, so
+// there is no image to resolve and status.resolvedImage stays empty. As with
+// an image ref, whether the repository actually holds a usable skill is
+// settled at pod init.
 func (r *SkillCardReconciler) reconcileSource(sc *konveyoriov1alpha1.SkillCard) {
 	sc.Status.ResolvedImage = ""
+	sc.Status.DeliveryMode = "source"
 	meta.SetStatusCondition(&sc.Status.Conditions, metav1.Condition{
 		Type:               ConditionTypeReady,
-		Status:             metav1.ConditionFalse,
+		Status:             metav1.ConditionTrue,
 		ObservedGeneration: sc.Generation,
-		Reason:             "SourceNotSupported",
-		Message:            "Git source resolution is not yet implemented (Phase 3)",
+		Reason:             "SourceAccepted",
+		Message:            fmt.Sprintf("git source accepted, cloned at pod start: %s", sc.Spec.Source),
 	})
 }
 
 // reconcileInline handles SkillCards with inline markdown content.
-// Deferred to Phase 3 — requires skillimage integration and an
-// in-cluster OCI registry.
+//
+// This is the one source the controller can genuinely validate: the content is
+// already in the CR, so no network is involved. Without frontmatter carrying a
+// name and description a skill is invisible to the agent runtime, and an
+// unvalidated inline card would otherwise resolve, mount and report Ready
+// while contributing nothing.
+//
+// The delivery mechanism is a ConfigMap the AgentRun controller creates, so
+// there is no image and status.resolvedImage stays empty.
 func (r *SkillCardReconciler) reconcileInline(sc *konveyoriov1alpha1.SkillCard) {
 	sc.Status.ResolvedImage = ""
+	sc.Status.DeliveryMode = "inline"
+
+	if err := validateInlineSkill(sc.Spec.Inline); err != nil {
+		meta.SetStatusCondition(&sc.Status.Conditions, metav1.Condition{
+			Type:               ConditionTypeReady,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: sc.Generation,
+			Reason:             "InvalidSkillContent",
+			Message:            err.Error(),
+		})
+		return
+	}
+
 	meta.SetStatusCondition(&sc.Status.Conditions, metav1.Condition{
 		Type:               ConditionTypeReady,
-		Status:             metav1.ConditionFalse,
+		Status:             metav1.ConditionTrue,
 		ObservedGeneration: sc.Generation,
-		Reason:             "InlineNotSupported",
-		Message:            "Inline content resolution is not yet implemented (Phase 3)",
+		Reason:             "InlineAccepted",
+		Message:            "inline skill content is valid",
 	})
 }
 

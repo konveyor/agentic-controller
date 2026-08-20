@@ -1,0 +1,41 @@
+# The emulator, with its request recorder on.
+#
+# With DEBUG=true it prints every request body it receives to stdout, before
+# it validates the model and before it matches a rule. That is the assertion
+# surface for this test: what goose actually put on the wire, read back out of
+# kubectl logs, rather than something the run reports about itself.
+#
+# It runs in the test's own namespace rather than reusing the one in default,
+# because sessions are keyed by bearer token and the logs are shared.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openai-emulator-debug
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: openai-emulator-debug}
+  template:
+    metadata:
+      labels: {app: openai-emulator-debug}
+    spec:
+      containers:
+      - name: emulator
+        image: EMULATOR_IMAGE_PLACEHOLDER
+        env:
+        - name: DEBUG
+          value: "true"
+        ports:
+        - containerPort: 8080
+        # No memory limit on purpose: sessions are held in memory, and a
+        # restart silently empties the script rather than failing loudly.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openai-emulator-debug
+spec:
+  selector: {app: openai-emulator-debug}
+  ports:
+  - port: 80
+    targetPort: 8080

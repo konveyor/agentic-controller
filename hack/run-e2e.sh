@@ -220,6 +220,15 @@ if [ -n "${SANDBOX}" ]; then
     else
         fail "Entrypoint did not produce expected output"
         echo "  Pod logs: ${LOGS}"
+        # The agent container never runs if an init container fails, and its
+        # logs are the only place that says why. Without this the run reports
+        # a wall of missing-output failures and nothing about the cause.
+        for init in $(kubectl get pod "${SANDBOX}" \
+            -o jsonpath='{range .status.initContainerStatuses[*]}{.name}{"\n"}{end}' 2>/dev/null); do
+            state=$(kubectl get pod "${SANDBOX}" -o jsonpath="{.status.initContainerStatuses[?(@.name=='${init}')].state}" 2>/dev/null)
+            echo "  init ${init}: ${state}"
+            kubectl logs "${SANDBOX}" -c "${init}" 2>&1 | sed 's/^/    /' || true
+        done
     fi
 
     # Verify expected content in the logs.
@@ -229,10 +238,13 @@ if [ -n "${SANDBOX}" ]; then
         fail "Params not found in pod logs"
     fi
 
-    if echo "${LOGS}" | grep -q "Skills:"; then
+    # The stub prints "Skills:" followed by an ls, so grepping the label alone
+    # passes with an empty directory. Name the skill the SkillCard resolves to,
+    # which is its frontmatter name rather than the card name.
+    if echo "${LOGS}" | grep -qE "Skills:.*maven-migration"; then
         pass "Skills directory mounted"
     else
-        fail "Skills not visible in pod logs"
+        fail "Skills not visible in pod logs (want maven-migration under Skills:)"
     fi
 
     if echo "${LOGS}" | grep -q "This is an e2e test"; then

@@ -21,7 +21,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"path"
 	"regexp"
 	"strings"
 
@@ -35,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -46,6 +49,7 @@ import (
 
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 
+	"github.com/konveyor/agentic-controller/api/skill"
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 )
 
@@ -70,6 +74,42 @@ const (
 
 	tmpVolumeName = "tmp"
 
+	// skillsVolumeName backs the assembled skills root. The loader writes it,
+	// the agent reads it.
+	skillsVolumeName = "skills"
+
+	// skillsDir is the mount contract from ADR 0001: every skill lives at
+	// /opt/skills/{name}/SKILL.md, one directory, whatever delivered it.
+	skillsDir = "/opt/skills"
+
+	// skillsSrcDir stages each source read-only. The loader assembles skillsDir
+	// from what it finds here, which is what lets one image carry several
+	// skills without widening the mount contract.
+	skillsSrcDir = "/opt/skills-src"
+
+	// skillLoaderContainerName is the init container that assembles and
+	// validates the skills root before the agent starts.
+	skillLoaderContainerName = "skill-loader"
+
+	// loaderBinary is the skill loader in the controller's own image. An
+	// absolute path because that image is distroless and has no PATH.
+	// Named explicitly rather than left to the image's ENTRYPOINT: an agent
+	// image is free to wrap its entrypoint in a script, and the loader has to
+	// run the subcommand either way.
+	loaderBinary = "/skill-loader"
+
+	// agentContainerName is the container that runs the agent itself.
+	agentContainerName = "agent"
+
+	// skillFileKey is the ConfigMap key an inline skill's markdown lands under,
+	// and the filename the loader expects to find once mounted.
+	skillFileKey = skill.File
+
+	// skillSourcesEnv declares every skill source to the loader as JSON:
+	// which are staged, which must be cloned, and any load policy the
+	// SkillCard imposes on what they carry.
+	skillSourcesEnv = "KONVEYOR_SKILL_SOURCES"
+
 	// sandboxFinishedReasonSucceeded is the Sandbox condition reason for
 	// success. Must match Agent Sandbox's SandboxReasonPodSucceeded constant.
 	sandboxFinishedReasonSucceeded = "PodSucceeded"
@@ -82,6 +122,12 @@ const (
 type AgentRunReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// SkillLoaderImage runs the skill-loader init container. It is the
+	// controller's own image, so an agent image is not required to carry the
+	// harness binary and the source list written here is always read by a
+	// loader of the same version.
+	SkillLoaderImage string
 }
 
 // +kubebuilder:rbac:groups=konveyor.io,resources=agentruns,verbs=get;list;watch;create;update;patch;delete
@@ -90,6 +136,7 @@ type AgentRunReconciler struct {
 // +kubebuilder:rbac:groups=agents.x-k8s.io,resources=sandboxes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update
 
 // Reconcile handles AgentRun reconciliation.
 //
@@ -351,11 +398,43 @@ func (r *AgentRunReconciler) createSandbox(
 		return "", fmt.Errorf("building env vars: %w", err)
 	}
 
-	// Resolve skill images for ImageVolumes.
-	volumes, volumeMounts, err := r.resolveSkillVolumes(ctx, agent, run.Namespace)
+	// Stage skill sources. Images become ImageVolumes, inline content becomes a
+	// ConfigMap, git sources are handed to the loader. All are read-only under
+	// /opt/skills-src, none of them built here.
+	skillSrc, err := r.resolveSkillVolumes(ctx, run, agent)
 	if err != nil {
 		return "", fmt.Errorf("resolving skill volumes: %w", err)
 	}
+	if err := r.createInlineSkillConfigMaps(ctx, run, skillSrc.inline); err != nil {
+		return "", err
+	}
+	volumes := skillSrc.volumes
+	// Staged sources are only visible to the loader. The agent sees the
+	// assembled root and nothing else, so ADR 0001's one-directory contract
+	// holds from the agent's side no matter how the skills arrived.
+	loaderMounts := skillSrc.mounts
+
+	// The assembled skills root: written by the loader, read by the agent.
+	// Bounded like the workspace and /tmp below, because what lands here is
+	// copied out of whatever image or repository a SkillCard names, and an
+	// unbounded EmptyDir fills the node rather than failing the pod.
+	volumes = append(volumes, corev1.Volume{
+		Name: skillsVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{
+				SizeLimit: resource.NewQuantity(1*1024*1024*1024, resource.BinarySI), // 1Gi
+			},
+		},
+	})
+	skillsMount := corev1.VolumeMount{Name: skillsVolumeName, MountPath: skillsDir}
+	loaderMounts = append(loaderMounts, skillsMount)
+
+	volumeMounts := make([]corev1.VolumeMount, 0, 3) // skills, workspace, tmp
+	volumeMounts = append(volumeMounts, corev1.VolumeMount{
+		Name:      skillsVolumeName,
+		MountPath: skillsDir,
+		ReadOnly:  true,
+	})
 
 	// Add workspace EmptyDir.
 	volumes = append(volumes, corev1.Volume{
@@ -392,10 +471,10 @@ func (r *AgentRunReconciler) createSandbox(
 			Name:      sandboxName,
 			Namespace: run.Namespace,
 			Labels: map[string]string{
-				labelManagedBy:                managedByLabel,
-				"app.kubernetes.io/component": "agent-sandbox",
-				labelAgentRun:                 run.Name,
-				labelAgent:                    agent.Name,
+				labelManagedBy: managedByLabel,
+				labelComponent: "agent-sandbox",
+				labelAgentRun:  run.Name,
+				labelAgent:     agent.Name,
 			},
 		},
 		Spec: sandboxv1beta1.SandboxSpec{
@@ -417,9 +496,12 @@ func (r *AgentRunReconciler) createSandbox(
 					// pull blips, node eviction) are not retried. Bounded
 					// retry (backoffLimit-style) can be added later if needed.
 					RestartPolicy: corev1.RestartPolicyNever,
+					InitContainers: []corev1.Container{
+						skillLoaderContainer(r.SkillLoaderImage, skillSrc, loaderMounts),
+					},
 					Containers: []corev1.Container{
 						{
-							Name:  "agent",
+							Name:  agentContainerName,
 							Image: agent.Spec.Image,
 							Env:   env,
 							// User-specified sources last: for duplicate
@@ -581,42 +663,174 @@ func (r *AgentRunReconciler) buildEnvVars(
 	return env, envFrom, nil
 }
 
-// resolveSkillVolumes resolves SkillCard and SkillCollection refs to
-// ImageVolume specs. Each resolved skill is mounted at
-// /opt/skills/{name}/. Returns an error if any skill cannot be resolved.
+// skillSources is the staged result of resolving an Agent's skill refs.
+//
+// Nothing is built here. An image was built ahead of time by whoever authored
+// it, inline content is already bytes in the CR, and a git source is cloned at
+// pod start — so the controller stays a stateless reconciler with no builder,
+// no registry credentials and no network egress of its own.
+type skillSources struct {
+	// volumes and mounts stage each source read-only under /opt/skills-src.
+	volumes []corev1.Volume
+	mounts  []corev1.VolumeMount
+	// inline maps a staged source name to its markdown, materialized as a
+	// ConfigMap owned by the AgentRun.
+	inline map[string]string
+	// declared is the source list handed to the loader. Every source appears,
+	// mounted or cloned, so the loader never has to infer what should be
+	// there from what happens to be on disk.
+	declared []skillSource
+}
+
+// skillSource is the loader's own Source type, not a copy of it. api/skill is
+// the one package the controller and the harness both import, so the wire
+// format of KONVEYOR_SKILL_SOURCES has a single definition and adding a field
+// to it is a compile-time fact on both sides.
+type skillSource = skill.Source
+
+type skillGitSource = skill.GitSource
+
+// resolveSkillVolumes resolves SkillCard and SkillCollection refs into staged
+// pod sources. Each source is mounted read-only at /opt/skills-src/{name}; the
+// loader assembles /opt/skills/{name}/SKILL.md from them.
+//
+// Sources are staged rather than mounted at their final path because one image
+// may carry several skills, and because a skill's directory is decided by its
+// own frontmatter name rather than by the SkillCard it arrived on.
 func (r *AgentRunReconciler) resolveSkillVolumes(
 	ctx context.Context,
+	run *konveyoriov1alpha1.AgentRun,
 	agent *konveyoriov1alpha1.Agent,
-	namespace string,
-) ([]corev1.Volume, []corev1.VolumeMount, error) {
-	var volumes []corev1.Volume
-	var mounts []corev1.VolumeMount
+) (*skillSources, error) {
+	namespace := run.Namespace
+	out := &skillSources{inline: map[string]string{}}
 	var errs []string
-	seen := make(map[string]bool) // deduplicate by skill name
+	seen := make(map[string]string)     // source name -> what it staged
+	volNames := make(map[string]string) // volume name -> the source that took it
 
-	addSkill := func(name, image string) {
-		if seen[name] {
-			return
+	// claim takes a source name and declares it to the loader. The name is a
+	// staging label only: a genuine collision between the skills themselves is
+	// caught by the loader, the only place that can see the frontmatter names
+	// two sources actually declare.
+	//
+	// The name also becomes a path segment, in the staging mount here and in
+	// the join the loader does on the other side, so it has to be one segment
+	// and not a traversal.
+	//
+	// delivery is what the name resolves to. Reaching one skill twice, directly
+	// and through a collection that carries it, is an ordinary way to pin a
+	// card, so an identical second claim is a no-op; two different deliveries
+	// under one name is a real conflict, because only one can occupy the
+	// staging directory.
+	claim := func(name, delivery, subPath, skillType string, git *skillGitSource) bool {
+		if name == "" || name != path.Base(name) || name == "." || name == ".." {
+			errs = append(errs, fmt.Sprintf(
+				"skill source %q is not a usable directory name; it must be a single path segment", name))
+			return false
 		}
+		// A SkillCard name is already a Kubernetes object name; a collection
+		// entry's is only checked for MinLength. The name becomes a mount path
+		// as well as a directory, and the API server rejects a mountPath
+		// containing ':' with an error that names neither the skill nor the
+		// collection it came from, so say it here instead.
+		if problems := validation.IsDNS1123Subdomain(name); len(problems) > 0 {
+			errs = append(errs, fmt.Sprintf(
+				"skill source %q is not a usable directory name: %s", name, strings.Join(problems, "; ")))
+			return false
+		}
+		if prev, dup := seen[name]; dup {
+			if prev != delivery {
+				errs = append(errs, fmt.Sprintf(
+					"skill source %q is claimed by two different sources", name))
+			}
+			return false
+		}
+		seen[name] = delivery
+		out.declared = append(out.declared, skillSource{
+			Name:    name,
+			SubPath: subPath,
+			Type:    skillType,
+			Git:     git,
+		})
+		return true
+	}
+
+	// stage adds the read-only mount a delivered source needs. Git sources
+	// skip it: the loader clones into its own scratch space.
+	stage := func(name string) string {
+		// Two source names can sanitize to one volume name, and a pod with two
+		// volumes of the same name is rejected by the API server with an error
+		// that names neither skill.
+		volName := sanitizeVolumeName("skill-" + name)
+		if prev, taken := volNames[volName]; taken {
+			errs = append(errs, fmt.Sprintf(
+				"skill sources %q and %q both need the pod volume %q; rename one", prev, name, volName))
+			return volName
+		}
+		volNames[volName] = name
+		out.mounts = append(out.mounts, corev1.VolumeMount{
+			Name:      volName,
+			MountPath: skillsSrcDir + "/" + name,
+			ReadOnly:  true,
+		})
+		return volName
+	}
+
+	addImage := func(name, subPath, skillType, image string) {
 		if image == "" {
 			errs = append(errs, fmt.Sprintf("skill %q has no resolved image", name))
 			return
 		}
-		seen[name] = true
-		volName := sanitizeVolumeName("skill-" + name)
-		volumes = append(volumes, corev1.Volume{
-			Name: volName,
+		if !claim(name, fmt.Sprintf("image:%s:%s:%s", image, subPath, defaultedSkillType(skillType)),
+			subPath, skillType, nil) {
+			return
+		}
+		out.volumes = append(out.volumes, corev1.Volume{
+			Name:         stage(name),
+			VolumeSource: corev1.VolumeSource{Image: &corev1.ImageVolumeSource{Reference: image}},
+		})
+	}
+
+	addInline := func(name, skillType, content string) {
+		// Inline content is one SKILL.md, so there is nothing to select into.
+		if !claim(name, fmt.Sprintf("inline:%s:%s", defaultedSkillType(skillType), content),
+			"", skillType, nil) {
+			return
+		}
+		out.inline[name] = content
+		out.volumes = append(out.volumes, corev1.Volume{
+			Name: stage(name),
 			VolumeSource: corev1.VolumeSource{
-				Image: &corev1.ImageVolumeSource{
-					Reference: image,
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: inlineSkillConfigMapName(run.Name, name),
+					},
 				},
 			},
 		})
-		mounts = append(mounts, corev1.VolumeMount{
-			Name:      volName,
-			MountPath: "/opt/skills/" + name,
-			ReadOnly:  true,
-		})
+	}
+
+	addGit := func(name, subPath, skillType string, git skillGitSource) {
+		claim(name, fmt.Sprintf("git:%s:%s:%s:%s", git.URL, git.Ref, subPath, defaultedSkillType(skillType)),
+			subPath, skillType, &git)
+	}
+
+	// addCard dispatches on which of the three sources a SkillCard declares.
+	// The CRD guarantees exactly one is set. A card is one skill, so its
+	// subPath and type travel with it whichever source it came from.
+	addCard := func(name string, sc *konveyoriov1alpha1.SkillCard) {
+		skillType := string(sc.Spec.Type)
+		switch {
+		case sc.Spec.Inline != "":
+			addInline(name, skillType, sc.Spec.Inline)
+		case sc.Spec.Source != "":
+			addGit(name, sc.Spec.SubPath, skillType, skillGitSource{
+				URL: sc.Spec.Source,
+				Ref: sc.Spec.Ref,
+			})
+		default:
+			addImage(name, sc.Spec.SubPath, skillType, sc.Status.ResolvedImage)
+		}
 	}
 
 	// Resolve direct SkillCard refs.
@@ -626,7 +840,7 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 			errs = append(errs, fmt.Sprintf("SkillCard %q: %v", ref.Ref, err))
 			continue
 		}
-		addSkill(sc.Name, sc.Status.ResolvedImage)
+		addCard(sc.Name, &sc)
 	}
 
 	// Resolve SkillCollection refs.
@@ -636,6 +850,28 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 			errs = append(errs, fmt.Sprintf("SkillCollection %q: %v", ref.Ref, err))
 			continue
 		}
+
+		// An image collection has no spec.skills: the enumeration Job wrote a
+		// SkillCard per skill in the image and status.resolvedSkills names
+		// them. Referencing those cards is what makes pointing a collection at
+		// an image reach an agent at all.
+		if scol.Spec.Image != "" {
+			if len(scol.Status.ResolvedSkills) == 0 {
+				errs = append(errs, fmt.Sprintf(
+					"SkillCollection %q has not finished enumerating %s", ref.Ref, scol.Spec.Image))
+			}
+			for _, cardName := range scol.Status.ResolvedSkills {
+				var sc konveyoriov1alpha1.SkillCard
+				if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: cardName}, &sc); err != nil {
+					errs = append(errs, fmt.Sprintf("SkillCard %q (enumerated from collection %q): %v",
+						cardName, ref.Ref, err))
+					continue
+				}
+				addCard(sc.Name, &sc)
+			}
+			continue
+		}
+
 		for _, skillRef := range scol.Spec.Skills {
 			switch {
 			case skillRef.SkillCardRef != "":
@@ -645,18 +881,126 @@ func (r *AgentRunReconciler) resolveSkillVolumes(
 						skillRef.SkillCardRef, ref.Ref, err))
 					continue
 				}
-				addSkill(skillRef.Name, sc.Status.ResolvedImage)
+				// Staged under the card's own name, the same name the direct
+				// ref path uses, so a card reached both ways is one source
+				// rather than two staging directories holding one skill --
+				// which the loader would reject as a duplicate skill name.
+				// A referenced card carries its own type; the entry's is
+				// ignored, as the CRD says.
+				addCard(sc.Name, &sc)
 			case skillRef.Image != "":
-				addSkill(skillRef.Name, skillRef.Image)
+				addImage(skillRef.Name, skillRef.SubPath, string(skillRef.Type), skillRef.Image)
+			case skillRef.Source != "":
+				addGit(skillRef.Name, skillRef.SubPath, string(skillRef.Type), skillGitSource{
+					URL: skillRef.Source,
+					Ref: skillRef.Ref,
+				})
+			default:
+				// The CRD requires exactly one of the three to be present, and
+				// a present-but-empty string satisfies it. Falling through
+				// silently would hand the agent a pod missing a skill it was
+				// told it has, with nothing anywhere saying so.
+				errs = append(errs, fmt.Sprintf(
+					"skill %q in collection %q has no source configured", skillRef.Name, ref.Ref))
 			}
 		}
 	}
 
 	if len(errs) > 0 {
-		return nil, nil, fmt.Errorf("skill resolution failed: %s", strings.Join(errs, "; "))
+		return nil, fmt.Errorf("skill resolution failed: %s", strings.Join(errs, "; "))
 	}
+	return out, nil
+}
 
-	return volumes, mounts, nil
+// defaultedSkillType fills in the load policy the SkillCard CRD defaults and a
+// SkillCollection entry does not.
+//
+// Only for comparing two deliveries, never for what is declared to the loader:
+// an unset type is left unset there so the loader applies the default in one
+// place. But one skill reached both as a card and as a collection entry naming
+// the same image arrives once as "skill" and once as "", and claim would
+// otherwise read that as two sources fighting over one staging directory and
+// fail the run.
+func defaultedSkillType(skillType string) string {
+	if skillType == "" {
+		return string(konveyoriov1alpha1.SkillCardTypeSkill)
+	}
+	return skillType
+}
+
+// inlineSkillConfigMapName names the ConfigMap holding an inline skill's
+// markdown.
+//
+// Scoped by AgentRun as well as SkillCard: the ConfigMap is owned by the run
+// that mounts it, so two runs sharing one inline SkillCard must not share one
+// ConfigMap. If they did, the second run would rewrite the owner reference and
+// deleting it would garbage collect the ConfigMap out from under the first.
+func inlineSkillConfigMapName(runName, skillCardName string) string {
+	return sanitizeVolumeName(runName + "-skill-" + skillCardName)
+}
+
+// createInlineSkillConfigMaps materializes inline SkillCards. Inline content is
+// already bytes in etcd, so there is nothing to build — it just needs a shape
+// the kubelet can mount.
+func (r *AgentRunReconciler) createInlineSkillConfigMaps(
+	ctx context.Context,
+	run *konveyoriov1alpha1.AgentRun,
+	inline map[string]string,
+) error {
+	for name, content := range inline {
+		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name:      inlineSkillConfigMapName(run.Name, name),
+			Namespace: run.Namespace,
+		}}
+		if _, err := ctrl.CreateOrUpdate(ctx, r.Client, cm, func() error {
+			cm.Labels = map[string]string{
+				labelManagedBy: managedByLabel,
+				labelAgentRun:  run.Name,
+			}
+			// A ConfigMap key cannot contain a path separator, so an inline
+			// skill is a single SKILL.md and cannot ship supporting files.
+			// Anything needing references/ has to be an image or a git source.
+			cm.Data = map[string]string{skillFileKey: content}
+			// Owned by the run, so it is collected with it.
+			return ctrl.SetControllerReference(run, cm, r.Scheme)
+		}); err != nil {
+			return fmt.Errorf("writing ConfigMap for inline skill %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// skillLoaderContainer builds the init container that assembles and validates
+// the skills root. It always runs, even with no skills, so there is one pod
+// shape and one place that fails a run whose skills are unusable.
+//
+// It runs the controller's own image rather than the agent's, so an agent
+// image is not required to carry our binary and the source list the controller
+// writes is always read by a loader of the same version. Command names the
+// binary rather than trusting an ENTRYPOINT, and both directories are explicit
+// because this container does not inherit the env their defaults come from.
+func skillLoaderContainer(image string, sources *skillSources, mounts []corev1.VolumeMount) corev1.Container {
+	c := corev1.Container{
+		Name:    skillLoaderContainerName,
+		Image:   image,
+		Command: []string{loaderBinary},
+		// The loader writes the one line that matters to stderr. This lifts it
+		// into the pod's status, so `kubectl describe pod` says which skill was
+		// wrong without needing log access to a container that already exited.
+		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
+		Args: []string{
+			"load",
+			"--src-dir", skillsSrcDir,
+			"--dest-dir", skillsDir,
+		},
+		VolumeMounts: mounts,
+	}
+	if len(sources.declared) > 0 {
+		// Marshaling a slice of fixed structs cannot fail.
+		encoded, _ := json.Marshal(sources.declared)
+		c.Env = append(c.Env, corev1.EnvVar{Name: skillSourcesEnv, Value: string(encoded)})
+	}
+	return c
 }
 
 // updatePhaseFromSandbox updates the AgentRun phase and ACPReady condition
@@ -920,15 +1264,30 @@ var volumeNameRegex = regexp.MustCompile(`[^a-z0-9-]`)
 
 // sanitizeVolumeName converts a name to a valid Kubernetes volume name
 // (RFC 1123: lowercase alphanumeric + hyphens, max 63 chars).
+//
+// The result names pod volumes, ConfigMaps and enumeration Jobs, so it has to
+// be injective: rewriting is what makes two inputs one name, and a collision
+// there silently makes two things the same object rather than failing. A name
+// that already satisfies the rules is returned untouched; anything the rewrite
+// touched carries a hash of what it started as. Dots are the case that bites,
+// since they are legal in an object name and the regex collapses them to
+// hyphens, so "my.collection" and "my-collection" would otherwise meet.
 func sanitizeVolumeName(name string) string {
-	name = strings.ToLower(name)
-	name = volumeNameRegex.ReplaceAllString(name, "-")
-	// Trim leading/trailing hyphens.
-	name = strings.Trim(name, "-")
-	if len(name) > 63 {
-		// Truncate and append a short hash to avoid collisions.
-		hash := sha256.Sum256([]byte(name))
-		name = name[:54] + "-" + hex.EncodeToString(hash[:4])
+	sanitized := strings.Trim(volumeNameRegex.ReplaceAllString(strings.ToLower(name), "-"), "-")
+	if sanitized == name && len(name) <= 63 {
+		return name
 	}
-	return name
+	suffix := "-" + hex.EncodeToString(sha256Prefix(name))
+	if sanitized == "" {
+		sanitized = "x"
+	}
+	if len(sanitized)+len(suffix) > 63 {
+		sanitized = strings.TrimRight(sanitized[:63-len(suffix)], "-")
+	}
+	return sanitized + suffix
+}
+
+func sha256Prefix(s string) []byte {
+	sum := sha256.Sum256([]byte(s))
+	return sum[:4]
 }

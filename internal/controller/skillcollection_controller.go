@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,11 +40,29 @@ import (
 type SkillCollectionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	// EnumerationImage runs `skill-loader materialize` when a collection names
+	// an image source. That binary ships only in the controller's own image,
+	// so this is normally SKILL_LOADER_IMAGE. There is no default: an image
+	// without it produces a pod that cannot exec.
+	EnumerationImage string
+
+	// EnumerationServiceAccount is the identity the enumeration Job runs as.
+	// It writes SkillCards, so it needs more than the controller's own Job
+	// permissions; see the trust boundary in skillcollection_enumerate.go.
+	EnumerationServiceAccount string
 }
 
 // +kubebuilder:rbac:groups=konveyor.io,resources=skillcollections,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=konveyor.io,resources=skillcollections/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=konveyor.io,resources=skillcollections/finalizers,verbs=update
+// +kubebuilder:rbac:groups=konveyor.io,resources=skillcards,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;delete
+// The enumeration Job runs in the collection's namespace and needs an identity
+// there. Kubernetes forbids granting what the granter lacks, so the Role this
+// creates can only ever carry the SkillCard permissions above.
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch
 
 // Reconcile handles SkillCollection reconciliation.
 //
@@ -66,6 +85,23 @@ func (r *SkillCollectionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	original := collection.DeepCopy()
 	collection.Status.ObservedGeneration = collection.Generation
 
+	// An image source means "every skill in here". The controller enumerates
+	// it with a Job and owns a SkillCard per skill it finds, so a user points
+	// at a source once rather than writing a card each.
+	if collection.Spec.Image != "" {
+		return r.reconcileImageSource(ctx, &collection, original)
+	}
+
+	// A collection that no longer names an image keeps neither the cards the
+	// enumeration wrote nor a status naming them. Nothing else prunes them --
+	// the Job that would is only created on the image path -- so they would
+	// otherwise stay referenceable for the collection's whole life, pointing at
+	// an image it has stopped pointing at.
+	if err := r.dropEnumeratedSkillCards(ctx, &collection); err != nil {
+		logger.Error(err, "Failed to drop cards from a previous image source")
+		return ctrl.Result{}, err
+	}
+
 	totalSkills := len(collection.Spec.Skills)
 	readyCount := 0
 	var notReadyReasons []string
@@ -85,8 +121,12 @@ func (r *SkillCollectionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			// as an ImageVolume by the AgentRun controller.
 			readyCount++
 		case skillRef.Source != "":
-			notReadyReasons = append(notReadyReasons,
-				fmt.Sprintf("skill %q: git source resolution not yet implemented (Phase 3)", skillRef.Name))
+			// Nothing to resolve, the same as for a SkillCard with a git
+			// source: the skill loader clones it at pod start, and whether the
+			// repository holds a usable skill is settled there. Reporting this
+			// as unresolved would leave the collection permanently not-Ready
+			// for a source the AgentRun controller already stages.
+			readyCount++
 		default:
 			notReadyReasons = append(notReadyReasons,
 				fmt.Sprintf("skill %q: no source configured", skillRef.Name))
@@ -106,7 +146,7 @@ func (r *SkillCollectionReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			Type:               ConditionTypeReady,
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: collection.Generation,
-			Reason:             "AllSkillsResolved",
+			Reason:             reasonAllSkillsResolved,
 			Message:            fmt.Sprintf("All %d skills resolved", totalSkills),
 		})
 	} else {
@@ -177,6 +217,11 @@ func (r *SkillCollectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&konveyoriov1alpha1.SkillCard{},
 			handler.EnqueueRequestsFromMapFunc(r.findCollectionsForSkillCard),
 		).
+		// Enumeration Jobs and the SkillCards they produce are both owned by
+		// the collection, so completion brings the reconcile back without
+		// polling.
+		Owns(&batchv1.Job{}).
+		Owns(&konveyoriov1alpha1.SkillCard{}).
 		Named("skillcollection").
 		Complete(r)
 }

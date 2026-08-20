@@ -9,6 +9,11 @@ resources:
 - role_binding.yaml
 - leader_election_role.yaml
 - leader_election_role_binding.yaml
+# The skill enumeration Job's identity is not shipped here. It has to exist in
+# the collection's namespace rather than the operator's, so the controller
+# creates it where it is needed (internal/controller/skillcollection_rbac.go);
+# a copy here would carry this kustomization's name prefix and namespace and so
+# could never be the object the Job names.
 # The following RBAC configurations are used to protect
 # the metrics endpoint with authn/authz. These configurations
 # ensure that only authorized users and service accounts

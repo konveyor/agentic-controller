@@ -80,7 +80,13 @@ kubectl wait deployment/agent-sandbox-controller \
 echo ""
 echo "=== Installing LLEmulator (mock LLM server) ==="
 LLEMULATOR_DIR=$(mktemp -d)
-git clone --depth 1 https://github.com/fabianvf/llemulator.git "${LLEMULATOR_DIR}" 2>&1
+# Pinned rather than tracking main, so an unrelated emulator change cannot
+# break this repo's CI. Bump it deliberately.
+LLEMULATOR_REF="${LLEMULATOR_REF:-8590822766430d999a48020570e312f415d4c7da}"
+git init -q "${LLEMULATOR_DIR}"
+git -C "${LLEMULATOR_DIR}" remote add origin https://github.com/fabianvf/llemulator.git
+git -C "${LLEMULATOR_DIR}" fetch -q --depth 1 origin "${LLEMULATOR_REF}"
+git -C "${LLEMULATOR_DIR}" checkout -q FETCH_HEAD
 
 # Build the llemulator image and load into Kind.
 LLEM_IMG="docker.io/library/openai-emulator:e2e"

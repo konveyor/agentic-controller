@@ -7,9 +7,15 @@
 # --- Build stage ---
 FROM golang:1.26 AS builder
 
-WORKDIR /src
+# The harness replaces github.com/konveyor/agentic-controller/api with ../api,
+# so that module has to be in the image at the path the replace names, laid out
+# the same way it is in the repository. Manifests first, so the download layer
+# still caches on go.mod alone.
+WORKDIR /src/harness
+COPY api/go.mod api/go.sum /src/api/
 COPY harness/go.mod harness/go.sum ./
 RUN go mod download
+COPY api/ /src/api/
 COPY harness/cmd/ cmd/
 COPY harness/internal/ internal/
 RUN CGO_ENABLED=0 go build -o /migration-harness ./cmd/migration-harness/

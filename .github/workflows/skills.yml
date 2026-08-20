@@ -12,7 +12,7 @@ jobs:
   build-and-push:
     permissions:
       contents: read
-    name: Build and push skill images
+    name: Build and push the skill bundle
     runs-on: ubuntu-latest
     steps:
       - name: Clone the code
@@ -25,7 +25,13 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build skills
+      # Frontmatter is the only skill metadata, and it is what the agent
+      # runtime uses to decide whether to read a skill at all. Catch an
+      # unusable one here rather than at pod init.
+      - name: Validate skill frontmatter
+        run: make skill-validate
+
+      - name: Build skill bundle
         run: make skill-build
 
       - name: Log in to Quay.io
@@ -36,6 +42,6 @@ jobs:
           username: ${{ vars.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_PASSWORD }}
 
-      - name: Push skills
+      - name: Push skill bundle
         if: github.event_name != 'pull_request'
         run: make skill-push

@@ -99,25 +99,21 @@ No runtime feature guarantees content is in context, so this stays the
 harness's job.
 
 Rules stay mounted at `/opt/skills/<name>` with everything else. The
-controller passes their names to the harness in `KONVEYOR_RULES`, and the
-harness concatenates those skills' `SKILL.md` into the prompt, after its
-own staging rules and before the stage task.
-
-`KONVEYOR_RULES` is a comma-separated list of SkillCard names, matching
-the mount directory under `/opt/skills`. Names are Kubernetes object
-names, so no escaping is needed. Unset and empty both mean there are no
-rules — the harness injects nothing.
+skill loader records which of them are rules, and the harness
+concatenates those skills' `SKILL.md` into the prompt, after its own
+staging rules and before the stage task.
 
 Rules are therefore both injected and discoverable: unconditionally in
 the prompt, and still under the linked root, so a rule that ships
 supporting files keeps them.
 
-Because unset means no rules, the two changes have a required order: the
-controller must set `KONVEYOR_RULES` before or in the same release as the
-harness stops concatenating everything. A harness that ships first reads
-an unset variable, injects nothing, and every rule silently stops
-reaching the prompt. That is the failure this ADR exists to prevent, so
-it is a sequencing constraint rather than a preference.
+> **Revised during implementation, 2026-08-17.** This section originally
+> had the controller set `KONVEYOR_RULES` from each card's `spec.type`.
+> A SkillCard name is not a mount directory, though: one image can carry
+> several skills, each mounted at its frontmatter name, which the
+> controller never reads. The loader does read it, so it records the
+> rules in `/opt/skills/.konveyor-skills.json` and the harness reads that.
+> Load policy still comes from `spec.type`. See ADR 0015 §8.
 
 Rules are then the only always-loaded content, which is the quantity
 `Gateway.ContextWindow`'s doc comment describes. This ADR does not
@@ -163,7 +159,7 @@ mount rather than through discovery.
 `HARNESS_ACP_TEE=off` precedent from ADR 0008. The default is native. The
 switch is self-contained because the mount layout does not change between
 modes: `inject` concatenates everything at `/opt/skills`, as today, and
-ignores `KONVEYOR_RULES`.
+ignores the loader's rules list.
 
 ## What changes
 
@@ -174,12 +170,14 @@ ignores `KONVEYOR_RULES`.
   gates the `.gitignore` write and the grounding-data fetch. The `#82`
   no-skills fallback carrying the only instruction to commit becomes
   unconditional.
-- Harness. Inject the skills named in `KONVEYOR_RULES` as a rules layer,
-  ordered after the staging rules and before the stage task.
-- Controller. Set `KONVEYOR_RULES` from the `type` of each resolved
-  SkillCard, comma-separated. `resolveSkillVolumes` ignores `spec.type`
-  today. This has to land before or with the harness change above —
-  unset means no rules, so the reverse order drops every rule silently.
+- Harness. Inject the skills the loader's manifest lists as rules as a
+  rules layer, ordered after the staging rules and before the stage task.
+  Per the revision above, the list comes from the manifest the loader
+  wrote rather than from a controller-set variable, so there is no
+  sequencing constraint between the two changes.
+- Controller. Carry each SkillCard's `spec.type` through to the loader,
+  which is what decides a skill's load policy. `resolveSkillVolumes`
+  ignored `spec.type` before this.
 - Harness. After cloning, log any skill name present in both the clone's
   discovery roots (`.agents/skills`, `.goose/skills`, `.claude/skills`)
   and `/opt/skills`. The repo copy wins and that is not going to change,

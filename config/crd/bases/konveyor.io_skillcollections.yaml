@@ -50,10 +50,24 @@ spec:
           metadata:
             type: object
           spec:
-            description: SkillCollectionSpec defines the desired state of a SkillCollection.
+            description: |-
+              SkillCollectionSpec defines the desired state of a SkillCollection.
+              Set either Image or Skills.
             properties:
+              image:
+                description: |-
+                  Image is an OCI image holding one or more skills. The controller
+                  enumerates it with a short-lived Job and creates a SkillCard per skill
+                  it finds, owned by this collection, so a user points at a source once
+                  rather than writing a card per skill.
+                type: string
               skills:
-                description: Skills is the list of skills in this collection.
+                description: |-
+                  Skills is an explicit list, for grouping skills that already exist.
+
+                  MinItems, because the rule above is satisfied by a list that is present
+                  and empty: without it `skills: []` is admitted and the collection is
+                  simply never Ready, where the field used to be rejected outright.
                 items:
                   description: |-
                     SkillCollectionSkillRef references a skill by SkillCard CR name,
@@ -69,12 +83,33 @@ spec:
                         collection.
                       minLength: 1
                       type: string
+                    ref:
+                      description: |-
+                        Ref is the branch, tag or commit to check out from Source. Empty
+                        clones the default branch, leaving the run unreproducible.
+                        Only meaningful with Source.
+                      type: string
                     skillCardRef:
                       description: SkillCardRef is the name of a SkillCard CR in the
                         same namespace.
                       type: string
                     source:
-                      description: Source is a git URL pointing to a skill directory.
+                      description: Source is a git URL. The skill loader clones it
+                        at pod start.
+                      type: string
+                    subPath:
+                      description: |-
+                        SubPath selects one skill from a source holding several, naming its
+                        directory within the image or repository.
+                        Only meaningful with Image or Source.
+                      type: string
+                    type:
+                      description: |-
+                        Type is the load policy for this entry's skill. Defaults to "skill".
+                        Ignored when SkillCardRef is set, since the card carries its own.
+                      enum:
+                      - skill
+                      - rule
                       type: string
                   required:
                   - name
@@ -89,12 +124,22 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              type:
+                description: |-
+                  Type is the load policy applied to every skill enumerated from Image.
+                  Defaults to "skill". Per-skill policy within one image is not yet
+                  expressible; see ADR 0015.
+                enum:
+                - skill
+                - rule
+                type: string
               version:
                 description: Version is the semantic version of the collection.
                 type: string
-            required:
-            - skills
             type: object
+            x-kubernetes-validations:
+            - message: set either image or skills, not both
+              rule: has(self.image) != has(self.skills)
           status:
             description: SkillCollectionStatus defines the observed state of a SkillCollection.
             properties:
@@ -165,6 +210,14 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
+              resolvedSkills:
+                description: |-
+                  ResolvedSkills names the SkillCards this collection owns, whether
+                  enumerated from Image or listed explicitly.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
             type: object
         type: object
     served: true

@@ -1,0 +1,25 @@
+kind: breaking
+
+description: >
+  Skills are packaged as ordinary OCI images built from a Containerfile
+  instead of via skillctl, and one image may carry a single skill or a
+  bundle of them. A skill-loader init container assembles /opt/skills from
+  image, inline and git sources alike, validates the frontmatter of every
+  skill it finds, and fails the pod with the reason rather than starting an
+  agent whose skills are missing. skill.yaml is removed; SKILL.md
+  frontmatter is the only skill metadata.
+
+  Rules start working. A SkillCard with type: rule has had no effect until
+  now; its content is injected into every prompt of every Agent that
+  references it from this release on. Existing cards typed as rules change
+  agent behaviour on upgrade without being edited, so audit them before
+  upgrading with `kubectl get skillcards -A -o wide`, which prints the type.
+
+  The skills in this repo now publish as one bundle image,
+  quay.io/konveyor/skills:latest, holding plan, execute, verify and
+  javaee-to-quarkus: a SkillCard naming one of those per-skill tags should
+  point at :latest and set subPath. The examples under skills/examples are
+  deliberately not in the bundle, so a card on
+  quay.io/konveyor/skills:maven-migration has no subPath to move to and
+  needs its own image; skills/examples/ejb-to-cdi/Containerfile is the
+  worked example.

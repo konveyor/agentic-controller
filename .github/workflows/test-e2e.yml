@@ -23,9 +23,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # kind v0.27's default node image is v1.32, where ImageVolume is alpha and
+      # off, so a skill source mounts empty. README requires 1.33+ for exactly
+      # this reason. v0.32 defaults to a node image well past that.
       - name: Install kind
         env:
-          KIND_VERSION: v0.27.0
+          KIND_VERSION: v0.32.0
         run: |
           curl -fLo ./kind --retry 5 --retry-delay 10 --retry-all-errors \
             "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-$(go env GOARCH)"
@@ -39,3 +42,57 @@ jobs:
 
       - name: Running e2e
         run: make e2e
+
+  # Its own job, because it builds the agent image and drives the real harness,
+  # so its cost and its trigger can change without touching the job above.
+  rule:
+    permissions:
+      contents: read
+    name: A rule reaches the model
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+
+      # The agent image, the controller, kind's node image and Hub together do
+      # not fit alongside the runner's preinstalled toolchains.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+
+      - name: Install kind
+        env:
+          KIND_VERSION: v0.32.0
+        run: |
+          curl -fLo ./kind --retry 5 --retry-delay 10 --retry-all-errors \
+            "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-$(go env GOARCH)"
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Install Helm
+        run: |
+          curl -fL --retry 5 --retry-delay 10 --retry-all-errors \
+            https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Set up the cluster
+        run: make e2e-setup
+
+      # tackle2-operator's own Helm chart, so Hub's deployment, RBAC and CRDs
+      # stay its to define rather than being copied here.
+      - name: Install Konveyor
+        run: make konveyor-install
+
+      # Detects the container tool the same way the setup scripts do, so the
+      # image is loaded into the Kind provider that actually holds the cluster.
+      - name: Build and load the agent image
+        run: make agent-base-load
+
+      - name: A rule reaches the model
+        run: make e2e-rule

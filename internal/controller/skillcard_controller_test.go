@@ -73,7 +73,9 @@ var _ = Describe("SkillCard Controller", func() {
 	Context("when reconciling a SkillCard with a source URL", func() {
 		const name = "sc-ctrl-source"
 
-		It("should set Ready=False with SourceNotSupported", func() {
+		// Nothing is built: the loader clones the repository at pod start, so
+		// there is no image to resolve.
+		It("should be Ready with no resolved image", func() {
 			sc := &konveyoriov1alpha1.SkillCard{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
@@ -93,8 +95,8 @@ var _ = Describe("SkillCard Controller", func() {
 
 				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
 				g.Expect(readyCond).NotTo(BeNil())
-				g.Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
-				g.Expect(readyCond.Reason).To(Equal("SourceNotSupported"))
+				g.Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(readyCond.Reason).To(Equal("SourceAccepted"))
 			}, timeout, interval).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, sc)).To(Succeed())
@@ -102,9 +104,42 @@ var _ = Describe("SkillCard Controller", func() {
 	})
 
 	Context("when reconciling a SkillCard with inline content", func() {
-		const name = "sc-ctrl-inline"
+		// Inline is the one source the controller can validate without
+		// network, because the content is already in the CR.
+		It("should be Ready when the content carries valid frontmatter", func() {
+			const name = "sc-ctrl-inline"
+			sc := &konveyoriov1alpha1.SkillCard{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: testNamespace,
+				},
+				Spec: konveyoriov1alpha1.SkillCardSpec{
+					Inline: "---\nname: no-javax\ndescription: never leave javax imports\n---\n\nDo not use javax packages.\n",
+					Type:   konveyoriov1alpha1.SkillCardTypeRule,
+				},
+			}
+			Expect(k8sClient.Create(ctx, sc)).To(Succeed())
 
-		It("should set Ready=False with InlineNotSupported", func() {
+			key := types.NamespacedName{Name: name, Namespace: testNamespace}
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.SkillCard
+				g.Expect(k8sClient.Get(ctx, key, &fetched)).To(Succeed())
+				// Delivered as a ConfigMap, so there is no image.
+				g.Expect(fetched.Status.ResolvedImage).To(BeEmpty())
+
+				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
+				g.Expect(readyCond).NotTo(BeNil())
+				g.Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(readyCond.Reason).To(Equal("InlineAccepted"))
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, sc)).To(Succeed())
+		})
+
+		// Without frontmatter the skill is invisible to the agent runtime. It
+		// must not report Ready while contributing nothing.
+		It("should set Ready=False when the content has no frontmatter", func() {
+			const name = "sc-ctrl-inline-invalid"
 			sc := &konveyoriov1alpha1.SkillCard{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
@@ -120,12 +155,12 @@ var _ = Describe("SkillCard Controller", func() {
 			Eventually(func(g Gomega) {
 				var fetched konveyoriov1alpha1.SkillCard
 				g.Expect(k8sClient.Get(ctx, key, &fetched)).To(Succeed())
-				g.Expect(fetched.Status.ResolvedImage).To(BeEmpty())
 
 				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
 				g.Expect(readyCond).NotTo(BeNil())
 				g.Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
-				g.Expect(readyCond.Reason).To(Equal("InlineNotSupported"))
+				g.Expect(readyCond.Reason).To(Equal("InvalidSkillContent"))
+				g.Expect(readyCond.Message).To(ContainSubstring("frontmatter"))
 			}, timeout, interval).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, sc)).To(Succeed())

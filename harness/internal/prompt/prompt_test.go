@@ -87,3 +87,56 @@ func tail(s string) string {
 	}
 	return s[len(s)-20:]
 }
+
+// A rule's content has to actually reach the prompt: that is the whole point
+// of the type. If it does not, the rule is silently not applied (ADR 0014).
+func TestBuildIncludesRuleBodies(t *testing.T) {
+	got := Build(Layers{
+		AgentPrompt: "agent",
+		Rules: []Rule{
+			{Name: "house-style", Body: "Never edit generated files.\n"},
+			{Name: "commit-policy", Body: "One commit per stage."},
+		},
+		StageTask: "do the thing",
+	})
+
+	for _, want := range []string{
+		"house-style", "Never edit generated files.",
+		"commit-policy", "One commit per stage.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt is missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// Order carries meaning here. The harness's own environment rules bind first,
+// then the skills' rules, and only then anything task-specific -- so a later
+// layer cannot read as relaxing an earlier one.
+func TestBuildPlacesRulesAfterStagingAndBeforeTask(t *testing.T) {
+	got := Build(Layers{
+		AgentPrompt:   "agent prompt",
+		Rules:         []Rule{{Name: "house-style", Body: "rule body"}},
+		WorkflowGuide: "workflow guide",
+		StageTask:     "stage task",
+	})
+
+	staging := strings.Index(got, "Working Environment")
+	rule := strings.Index(got, "rule body")
+	guide := strings.Index(got, "workflow guide")
+	task := strings.Index(got, "stage task")
+
+	if !(staging < rule && rule < guide && guide < task) {
+		t.Errorf("layers are out of order: staging=%d rule=%d guide=%d task=%d\n%s",
+			staging, rule, guide, task, got)
+	}
+}
+
+// No rules means no empty heading: a run with only on-demand skills should not
+// be told it has rules to follow.
+func TestBuildOmitsTheRulesSectionWhenThereAreNone(t *testing.T) {
+	got := Build(Layers{AgentPrompt: "agent", StageTask: "task"})
+	if strings.Contains(got, "## Rules") {
+		t.Errorf("empty rules section rendered:\n%s", got)
+	}
+}

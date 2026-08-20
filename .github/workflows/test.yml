@@ -28,8 +28,42 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
+      # An overlay that retags the controller without repeating the base's
+      # replacement leaves the loader pointing at a placeholder, which shows up
+      # as ErrImagePull on an init container rather than anything readable.
+      - name: Verify the loader image matches the manager's
+        run: make verify-loader-image
+
       - name: Running Tests
         run: make test
+
+  api-test:
+    permissions:
+      contents: read
+    name: API test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: api/go.mod
+
+      - name: Verify go.mod is tidy
+        working-directory: api
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      # api/skill is the one skill validator the controller, the loader and CI
+      # all call, so a break here breaks every caller at once.
+      - name: Running Tests
+        working-directory: api
+        run: go test ./...
 
   harness-test:
     permissions:

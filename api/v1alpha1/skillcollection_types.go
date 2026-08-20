@@ -20,6 +20,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// LabelSkillCollection marks SkillCards a collection generated, so that
+// pruning finds them without guessing from names.
+//
+// It lives here because the enumeration Job writes it and the controller
+// prunes by it. A label the two agreed on only by string equality would drift
+// silently: the List comes back empty and every generated card is orphaned
+// instead of pruned, with nothing to compile against.
+const LabelSkillCollection = "konveyor.io/skillcollection"
+
 // SkillCollectionSkillRef references a skill by SkillCard CR name,
 // OCI image ref, or git source URL. Exactly one of SkillCardRef,
 // Image, or Source must be set.
@@ -37,22 +46,59 @@ type SkillCollectionSkillRef struct {
 	// +optional
 	Image string `json:"image,omitempty"`
 
-	// Source is a git URL pointing to a skill directory.
+	// Source is a git URL. The skill loader clones it at pod start.
 	// +optional
 	Source string `json:"source,omitempty"`
+
+	// Ref is the branch, tag or commit to check out from Source. Empty
+	// clones the default branch, leaving the run unreproducible.
+	// Only meaningful with Source.
+	// +optional
+	Ref string `json:"ref,omitempty"`
+
+	// SubPath selects one skill from a source holding several, naming its
+	// directory within the image or repository.
+	// Only meaningful with Image or Source.
+	// +optional
+	SubPath string `json:"subPath,omitempty"`
+
+	// Type is the load policy for this entry's skill. Defaults to "skill".
+	// Ignored when SkillCardRef is set, since the card carries its own.
+	// +optional
+	Type SkillCardType `json:"type,omitempty"`
 }
 
 // SkillCollectionSpec defines the desired state of a SkillCollection.
+// Set either Image or Skills.
+// +kubebuilder:validation:XValidation:rule="has(self.image) != has(self.skills)",message="set either image or skills, not both"
 type SkillCollectionSpec struct {
 	// Version is the semantic version of the collection.
 	// +optional
 	Version string `json:"version,omitempty"`
 
-	// Skills is the list of skills in this collection.
+	// Image is an OCI image holding one or more skills. The controller
+	// enumerates it with a short-lived Job and creates a SkillCard per skill
+	// it finds, owned by this collection, so a user points at a source once
+	// rather than writing a card per skill.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// Type is the load policy applied to every skill enumerated from Image.
+	// Defaults to "skill". Per-skill policy within one image is not yet
+	// expressible; see ADR 0015.
+	// +optional
+	Type SkillCardType `json:"type,omitempty"`
+
+	// Skills is an explicit list, for grouping skills that already exist.
+	//
+	// MinItems, because the rule above is satisfied by a list that is present
+	// and empty: without it `skills: []` is admitted and the collection is
+	// simply never Ready, where the field used to be rejected outright.
+	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +listType=map
 	// +listMapKey=name
-	Skills []SkillCollectionSkillRef `json:"skills"`
+	Skills []SkillCollectionSkillRef `json:"skills,omitempty"`
 }
 
 // SkillCollectionStatus defines the observed state of a SkillCollection.
@@ -67,6 +113,12 @@ type SkillCollectionStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// ResolvedSkills names the SkillCards this collection owns, whether
+	// enumerated from Image or listed explicitly.
+	// +optional
+	// +listType=set
+	ResolvedSkills []string `json:"resolvedSkills,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -20,8 +20,8 @@ CI pipeline) resolves application metadata before creating the CR.
 
 | CRD | Purpose |
 |-----|---------|
-| **SkillCard** | Individual skill or rule. Resolves to an OCI artifact mounted at `/opt/skills/{name}/`. |
-| **SkillCollection** | Group of skills. References skills by OCI image, git source, or SkillCard CR name. |
+| **SkillCard** | One skill or rule, from an OCI image, a git repository, or inline content. Assembled into `/opt/skills/{name}/` at pod init, where `{name}` is the skill's own frontmatter name. |
+| **SkillCollection** | Group of skills. Points at an OCI image holding several, in which case the controller writes a SkillCard per skill it finds, or references existing SkillCards. |
 | **Gateway** | LLM service endpoint serving one provider/model combination. |
 | **Agent** | Template declaring available skills, gateways, container image, prompt, and typed parameters. |
 | **AgentRun** | Execute a single Agent with specific values. Creates an Agent Sandbox. |
@@ -33,7 +33,8 @@ CI pipeline) resolves application metadata before creating the CR.
 - **Agent Sandbox** is a hard dependency for workload execution
 - **Git credentials** stay in the harness — the agent does not receive
   push credentials
-- **Skills** are OCI artifacts mounted via ImageVolumes (K8s 1.33+)
+- **Skills** are Agent Skills directories, delivered as ordinary OCI images
+  mounted via ImageVolumes (K8s 1.33+), git clones, or inline content
 - **Workspaces** are ephemeral — git is the persistence layer
 - **ACP over HTTP** (via `goose serve`) provides real-time observability
   and human-in-the-loop interaction
@@ -46,10 +47,13 @@ See `docs/adr/` for the full set of architecture decision records.
 ```
 agentic-controller/
   api/v1alpha1/           CRD type definitions (Go structs)
+  api/skill/              Agent Skills frontmatter parsing and validation
   internal/controller/    Controller implementations
-  internal/registry/      OCI registry client
+  internal/skills/        Skill assembly, and SkillCard materialization
+  cmd/skill-loader/       The init container and enumeration Job binary
   docs/adr/               Architecture Decision Records
-  skills/                 Agent skills for contributors
+  harness/                In-pod runner: git lifecycle, prompt assembly, ACP
+  skills/                 Agent skills, both runtime and contributor-facing
   CONTEXT.md              Domain glossary
   AGENTS.md               Agent-facing instructions
 ```
@@ -68,7 +72,7 @@ agentic-controller/
 | [konveyor/tackle2-hub](https://github.com/konveyor/tackle2-hub) | Application inventory, curated REST API for agent resources |
 | [konveyor/tackle2-ui](https://github.com/konveyor/tackle2-ui) | Web UI |
 | [kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) | Sandbox CRDs for agent workloads |
-| [redhat-et/skillimage](https://github.com/redhat-et/skillimage) | OCI skill packaging and distribution |
+| [agentskills.io](https://agentskills.io) | The skill format our skills are written in |
 | [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Secure runtime for autonomous agents |
 
 ## Contributing

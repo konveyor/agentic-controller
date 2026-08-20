@@ -29,5 +29,12 @@ go.work
 # Kubeconfig might contain secrets
 *.kubeconfig
 
+# Compiled binaries built at the repo root by a bare `go build`.
+/manager
+/skill-loader
+
 # Local scratch files
 .scratch/
+
+# Personal maintainer notes, cluster state and run logs
+.dev/

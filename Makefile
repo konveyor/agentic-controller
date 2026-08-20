@@ -78,12 +78,32 @@ harness-test: ## Build, load, and deploy the harness agent in Kind (requires e2e
 e2e-run: ## Run the e2e test (cluster must be set up with e2e-setup).
 	hack/run-e2e.sh
 
+.PHONY: e2e-skills
+e2e-skills: ## Run the skill delivery scenarios (cluster must be set up with e2e-setup).
+	hack/run-e2e-skills.sh
+
+.PHONY: konveyor-install
+konveyor-install: ## Install Konveyor from tackle2-operator's Helm chart (idempotent).
+	hack/install-konveyor.sh
+
+.PHONY: agent-base-load
+agent-base-load: ## Build the agent image and load it into the Kind cluster.
+	hack/load-agent-base.sh
+
+.PHONY: e2e-rule
+e2e-rule: konveyor-install ## Check a rule reaches the model. Needs agent-base built and loaded.
+	hack/run-e2e-rule.sh
+
 .PHONY: e2e
-e2e: e2e-setup e2e-run ## Full e2e: create cluster, deploy, test.
+e2e: e2e-setup e2e-run e2e-skills ## Full e2e: create cluster, deploy, test.
 
 .PHONY: e2e-cleanup
 e2e-cleanup: ## Tear down the Kind cluster used for e2e tests.
 	kind delete cluster --name $(KIND_CLUSTER)
+
+.PHONY: verify-loader-image
+verify-loader-image: kustomize ## Check every overlay keeps SKILL_LOADER_IMAGE equal to the manager's image.
+	KUSTOMIZE="$(KUSTOMIZE)" hack/verify-loader-image.sh
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -206,7 +226,10 @@ agent-images-multiarch-push: agent-images-multiarch-build ## Build and push agen
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+	# The manager refuses to start without this, because the loader init
+	# container is on every AgentRun pod. Running from your host, the value has
+	# to be an image the *cluster* can pull, not one on this machine.
+	SKILL_LOADER_IMAGE="$(IMG)" go run ./cmd/main.go
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -269,35 +292,30 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 ##@ Skills
 
-SKILL_IMAGE ?= quay.io/konveyor/skills
-SKILL_DIRS := $(wildcard skills/examples/*/skill.yaml)
-SKILL_DIRS := $(dir $(SKILL_DIRS))
-SKILLCTL_VERSION ?= v0.7.2
-
-SKILLCTL ?= $(LOCALBIN)/skillctl
-
-.PHONY: skillctl
-skillctl: $(SKILLCTL) ## Download skillctl locally if necessary.
-$(SKILLCTL): $(LOCALBIN)
-	$(call go-install-tool,$(SKILLCTL),github.com/redhat-et/skillimage/cmd/skillctl,$(SKILLCTL_VERSION))
+# Skills are ordinary OCI images: a Containerfile, any builder, the same
+# signing and mirroring pipeline as every other image we ship. This repo's
+# skills travel as one bundle image — the loader detects a bundle by the
+# absence of SKILL.md at the image root.
+SKILL_IMAGE ?= quay.io/konveyor/skills:latest
 
 .PHONY: skill-build
-skill-build: skillctl ## Build all example skills into the local OCI store.
-	@for dir in $(SKILL_DIRS); do \
-		echo "Building skill: $${dir}" ;\
-		"$(SKILLCTL)" build "$${dir}" ;\
-	done
+skill-build: ## Build the skill bundle image.
+	$(CONTAINER_TOOL) build -t $(SKILL_IMAGE) -f skills/Containerfile skills
 
 .PHONY: skill-push
-skill-push: skill-build ## Build and push all example skills to the registry.
-	@for dir in $(SKILL_DIRS); do \
-		name=$$(basename "$${dir}") ;\
-		local_ref=$$($(SKILLCTL) list | grep -w "$${name}" | head -1 | awk '{print $$1 ":" $$2}') ;\
-		if [ -z "$${local_ref}" ]; then echo "ERROR: skill '$${name}' not found in local store" >&2; exit 1; fi ;\
-		echo "Tagging $${local_ref} -> $(SKILL_IMAGE):$${name}" ;\
-		"$(SKILLCTL)" tag "$${local_ref}" "$(SKILL_IMAGE):$${name}" ;\
-		echo "Pushing $(SKILL_IMAGE):$${name}" ;\
-		"$(SKILLCTL)" push "$(SKILL_IMAGE):$${name}" ;\
+skill-push: skill-build ## Build and push the skill bundle image.
+	$(CONTAINER_TOOL) push $(SKILL_IMAGE)
+
+# A skill is one directory deep, so a directory of directories is not itself a
+# bundle and its contents are not seen. skills/examples/ is therefore named
+# separately rather than being silently skipped.
+SKILL_TREES ?= skills skills/examples
+
+.PHONY: skill-validate
+skill-validate: ## Check every SKILL.md frontmatter parses and is complete.
+	@for tree in $(SKILL_TREES); do \
+		echo "Validating $${tree}" ;\
+		go run ./cmd/skill-loader validate "$${tree}" || exit 1 ;\
 	done
 
 ##@ Changelog

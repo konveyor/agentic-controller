@@ -42,13 +42,28 @@ type SkillCardSpec struct {
 	// +optional
 	Image string `json:"image,omitempty"`
 
-	// Source is a git URL pointing to a skill directory.
-	// The controller clones, builds, and pushes the OCI artifact.
+	// SubPath selects one skill from a source that holds several, naming its
+	// directory within the image or repository. A SkillCard is always one
+	// skill, so a source holding several without a SubPath is an error.
+	// Only meaningful with Image or Source.
+	// +optional
+	SubPath string `json:"subPath,omitempty"`
+
+	// Source is a git URL. The skill loader clones it at pod start; nothing
+	// is built.
 	// +optional
 	Source string `json:"source,omitempty"`
 
-	// Inline is raw markdown content for the skill.
-	// The controller builds and pushes an OCI artifact from this content.
+	// Ref is the branch, tag or commit to check out from Source. Empty
+	// clones the default branch, which makes the run unreproducible, and the
+	// loader warns when it is unset.
+	// Only meaningful with Source.
+	// +optional
+	Ref string `json:"ref,omitempty"`
+
+	// Inline is raw markdown content for the skill, delivered as a ConfigMap.
+	// A ConfigMap key cannot hold a path separator, so an inline skill is a
+	// single SKILL.md and cannot ship supporting files.
 	// +optional
 	Inline string `json:"inline,omitempty"`
 
@@ -64,8 +79,10 @@ type SkillCardSpec struct {
 	// +optional
 	Description string `json:"description,omitempty"`
 
-	// Type indicates whether this is an on-demand skill or an always-loaded rule.
-	// Defaults to "skill".
+	// Type is this skill's load policy. Defaults to "skill".
+	//
+	// It lives here rather than in SKILL.md: the Agent Skills spec's field set
+	// is closed, so declaring it in content would break the format (ADR 0015).
 	// +kubebuilder:default=skill
 	// +optional
 	Type SkillCardType `json:"type,omitempty"`
@@ -83,9 +100,17 @@ type SkillCardStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// ResolvedImage is the OCI image reference for the resolved skill artifact.
-	// Set after successful resolution from any source type.
+	// Only an image source resolves to one; for inline and git it stays empty
+	// because there is no image, so read DeliveryMode rather than inferring
+	// from this being unset.
 	// +optional
 	ResolvedImage string `json:"resolvedImage,omitempty"`
+
+	// DeliveryMode is how this skill reaches the pod, so that "not resolved
+	// yet" is distinguishable from "resolved, just not to an image".
+	// +kubebuilder:validation:Enum=image;inline;source
+	// +optional
+	DeliveryMode string `json:"deliveryMode,omitempty"`
 
 	// Conditions represent the latest available observations of the SkillCard's state.
 	// +optional
