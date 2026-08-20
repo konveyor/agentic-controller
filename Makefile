@@ -82,6 +82,18 @@ e2e-run: ## Run the e2e test (cluster must be set up with e2e-setup).
 e2e-skills: ## Run the skill delivery scenarios (cluster must be set up with e2e-setup).
 	hack/run-e2e-skills.sh
 
+.PHONY: konveyor-install
+konveyor-install: ## Install Konveyor from tackle2-operator's Helm chart (idempotent).
+	hack/install-konveyor.sh
+
+.PHONY: agent-base-load
+agent-base-load: ## Build the agent image and load it into the Kind cluster.
+	hack/load-agent-base.sh
+
+.PHONY: e2e-rule
+e2e-rule: konveyor-install ## Check a rule reaches the model. Needs agent-base built and loaded.
+	hack/run-e2e-rule.sh
+
 .PHONY: e2e
 e2e: e2e-setup e2e-run e2e-skills ## Full e2e: create cluster, deploy, test.
 

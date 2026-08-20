@@ -351,8 +351,11 @@ records what that costs.
 ## The probe
 
 Measured on minikube, CRI-O 1.35.0, Kubernetes v1.34.0, ImageVolume gate
-enabled: the rig the exec probe used. The prototype ships a script that
-re-answers all four questions on any cluster.
+enabled: the rig the exec probe used. These run in CI now rather than by hand,
+as `hack/run-e2e-skills.sh`, on a cluster built fresh for every change. They
+were scripts somebody had to remember to run, and one of them passed for days
+against a ServiceAccount left in a namespace by hand while the code that
+should have created it did not exist.
 
 A four-skill image, one inline ConfigMap and one git clone with a `subPath`,
 together. The git source's card carries `type: rule`, so its skill is
@@ -397,9 +400,14 @@ always-loaded rules: [house-rules plan]
 and the loader resolves the name. Deleting the AgentRun garbage collected the
 inline ConfigMap, confirming the ownership scoping.
 
-Still not measured: a run against a live model. The agent container starts
-after a known-good skills root, but nothing has yet read those skills and
-acted on them.
+`hack/run-e2e-rule.sh` then follows a rule one hop further, onto the wire. The
+emulator records the request body goose sent, and the assertion is that the
+rule's text arrives under `## Rules` in it, against a control run with the rule
+detached where it does not. The emulator answers that prompt with the tool call
+the rule demanded, so the harness also sees the call come back through goose.
+
+Still not measured: a live model. What a real model does when it reads the rule
+is the one claim a scripted endpoint cannot make.
 
 ## Consequences
 
