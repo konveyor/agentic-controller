@@ -36,6 +36,8 @@ func clearKonveyorEnv(t *testing.T) {
 		"HARNESS_ACP_TEE",
 		"HARNESS_HITL_STEER",
 		"HARNESS_HITL_TIMEOUT_SECONDS",
+		"KONVEYOR_GIT_AUTHOR_NAME",
+		"KONVEYOR_GIT_AUTHOR_EMAIL",
 	} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
@@ -145,6 +147,40 @@ func TestLoadFromEnv(t *testing.T) {
 		}
 		if cfg.MaxTurns != 500 {
 			t.Errorf("MaxTurns = %d, want 500", cfg.MaxTurns)
+		}
+	})
+
+	t.Run("defaults git author when unset", func(t *testing.T) {
+		clearKonveyorEnv(t)
+		setRequiredEnv(t)
+
+		cfg, err := LoadFromEnv()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.GitAuthorName != DefaultGitAuthorName {
+			t.Errorf("GitAuthorName = %q, want %q", cfg.GitAuthorName, DefaultGitAuthorName)
+		}
+		if cfg.GitAuthorEmail != DefaultGitAuthorEmail {
+			t.Errorf("GitAuthorEmail = %q, want %q", cfg.GitAuthorEmail, DefaultGitAuthorEmail)
+		}
+	})
+
+	t.Run("reads git author from env", func(t *testing.T) {
+		clearKonveyorEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("KONVEYOR_GIT_AUTHOR_NAME", "Jane Dev")
+		t.Setenv("KONVEYOR_GIT_AUTHOR_EMAIL", "jane@example.com")
+
+		cfg, err := LoadFromEnv()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.GitAuthorName != "Jane Dev" {
+			t.Errorf("GitAuthorName = %q, want %q", cfg.GitAuthorName, "Jane Dev")
+		}
+		if cfg.GitAuthorEmail != "jane@example.com" {
+			t.Errorf("GitAuthorEmail = %q, want %q", cfg.GitAuthorEmail, "jane@example.com")
 		}
 	})
 }

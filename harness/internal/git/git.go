@@ -139,13 +139,16 @@ func CommitFiles(repo *gogit.Repository, paths []string, msg string) error {
 	return nil
 }
 
-func ConfigureAuthor(repo *gogit.Repository) error {
+// ConfigureAuthor sets the git commit identity (user.name / user.email)
+// used for the agent's local commits. go-git derives both the author and
+// the committer from these values.
+func ConfigureAuthor(repo *gogit.Repository, name, email string) error {
 	cfg, err := repo.Config()
 	if err != nil {
 		return fmt.Errorf("read config: %w", err)
 	}
-	cfg.User.Name = "migration-agent"
-	cfg.User.Email = "migration-agent@konveyor.io"
+	cfg.User.Name = name
+	cfg.User.Email = email
 	return repo.SetConfig(cfg)
 }
 

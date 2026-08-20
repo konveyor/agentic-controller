@@ -1,0 +1,6 @@
+kind: feature
+description: >
+  Add gitConfig (userName / userEmail) to the Agent and AgentRun specs to
+  control the git commit identity the harness uses for agent commits. The
+  AgentRun value overrides the Agent default per field; when unset, commits
+  keep the previous default identity. Push credentials are unchanged.

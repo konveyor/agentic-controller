@@ -13,6 +13,11 @@ const (
 
 	// MaxHITLTimeoutSeconds caps HARNESS_HITL_TIMEOUT_SECONDS (10 min).
 	MaxHITLTimeoutSeconds = 600
+
+	// Default git commit identity used when the Agent/AgentRun does not
+	// configure one. Preserves the historical hardcoded author.
+	DefaultGitAuthorName  = "migration-agent"
+	DefaultGitAuthorEmail = "migration-agent@konveyor.io"
 )
 
 type Config struct {
@@ -29,6 +34,13 @@ type Config struct {
 	ACPSecretKey string
 
 	TargetBranch string
+
+	// GitAuthorName / GitAuthorEmail are the git commit identity the
+	// harness applies before the agent commits. Sourced from the
+	// Agent/AgentRun gitConfig (via the controller) and defaulted to
+	// DefaultGitAuthor* when unset.
+	GitAuthorName  string
+	GitAuthorEmail string
 
 	// Workflow stage metadata, injected by the controller for
 	// AgentWorkflowRun stages. Both empty for standalone AgentRuns.
@@ -65,6 +77,14 @@ func envWithFallback(primary, fallback string) string {
 	return os.Getenv(fallback)
 }
 
+// envOrDefault reads name, returning def when it is unset or empty.
+func envOrDefault(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
+}
+
 func LoadFromEnv() (*Config, error) {
 	model := envWithFallback("KONVEYOR_LLM_MODEL", "KONVEYOR_MODEL_PRIMARY_MODEL")
 
@@ -93,6 +113,9 @@ func LoadFromEnv() (*Config, error) {
 		AppID:        required["APP_ID"],
 		ACPSecretKey: required["KONVEYOR_ACP_SECRET_KEY"],
 		TargetBranch: required["TARGET_BRANCH"],
+
+		GitAuthorName:  envOrDefault("KONVEYOR_GIT_AUTHOR_NAME", DefaultGitAuthorName),
+		GitAuthorEmail: envOrDefault("KONVEYOR_GIT_AUTHOR_EMAIL", DefaultGitAuthorEmail),
 
 		WorkflowStage:      os.Getenv("KONVEYOR_WORKFLOW_STAGE"),
 		WorkflowStageCount: os.Getenv("KONVEYOR_WORKFLOW_STAGE_COUNT"),

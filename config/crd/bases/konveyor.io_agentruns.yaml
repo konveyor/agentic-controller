@@ -280,6 +280,23 @@ spec:
                   run. Must be one of the gateways declared on the referenced Agent.
                 minLength: 1
                 type: string
+              gitConfig:
+                description: |-
+                  GitConfig overrides the Agent's git commit identity for this run.
+                  Fields left unset fall back to the Agent's GitConfig, then to the
+                  harness default identity.
+                properties:
+                  userEmail:
+                    description: UserEmail maps to git config user.email for the agent's
+                      commits.
+                    minLength: 1
+                    type: string
+                  userName:
+                    description: UserName maps to git config user.name for the agent's
+                      commits.
+                    minLength: 1
+                    type: string
+                type: object
               instructions:
                 description: |-
                   Instructions are task-specific instructions for this run.

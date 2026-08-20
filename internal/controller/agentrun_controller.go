@@ -526,6 +526,23 @@ func (r *AgentRunReconciler) buildEnvVars(
 		})
 	}
 
+	// Git commit identity. AgentRun overrides Agent per field; unset
+	// fields are left absent so the harness applies its default. The
+	// controller only forwards declared values — it holds no default.
+	gitName, gitEmail := resolveGitIdentity(agent, run)
+	if gitName != "" {
+		env = append(env, corev1.EnvVar{
+			Name:  "KONVEYOR_GIT_AUTHOR_NAME",
+			Value: gitName,
+		})
+	}
+	if gitEmail != "" {
+		env = append(env, corev1.EnvVar{
+			Name:  "KONVEYOR_GIT_AUTHOR_EMAIL",
+			Value: gitEmail,
+		})
+	}
+
 	// Gateway credential mounting. One run = one gateway = one model.
 	if run.Spec.Gateway != "" {
 		var gateway konveyoriov1alpha1.Gateway
@@ -579,6 +596,28 @@ func (r *AgentRunReconciler) buildEnvVars(
 	env = append(env, run.Spec.Env...)
 
 	return env, envFrom, nil
+}
+
+// resolveGitIdentity computes the git commit identity (name, email) for a
+// run, preferring the AgentRun's GitConfig over the Agent's, per field.
+// Empty return values mean "not configured" — the harness supplies its
+// own default in that case.
+func resolveGitIdentity(
+	agent *konveyoriov1alpha1.Agent,
+	run *konveyoriov1alpha1.AgentRun,
+) (name, email string) {
+	if gc := agent.Spec.GitConfig; gc != nil {
+		name, email = gc.UserName, gc.UserEmail
+	}
+	if gc := run.Spec.GitConfig; gc != nil {
+		if gc.UserName != "" {
+			name = gc.UserName
+		}
+		if gc.UserEmail != "" {
+			email = gc.UserEmail
+		}
+	}
+	return name, email
 }
 
 // resolveSkillVolumes resolves SkillCard and SkillCollection refs to

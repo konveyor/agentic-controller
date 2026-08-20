@@ -59,6 +59,10 @@ SkillCards/SkillCollections are ready. When OpenShell is integrated,
 Gateway CRs will be replaced by OpenShell Gateway Services.
 Subagent delegation is a runtime concern — the agent runtime may
 spawn subagents internally but this is not modeled in the CRD.
+An Agent may also declare a `gitConfig` (commit `user.name`/`user.email`)
+setting the default commit identity for its runs; this controls commit
+authorship only and is independent of the push credentials resolved from
+the application's git identity.
 _Avoid_: conflating Agent with AgentRun — Agent is a template,
 AgentRun is an invocation.
 
@@ -87,7 +91,9 @@ them through without interpretation. Execution limits (`maxTurns`,
 Konveyor-managed agents, Hub injects connectivity info
 (`HUB_BASE_URL`, `APP_ID`, scoped API token) into the AgentRun's
 env at create time; the harness resolves application metadata from
-Hub at runtime.
+Hub at runtime. An AgentRun may set `gitConfig` to override the Agent's
+commit identity for this run (per field: AgentRun over Agent, then the
+harness default).
 _Avoid_: putting execution controls (turn limits, cost budgets) in
 skills or in arbitrary params — these are CRD-level concerns.
 
