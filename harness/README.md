@@ -202,7 +202,9 @@ closed as everywhere else: nobody attached, or no answer within
 the model no human answered, and the prompt guidelines tell it to say what
 it needed and stop rather than guess. `HARNESS_HITL_ASK=off` leaves the
 tool out; elicitation from any other MCP server the session mounts takes
-the same path.
+the same path. The design decisions behind this flow — and what a future
+agent runtime must provide to compose with it — are recorded in
+[ADR 0016](../docs/adr/0016-ask-user-tool-and-elicitation.md).
 
 **Fault containment.** The tee can never fail the run: bounded
 per-viewer queues (slow viewers are dropped), ping/pong keepalive so
