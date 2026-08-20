@@ -87,3 +87,18 @@ func tail(s string) string {
 	}
 	return s[len(s)-20:]
 }
+
+func TestAskUserGuideline(t *testing.T) {
+	with := Build(Layers{AgentPrompt: "p", StageTask: "t", AskUser: true})
+	without := Build(Layers{AgentPrompt: "p", StageTask: "t"})
+	if !strings.Contains(with, "`ask_user`") || !strings.Contains(with, "Do not ask questions in prose") {
+		t.Fatalf("ask_user guideline missing:\n%s", with)
+	}
+	if strings.Contains(without, "ask_user") {
+		t.Fatalf("ask_user guideline must only appear when the tool is mounted:\n%s", without)
+	}
+	// It belongs to the harness's working guidelines, ahead of the stage task.
+	if strings.Index(with, "ask_user") > strings.Index(with, "## Stage Task") {
+		t.Fatalf("guideline should precede the stage task:\n%s", with)
+	}
+}

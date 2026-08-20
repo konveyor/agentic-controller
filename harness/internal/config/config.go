@@ -47,6 +47,12 @@ type Config struct {
 	// the run session are relayed onto the run connection (default on;
 	// HARNESS_HITL_STEER=off makes the run stream watch-only).
 	HITLSteer bool
+	// HITLAsk: the agent gets an ask_user tool (the harness's own stdio
+	// MCP server) whose questions reach attached viewers as
+	// elicitation/create asks and block the turn until answered; with
+	// nobody watching they fail closed (cancelled, never answered for the
+	// human). Default on; HARNESS_HITL_ASK=off leaves the tool out.
+	HITLAsk bool
 
 	// Prompt context layers, composed by internal/prompt.
 	AgentPrompt       string
@@ -110,6 +116,7 @@ func LoadFromEnv() (*Config, error) {
 	// (and steering), so only an explicit opt-out disables them.
 	cfg.ACPTee = !envSwitchedOff("HARNESS_ACP_TEE")
 	cfg.HITLSteer = !envSwitchedOff("HARNESS_HITL_STEER")
+	cfg.HITLAsk = !envSwitchedOff("HARNESS_HITL_ASK")
 	if n, err := strconv.Atoi(os.Getenv("HARNESS_HITL_TIMEOUT_SECONDS")); err == nil && n > 0 {
 		// Ceiling: a single ask parking the run for hours isn't HITL,
 		// it's abandonment — the pod deadline should not be spent inside

@@ -74,7 +74,8 @@ All configuration is via environment variables — there is no config file or `i
 | `KONVEYOR_INSTRUCTIONS` | — | Stage-specific task instructions |
 | `HARNESS_ACP_TEE` | `on` | `off` disables the ACP tee; goose then owns :4000 directly |
 | `HARNESS_HITL_STEER` | `on` | `off` makes the run stream watch-only: viewer steer/cancel frames for the run session are refused instead of relayed |
-| `HARNESS_HITL_TIMEOUT_SECONDS` | `180` | How long a permission ask waits for an attached viewer; values above 600 are clamped to 600 |
+| `HARNESS_HITL_TIMEOUT_SECONDS` | `180` | How long a permission ask or an `ask_user` question waits for an attached viewer; values above 600 are clamped to 600 |
+| `HARNESS_HITL_ASK` | `on` | `off` leaves the `ask_user` tool out of the session (the agent then has no way to block on a human answer) |
 
 ---
 
@@ -183,6 +184,27 @@ a timer is no ask at all. After a timeout the viewers are considered
 unresponsive and follow-up asks deny fast until a new attach or any
 viewer interaction shows a human is back, which caps the deny/retry turn
 burn.
+
+**Questions from the agent (`ask_user`).** The session mounts a stdio
+MCP server that is the harness binary itself (`migration-harness
+ask-user-mcp`), giving the agent one tool: `ask_user(question, options?)`.
+A call becomes an MCP `elicitation/create` that goose relays over ACP to
+the harness (the harness advertises `clientCapabilities.elicitation.form`
+at initialize), the harness offers it to attached viewers exactly like a
+permission ask (`kask-*` ids, first answer wins, a viewer attaching
+mid-question is shown the pending ask), and the `{action, content}` answer
+travels back to the tool, which tells the model "The human answered: …".
+The tool call blocks the turn for the whole round trip — this is the
+in-turn "stop and confirm" that prose questions cannot express (an
+assistant message ending on a question is just a finished turn). Fail
+closed as everywhere else: nobody attached, or no answer within
+`HARNESS_HITL_TIMEOUT_SECONDS`, cancels the question — the tool then tells
+the model no human answered, and the prompt guidelines tell it to say what
+it needed and stop rather than guess. `HARNESS_HITL_ASK=off` leaves the
+tool out; elicitation from any other MCP server the session mounts takes
+the same path. The design decisions behind this flow — and what a future
+agent runtime must provide to compose with it — are recorded in
+[ADR 0017](../docs/adr/0017-ask-user-tool-and-elicitation.md).
 
 **Fault containment.** The tee can never fail the run: bounded
 per-viewer queues (slow viewers are dropped), ping/pong keepalive so

@@ -887,3 +887,120 @@ func TestStopStaysBoundedWithStalledViewers(t *testing.T) {
 		t.Fatal("Stop exceeded its flush budget — a later viewer waited with no deadline")
 	}
 }
+
+// The agent's question (elicitation/create) rides the same relay as a
+// permission ask under a kask-<n> id; a viewer that attaches while the
+// question is still waiting receives it on attach, and its answer is
+// relayed verbatim.
+func TestForwardElicitationAndLateViewerReplay(t *testing.T) {
+	_, _, s := startTee(t, Config{HITLTimeout: 2 * time.Second})
+
+	params := json.RawMessage(`{"sessionId":"s1","mode":"form","message":"Which database?",` +
+		`"requestedSchema":{"type":"object","properties":{"answer":{"type":"string","enum":["postgres","mysql"]}},"required":["answer"]}}`)
+
+	// Nobody attached: fail closed immediately.
+	if _, outcome := s.ForwardElicitation(params); outcome != acp.ForwardNoViewers {
+		t.Fatalf("expected NoViewers, got %v", outcome)
+	}
+
+	first, err := dialViewer(t, s, testKey)
+	if err != nil {
+		t.Fatalf("viewer dial: %v", err)
+	}
+
+	type fwdOut struct {
+		result  json.RawMessage
+		outcome acp.PermissionForwardOutcome
+	}
+	done := make(chan fwdOut, 1)
+	go func() {
+		r, o := s.ForwardElicitation(params)
+		done <- fwdOut{r, o}
+	}()
+
+	ask := first.expect("forwarded question", func(f string) bool { return strings.Contains(f, "kask-") })
+	var askFrame struct {
+		ID     string          `json:"id"`
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	if err := json.Unmarshal([]byte(ask), &askFrame); err != nil {
+		t.Fatalf("ask frame: %v", err)
+	}
+	if askFrame.Method != "elicitation/create" || !strings.HasPrefix(askFrame.ID, "kask-") {
+		t.Fatalf("bad ask frame: %s", ask)
+	}
+	if string(askFrame.Params) != string(params) {
+		t.Fatalf("params altered: %s", askFrame.Params)
+	}
+
+	// A second viewer arrives while the question waits: it must see the
+	// pending ask on attach (the harness ring alone would not carry it).
+	late, err := dialViewer(t, s, testKey)
+	if err != nil {
+		t.Fatalf("late viewer dial: %v", err)
+	}
+	replayed := late.expect("replayed question", func(f string) bool { return strings.Contains(f, askFrame.ID) })
+	if !strings.Contains(replayed, `"elicitation/create"`) {
+		t.Fatalf("late viewer did not get the pending question: %s", replayed)
+	}
+
+	// The late viewer answers; the result is relayed verbatim and the
+	// first viewer's pipe never sees it.
+	answer := fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"result":{"action":"accept","content":{"answer":"postgres"}}}`, askFrame.ID)
+	if err := late.conn.WriteMessage(websocket.TextMessage, []byte(answer)); err != nil {
+		t.Fatalf("answer write: %v", err)
+	}
+	out := <-done
+	if out.outcome != acp.ForwardAnswered {
+		t.Fatalf("expected Answered, got %v", out.outcome)
+	}
+	if !strings.Contains(string(out.result), `"answer":"postgres"`) {
+		t.Fatalf("answer not relayed: %s", out.result)
+	}
+
+	// Once answered, a fresh viewer is not shown the stale question.
+	third, err := dialViewer(t, s, testKey)
+	if err != nil {
+		t.Fatalf("third viewer dial: %v", err)
+	}
+	select {
+	case f := <-third.recv:
+		if strings.Contains(f, askFrame.ID) {
+			t.Fatalf("answered question replayed to a later viewer: %s", f)
+		}
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// resolveAsk must remove the pending replay frame in the same critical
+// section that commits the answer. forwardAsk's deferred cleanup runs
+// only after the parked goroutine wakes, so a viewer attaching in that
+// gap would otherwise be offered an already-answered question whose
+// reply then vanishes as "late/duplicate" with no feedback.
+func TestResolveAskClearsPendingFrameWithAnswer(t *testing.T) {
+	_, _, s := startTee(t, Config{HITLTimeout: time.Second})
+
+	ch := make(chan json.RawMessage, 1)
+	s.mu.Lock()
+	s.perms["kask-9"] = ch
+	s.pendingAsks["kask-9"] = []byte(`{"id":"kask-9"}`)
+	s.mu.Unlock()
+
+	s.resolveAsk("kask-9", json.RawMessage(`{"action":"accept"}`))
+
+	s.mu.Lock()
+	_, stillPending := s.pendingAsks["kask-9"]
+	s.mu.Unlock()
+	if stillPending {
+		t.Fatal("answered ask still in pendingAsks — a viewer attaching now would be offered a dead question")
+	}
+	select {
+	case r := <-ch:
+		if !strings.Contains(string(r), "accept") {
+			t.Fatalf("wrong answer delivered: %s", r)
+		}
+	default:
+		t.Fatal("answer never delivered to the waiting forwardAsk")
+	}
+}
