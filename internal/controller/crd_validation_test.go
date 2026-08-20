@@ -205,16 +205,16 @@ var _ = Describe("CRD Validation", func() {
 					Gateways: []konveyoriov1alpha1.AgentGatewayRef{
 						{Ref: testGateway},
 					},
-					Params: []konveyoriov1alpha1.AgentParam{
+					Params: []konveyoriov1alpha1.Param{
 						{
 							Name:        testParamName,
-							Type:        konveyoriov1alpha1.AgentParamTypeString,
+							Type:        konveyoriov1alpha1.ParamTypeString,
 							Description: "Git URL of the application source",
 							Required:    true,
 						},
 						{
 							Name:    "source_branch",
-							Type:    konveyoriov1alpha1.AgentParamTypeString,
+							Type:    konveyoriov1alpha1.ParamTypeString,
 							Default: testDefaultBranch,
 						},
 					},
@@ -235,7 +235,7 @@ var _ = Describe("CRD Validation", func() {
 					Gateways: []konveyoriov1alpha1.AgentGatewayRef{
 						{Ref: testGatewayName},
 					},
-					Params: []konveyoriov1alpha1.AgentParam{
+					Params: []konveyoriov1alpha1.Param{
 						{
 							Name:    testParamTargetBranch,
 							Default: testDefaultBranch,
@@ -259,7 +259,7 @@ var _ = Describe("CRD Validation", func() {
 					Gateways: []konveyoriov1alpha1.AgentGatewayRef{
 						{Ref: testGatewayName},
 					},
-					Params: []konveyoriov1alpha1.AgentParam{
+					Params: []konveyoriov1alpha1.Param{
 						{
 							Name:     testParamName,
 							Default:  "https://example.com",
@@ -301,7 +301,7 @@ var _ = Describe("CRD Validation", func() {
 				Spec: konveyoriov1alpha1.AgentRunSpec{
 					AgentRef: "java-migration-agent",
 					Gateway:  testGateway,
-					Params: []konveyoriov1alpha1.AgentRunParam{
+					Params: []konveyoriov1alpha1.ParamValue{
 						{Name: testParamName, Value: "https://github.com/acme/app.git"},
 					},
 					Instructions: "Migrate this application.",
@@ -476,7 +476,7 @@ var _ = Describe("CRD Validation", func() {
 				Spec: konveyoriov1alpha1.AgentWorkflowRunSpec{
 					WorkflowRef: "java-migration",
 					Gateway:     testGateway,
-					Params: []konveyoriov1alpha1.AgentRunParam{
+					Params: []konveyoriov1alpha1.ParamValue{
 						{Name: testParamName, Value: "https://github.com/acme/app.git"},
 					},
 					Env: []corev1.EnvVar{

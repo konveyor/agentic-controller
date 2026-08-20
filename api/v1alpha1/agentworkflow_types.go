@@ -37,9 +37,17 @@ type AgentWorkflowStage struct {
 	AgentRef string `json:"agentRef"`
 
 	// Instructions are task-specific instructions for this stage.
-	// Composed with the Agent's prompt at execution time.
+	// Composed with the Agent's prompt at execution time. Supports
+	// $(agent.<name>) / $(workflow.<name>) substitution.
 	// +optional
 	Instructions string `json:"instructions,omitempty"`
+
+	// Execution overrides the stage Agent's default supervision mode and
+	// budget limits. The AgentWorkflowRun controller resolves these
+	// (stage override, else Agent default) and stamps the result onto the
+	// stage's AgentRun (ADR 0018). Unset fields fall back to the Agent.
+	// +optional
+	Execution *ExecutionSpec `json:"execution,omitempty"`
 }
 
 // AgentWorkflowSpec defines the desired state of an AgentWorkflow.
@@ -58,6 +66,15 @@ type AgentWorkflowSpec struct {
 	// +listType=map
 	// +listMapKey=name
 	Stages []AgentWorkflowStage `json:"stages"`
+
+	// Params declares workflow-level typed parameters. An
+	// AgentWorkflowRun supplies values; the controller renders them into
+	// the workflow section of params.json and into $(workflow.<name>)
+	// references in the guide and stage instructions (ADR 0009).
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Params []Param `json:"params,omitempty"`
 }
 
 // AgentWorkflowStatus defines the observed state of an AgentWorkflow.

@@ -33,6 +33,23 @@ type AgentWorkflowRunStageStatus struct {
 	// AgentRunName is the name of the AgentRun CR created for this stage.
 	// +optional
 	AgentRunName string `json:"agentRunName,omitempty"`
+
+	// The following fields snapshot the stage definition captured from
+	// the AgentWorkflow at initialization time (#87). The controller
+	// executes from this snapshot, not the live workflow spec, so a
+	// mid-run edit to the workflow cannot change stages already planned.
+
+	// AgentRef is the snapshotted Agent name for this stage.
+	// +optional
+	AgentRef string `json:"agentRef,omitempty"`
+
+	// Instructions is the snapshotted stage instruction text.
+	// +optional
+	Instructions string `json:"instructions,omitempty"`
+
+	// Execution is the snapshotted stage execution override.
+	// +optional
+	Execution *ExecutionSpec `json:"execution,omitempty"`
 }
 
 // AgentWorkflowRunSpec defines the desired state of an AgentWorkflowRun.
@@ -53,7 +70,7 @@ type AgentWorkflowRunSpec struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=name
-	Params []AgentRunParam `json:"params,omitempty"`
+	Params []ParamValue `json:"params,omitempty"`
 
 	// Env is a list of additional environment variables to set across
 	// all stages. Passed through to each AgentRun's Sandbox unchanged.
@@ -81,11 +98,25 @@ type AgentWorkflowRunStatus struct {
 	// +optional
 	CurrentStage string `json:"currentStage,omitempty"`
 
-	// Stages tracks the status of each stage.
+	// Stages tracks the status of each stage, and snapshots each stage's
+	// definition at initialization time (#87).
 	// +optional
 	// +listType=map
 	// +listMapKey=name
 	Stages []AgentWorkflowRunStageStatus `json:"stages,omitempty"`
+
+	// Guide snapshots the AgentWorkflow guide at initialization time, so
+	// mid-run edits do not change it for stages still to run (#87).
+	// +optional
+	Guide string `json:"guide,omitempty"`
+
+	// Params snapshots the AgentWorkflow's workflow-level parameter
+	// declarations at initialization time, so coercion of the run's
+	// supplied values stays stable across a mid-run workflow edit (#87).
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Params []Param `json:"params,omitempty"`
 
 	// StartTime is the time the workflow run started.
 	// +optional

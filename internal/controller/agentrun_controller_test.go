@@ -135,9 +135,10 @@ var _ = Describe("AgentRun Controller", func() {
 				var fetched konveyoriov1alpha1.AgentRun
 				g.Expect(k8sClient.Get(ctx, key, &fetched)).To(Succeed())
 				g.Expect(fetched.Status.Phase).To(Equal(konveyoriov1alpha1.AgentRunPhaseFailed))
-				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
-				g.Expect(readyCond).NotTo(BeNil())
-				g.Expect(readyCond.Reason).To(Equal("AgentNotFound"))
+				cond := meta.FindStatusCondition(fetched.Status.Conditions, konveyoriov1alpha1.AgentRunConditionSucceeded)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal("AgentNotFound"))
 			}, timeout, interval).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
@@ -170,9 +171,10 @@ var _ = Describe("AgentRun Controller", func() {
 			Eventually(func(g Gomega) {
 				var fetched konveyoriov1alpha1.AgentRun
 				g.Expect(k8sClient.Get(ctx, runKey, &fetched)).To(Succeed())
-				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
-				g.Expect(readyCond).NotTo(BeNil())
-				g.Expect(readyCond.Reason).To(Equal("AgentNotReady"))
+				cond := meta.FindStatusCondition(fetched.Status.Conditions, konveyoriov1alpha1.AgentRunConditionSucceeded)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
+				g.Expect(cond.Reason).To(Equal("AgentNotReady"))
 				g.Expect(fetched.Status.SandboxName).To(BeEmpty())
 			}, timeout, interval).Should(Succeed())
 
@@ -198,7 +200,7 @@ var _ = Describe("AgentRun Controller", func() {
 				Spec: konveyoriov1alpha1.AgentSpec{
 					Image:    testAgentImage,
 					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
-					Params:   []konveyoriov1alpha1.AgentParam{{Name: testParamName, Required: true}},
+					Params:   []konveyoriov1alpha1.Param{{Name: testParamName, Required: true}},
 				},
 			}
 			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
@@ -208,7 +210,7 @@ var _ = Describe("AgentRun Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
 				Spec: konveyoriov1alpha1.AgentRunSpec{
 					AgentRef: agentName,
-					Params: []konveyoriov1alpha1.AgentRunParam{
+					Params: []konveyoriov1alpha1.ParamValue{
 						{Name: testParamName, Value: testRepoURL},
 						{Name: "undeclared_param", Value: "bad"},
 					},
@@ -221,10 +223,11 @@ var _ = Describe("AgentRun Controller", func() {
 				var fetched konveyoriov1alpha1.AgentRun
 				g.Expect(k8sClient.Get(ctx, key, &fetched)).To(Succeed())
 				g.Expect(fetched.Status.Phase).To(Equal(konveyoriov1alpha1.AgentRunPhaseFailed))
-				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
-				g.Expect(readyCond).NotTo(BeNil())
-				g.Expect(readyCond.Reason).To(Equal("InvalidParams"))
-				g.Expect(readyCond.Message).To(ContainSubstring("undeclared_param"))
+				cond := meta.FindStatusCondition(fetched.Status.Conditions, konveyoriov1alpha1.AgentRunConditionSucceeded)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal("InvalidParams"))
+				g.Expect(cond.Message).To(ContainSubstring("undeclared_param"))
 			}, timeout, interval).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
@@ -268,10 +271,11 @@ var _ = Describe("AgentRun Controller", func() {
 				var fetched konveyoriov1alpha1.AgentRun
 				g.Expect(k8sClient.Get(ctx, key, &fetched)).To(Succeed())
 				g.Expect(fetched.Status.Phase).To(Equal(konveyoriov1alpha1.AgentRunPhaseFailed))
-				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
-				g.Expect(readyCond).NotTo(BeNil())
-				g.Expect(readyCond.Reason).To(Equal("InvalidGateway"))
-				g.Expect(readyCond.Message).To(ContainSubstring("wrong-gateway"))
+				cond := meta.FindStatusCondition(fetched.Status.Conditions, konveyoriov1alpha1.AgentRunConditionSucceeded)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal("InvalidGateway"))
+				g.Expect(cond.Message).To(ContainSubstring("wrong-gateway"))
 			}, timeout, interval).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
@@ -314,7 +318,7 @@ var _ = Describe("AgentRun Controller", func() {
 					Prompt:     "You are a test agent.",
 					Gateways:   []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
 					SkillCards: []konveyoriov1alpha1.AgentSkillCardRef{{Ref: skillName}},
-					Params: []konveyoriov1alpha1.AgentParam{
+					Params: []konveyoriov1alpha1.Param{
 						{Name: testParamName, Required: true},
 						{Name: "source_branch", Default: testDefaultBranch},
 					},
@@ -328,7 +332,7 @@ var _ = Describe("AgentRun Controller", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
 				Spec: konveyoriov1alpha1.AgentRunSpec{
 					AgentRef:     agentName,
-					Params:       []konveyoriov1alpha1.AgentRunParam{{Name: testParamName, Value: testRepoURL}},
+					Params:       []konveyoriov1alpha1.ParamValue{{Name: testParamName, Value: testRepoURL}},
 					Gateway:      gwName,
 					Instructions: "Run the migration.",
 				},

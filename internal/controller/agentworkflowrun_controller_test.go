@@ -108,7 +108,7 @@ var _ = Describe("AgentWorkflowRun Controller", func() {
 				Spec: konveyoriov1alpha1.AgentSpec{
 					Image:    testAgentImage,
 					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
-					Params: []konveyoriov1alpha1.AgentParam{
+					Params: []konveyoriov1alpha1.Param{
 						{Name: testParamName, Required: true},
 					},
 				},
@@ -136,7 +136,7 @@ var _ = Describe("AgentWorkflowRun Controller", func() {
 				Spec: konveyoriov1alpha1.AgentWorkflowRunSpec{
 					WorkflowRef: workflowName,
 					Gateway:     gwName,
-					Params: []konveyoriov1alpha1.AgentRunParam{
+					Params: []konveyoriov1alpha1.ParamValue{
 						{Name: testParamName, Value: testRepoURL},
 					},
 				},
@@ -265,8 +265,8 @@ var _ = Describe("AgentWorkflowRun Controller", func() {
 				Spec: konveyoriov1alpha1.AgentSpec{
 					Image:    testAgentImage,
 					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
-					Params: []konveyoriov1alpha1.AgentParam{
-						{Name: "source_url", Required: true},
+					Params: []konveyoriov1alpha1.Param{
+						{Name: testParamName, Required: true},
 					},
 				},
 			}
@@ -279,7 +279,7 @@ var _ = Describe("AgentWorkflowRun Controller", func() {
 				Spec: konveyoriov1alpha1.AgentSpec{
 					Image:    testAgentImage,
 					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
-					Params: []konveyoriov1alpha1.AgentParam{
+					Params: []konveyoriov1alpha1.Param{
 						{Name: testParamTargetBranch, Required: true},
 					},
 				},
@@ -306,7 +306,7 @@ var _ = Describe("AgentWorkflowRun Controller", func() {
 				Spec: konveyoriov1alpha1.AgentWorkflowRunSpec{
 					WorkflowRef: workflowName,
 					Gateway:     gwName,
-					Params: []konveyoriov1alpha1.AgentRunParam{
+					Params: []konveyoriov1alpha1.ParamValue{
 						{Name: "source_url", Value: "https://github.com/example/repo.git"},
 						{Name: testParamTargetBranch, Value: "konveyor/test"},
 					},

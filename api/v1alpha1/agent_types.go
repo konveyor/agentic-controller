@@ -20,37 +20,42 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// AgentParamType defines the type of a parameter.
+// ParamType defines the type of a parameter.
 // +kubebuilder:validation:Enum=string;number;boolean
-type AgentParamType string
+type ParamType string
 
 const (
-	AgentParamTypeString  AgentParamType = "string"
-	AgentParamTypeNumber  AgentParamType = "number"
-	AgentParamTypeBoolean AgentParamType = "boolean"
+	ParamTypeString  ParamType = "string"
+	ParamTypeNumber  ParamType = "number"
+	ParamTypeBoolean ParamType = "boolean"
 )
 
-// AgentParam declares a typed parameter that an Agent accepts.
-// AgentRun supplies values for these parameters, which are injected as
-// KONVEYOR_PARAM_{NAME} env vars into the Sandbox.
+// Param declares a typed parameter that an Agent or AgentWorkflow
+// accepts. A run (AgentRun / AgentWorkflowRun) supplies values via
+// ParamValue. Resolved values are delivered to the Sandbox in
+// /run/konveyor/params.json (see ADR 0009) and may be referenced in
+// prompt text with $(agent.<name>) / $(workflow.<name>).
 // +kubebuilder:validation:XValidation:rule="!(has(self.required) && self.required && has(self.default) && size(self.default) > 0)",message="a parameter with a default value cannot be required"
-type AgentParam struct {
-	// Name is the parameter name. Will be uppercased and prefixed with
-	// KONVEYOR_PARAM_ when injected as an env var.
+type Param struct {
+	// Name is the parameter name. Referenced in prompt text as
+	// $(agent.<name>) or $(workflow.<name>) and delivered in
+	// params.json under the corresponding section.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z_][a-zA-Z0-9_]*$`
 	Name string `json:"name"`
 
-	// Type is the parameter type.
+	// Type is the parameter type. Controls JSON coercion in
+	// params.json: number as a JSON number, boolean as a JSON boolean,
+	// string as a JSON string.
 	// +kubebuilder:default=string
 	// +optional
-	Type AgentParamType `json:"type,omitempty"`
+	Type ParamType `json:"type,omitempty"`
 
 	// Description explains the purpose of the parameter.
 	// +optional
 	Description string `json:"description,omitempty"`
 
-	// Default is the default value if not specified in AgentRun.
+	// Default is the default value if not supplied by a run.
 	// +optional
 	Default string `json:"default,omitempty"`
 
@@ -58,6 +63,62 @@ type AgentParam struct {
 	// A parameter with a default is never required.
 	// +optional
 	Required bool `json:"required,omitempty"`
+}
+
+// ExecutionMode controls the supervision policy for a run's tool calls.
+// +kubebuilder:validation:Enum=auto;approve
+type ExecutionMode string
+
+const (
+	// ExecutionModeAuto approves all tool calls automatically. Headless-safe.
+	ExecutionModeAuto ExecutionMode = "auto"
+	// ExecutionModeApprove requires explicit approval for tool calls,
+	// relayed to attached viewers by the harness tee (ADR 0008). With no
+	// viewer attached, the fail-closed policy denies all tool calls.
+	ExecutionModeApprove ExecutionMode = "approve"
+)
+
+// ExecutionLimits are the budget ceilings for a run: whichever is hit
+// first triggers wind-down (ADR 0011). These are template-level concerns
+// the Agent author owns, so they are declared on the Agent as defaults
+// and may be overridden per AgentWorkflow stage. They deliberately do
+// NOT include mode — mode is an execution-time concern, not a template
+// concern (ADR 0011/0018). Who may set or raise limits is a UI/API (Hub)
+// governance concern, not enforced by the controller (ADR 0018).
+type ExecutionLimits struct {
+	// MaxTurns is the maximum number of turns before wind-down. The unit
+	// is runtime-defined (e.g. Goose counts turns without user input).
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	MaxTurns *int `json:"maxTurns,omitempty"`
+
+	// MaxCost is the maximum cumulative cost in USD before wind-down,
+	// as a decimal string (e.g. "10.00"). USD only: the enforcement
+	// threshold must match the currency of reported usage, which is USD
+	// across the supported runtimes. Reported cost may carry an ISO 4217
+	// currency; this threshold does not.
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]{1,2})?$`
+	// +optional
+	MaxCost string `json:"maxCost,omitempty"`
+}
+
+// ExecutionSpec is the full per-invocation execution config: supervision
+// mode plus the budget limits. It is set on AgentRun (standalone runs)
+// and on AgentWorkflow stages (per-stage), never on the Agent — the
+// Agent carries only ExecutionLimits, because mode is an execution-time
+// concern (ADR 0011/0018). The AgentRun carries the resolved values,
+// written to the execution section of params.json. Fields are
+// individually optional so a run or stage can override one without
+// restating the others; resolution is per-field (run/stage value if set,
+// else Agent default for the limits).
+type ExecutionSpec struct {
+	// Mode is the supervision policy for tool calls. Defaults to auto.
+	// +optional
+	Mode ExecutionMode `json:"mode,omitempty"`
+
+	// ExecutionLimits are the budget ceilings (maxTurns, maxCost),
+	// resolved against the Agent's defaults.
+	ExecutionLimits `json:",inline"`
 }
 
 // AgentGatewayRef references a Gateway by name.
@@ -115,7 +176,15 @@ type AgentSpec struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=name
-	Params []AgentParam `json:"params,omitempty"`
+	Params []Param `json:"params,omitempty"`
+
+	// Execution declares the default budget limits (maxTurns, maxCost)
+	// for runs of this Agent. Runs and workflow stages may override
+	// these; the AgentRun carries the resolved values (ADR 0018). The
+	// Agent does not declare mode — mode is an execution-time concern set
+	// on the AgentRun or stage (ADR 0011/0018).
+	// +optional
+	Execution *ExecutionLimits `json:"execution,omitempty"`
 }
 
 // AgentStatus defines the observed state of an Agent.

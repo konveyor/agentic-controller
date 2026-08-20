@@ -1,0 +1,13 @@
+kind: feature
+description: >
+  Implement ADRs 0009/0011 (with the 0018 amendment) on the controller:
+  scope-namespaced parameter substitution and /run/konveyor/params.json
+  delivery (replacing the old per-parameter env vars), workflow-level
+  params, and execution controls. Budget limits (maxTurns, maxCost) are
+  Agent defaults overridable per workflow stage; supervision mode lives
+  on AgentRun and stages, never the Agent. AgentRun gains a Succeeded
+  terminal condition and opaque terminationData, and drops its Ready
+  condition; harness exit code 2 maps to a LimitReached outcome.
+  AgentWorkflowRun now snapshots the full stage definitions, guide, and
+  params at initialization so a mid-run workflow edit cannot change
+  stages already planned.
