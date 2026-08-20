@@ -35,8 +35,7 @@ For each compiler error:
 
 1. Read the error message to identify the file and issue
 2. Read the source file
-3. Consult domain skill's `references/verify-errors.md` for known error-fix mappings
-4. Apply a minimal fix — compiler error only
+3. Apply a minimal fix — compiler error only
    - Never change business logic — if a fix would alter what the code does, record it and stop
    - Never remove or stub out methods to make the build pass
    - If unsure, record the error and move on
@@ -78,7 +77,7 @@ Wait for the application to start (timeout: 60 seconds).
 Hit the application's health endpoint to verify it reached a ready state:
 - Check the framework-specific health path (e.g. `/q/health/ready` for Quarkus, `/actuator/health` for Spring Boot)
 - If no known health endpoint, try the application's root URL
-- Record: `health_check: "passed"` or `"failed"`
+- Record: `health_check: "passed"` or `"failed"` or `"skipped"` if no health check is defined
 
 ### 3c. Smoke tests
 
