@@ -400,6 +400,9 @@ if [ "${FAIL}" -gt 0 ]; then
         pod="$(run_pod "${r}")"
         [ -n "${pod}" ] || continue
         echo "--- ${r} (${pod}) phase=$(phase "${r}")"
+        # Events, not just logs: a container that never started has no logs,
+        # and the reason it did not (ErrImagePull, scheduling) lives here.
+        kc describe pod "${pod}" 2>/dev/null | sed -n '/^Events:/,$p' | sed 's/^/    /' || true
         kc logs "${pod}" -c skill-loader 2>&1 | tail -15 | sed 's/^/    /' || true
         kc logs "${pod}" -c agent 2>&1 | tail -40 | sed 's/^/    /' || true
     done

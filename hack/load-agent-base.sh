@@ -12,7 +12,7 @@
 #
 # Environment:
 #   CONTAINER_TOOL    docker or podman (default: auto-detect)
-#   AGENT_BASE_IMG    image to build (default agent-base:e2e)
+#   E2E_AGENT_IMAGE   image to build (default agent-base:e2e)
 #   KIND_CLUSTER      cluster to load into (default agentic-controller-e2e)
 
 set -euo pipefail
@@ -26,23 +26,31 @@ if [ -z "${CONTAINER_TOOL:-}" ]; then
 fi
 
 # Not :latest. Kubernetes defaults imagePullPolicy to Always for that tag, so
-# the kubelet would ignore the image loaded into the node.
-AGENT_BASE_IMG="${AGENT_BASE_IMG:-quay.io/konveyor/agent-base:e2e}"
+# the kubelet ignores the image loaded into the node and pulls a tag that only
+# exists locally.
+#
+# Deliberately not named AGENT_BASE_IMG. The Makefile exports that one, so it
+# is always set in this script's environment and a ${AGENT_BASE_IMG:-...}
+# default here would never be reached -- which is how CI came to build :latest
+# and fail on ErrImagePull while the same commit built :e2e everywhere the
+# variable was not yet exported.
+E2E_AGENT_IMAGE="${E2E_AGENT_IMAGE:-quay.io/konveyor/agent-base:e2e}"
 KIND_CLUSTER="${KIND_CLUSTER:-agentic-controller-e2e}"
 
 if [ "${CONTAINER_TOOL}" = "podman" ]; then
     export KIND_EXPERIMENTAL_PROVIDER=podman
 fi
 
-echo "=== Building ${AGENT_BASE_IMG} with ${CONTAINER_TOOL} ==="
-make agent-base-build AGENT_BASE_IMG="${AGENT_BASE_IMG}" CONTAINER_TOOL="${CONTAINER_TOOL}"
+echo "=== Building ${E2E_AGENT_IMAGE} with ${CONTAINER_TOOL} ==="
+# On the command line, so it beats the Makefile's exported default.
+make agent-base-build AGENT_BASE_IMG="${E2E_AGENT_IMAGE}" CONTAINER_TOOL="${CONTAINER_TOOL}"
 
 echo "=== Loading into Kind cluster '${KIND_CLUSTER}' ==="
 if [ "${CONTAINER_TOOL}" = "podman" ]; then
     TMP=$(mktemp -d)
     trap 'rm -rf "${TMP}"' EXIT
-    "${CONTAINER_TOOL}" save "${AGENT_BASE_IMG}" -o "${TMP}/agent-base.tar"
+    "${CONTAINER_TOOL}" save "${E2E_AGENT_IMAGE}" -o "${TMP}/agent-base.tar"
     kind load image-archive "${TMP}/agent-base.tar" --name "${KIND_CLUSTER}"
 else
-    kind load docker-image "${AGENT_BASE_IMG}" --name "${KIND_CLUSTER}"
+    kind load docker-image "${E2E_AGENT_IMAGE}" --name "${KIND_CLUSTER}"
 fi
