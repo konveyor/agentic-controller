@@ -122,6 +122,21 @@ func TestInitializeListAndAskRoundTrip(t *testing.T) {
 	}
 }
 
+func TestInitializeNeverAgreesToPreElicitationRevisions(t *testing.T) {
+	c, stop := startServer(t)
+	defer stop()
+
+	// 2025-03-26 predates elicitation, so agreeing to it would promise a
+	// revision in which elicitation/create does not exist. The server must
+	// answer its own version and leave the disconnect decision to the client.
+	c.send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"goose","version":"1.0.0"}}}`)
+	init := c.next()
+	result, _ := init["result"].(map[string]any)
+	if result["protocolVersion"] != protocolVersion {
+		t.Fatalf("a pre-elicitation offer must be answered with %s, got %v", protocolVersion, init)
+	}
+}
+
 func TestDeclineCancelAndEOF(t *testing.T) {
 	for _, tc := range []struct {
 		name, reply, want string

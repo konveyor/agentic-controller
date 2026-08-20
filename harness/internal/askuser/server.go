@@ -36,9 +36,12 @@ const ToolName = "ask_user"
 // Subcommand is the harness CLI verb that runs this server.
 const Subcommand = "ask-user-mcp"
 
-// protocolVersion is the MCP revision this server speaks; an initialize
-// naming a version we do not know is answered with this one, per MCP's
-// negotiation rule.
+// protocolVersion is the MCP revision this server speaks, and the only one
+// initialize ever answers: elicitation/create — the whole point of this
+// server — exists only from this revision, so agreeing to an older offer
+// would promise a protocol we cannot keep. A client that cannot speak it
+// disconnects at the handshake instead of failing on the first question
+// mid-turn.
 const protocolVersion = "2025-06-18"
 
 // maxLine bounds one stdio frame (a tool call with a long question).
@@ -160,12 +163,11 @@ func (s *Server) handleRequest(f rpcFrame) {
 			ProtocolVersion string `json:"protocolVersion"`
 		}
 		_ = json.Unmarshal(f.Params, &p)
-		version := protocolVersion
-		if p.ProtocolVersion != "" && p.ProtocolVersion <= protocolVersion {
-			version = p.ProtocolVersion
+		if p.ProtocolVersion != protocolVersion {
+			s.logf("askuser: client offered MCP protocol %q; answering %s, which elicitation requires", p.ProtocolVersion, protocolVersion)
 		}
 		s.respond(f.ID, map[string]any{
-			"protocolVersion": version,
+			"protocolVersion": protocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "konveyor-ask-user", "version": "0.1.0"},
 		})
