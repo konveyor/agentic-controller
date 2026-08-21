@@ -1,0 +1,23 @@
+# Gateway for AWS Bedrock.
+#
+# Prerequisites — create a Secret with your real AWS credentials:
+#   kubectl create secret generic bedrock-credentials \
+#     --from-literal=AWS_ACCESS_KEY_ID="<your-access-key-id>" \
+#     --from-literal=AWS_SECRET_ACCESS_KEY="<your-secret-access-key>" \
+#     --from-literal=AWS_REGION="<your-region>"
+#
+# The credential Secret uses envFrom (no key field) because Bedrock
+# requires multiple AWS env vars.
+apiVersion: konveyor.io/v1alpha1
+kind: Gateway
+metadata:
+  name: aws-bedrock
+spec:
+  provider: aws-bedrock
+  endpoint: "https://bedrock-runtime.us-east-1.amazonaws.com"
+  credentialRef:
+    secretName: bedrock-credentials
+  model:
+    name: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    contextWindow: 200000
+    tier: premium
