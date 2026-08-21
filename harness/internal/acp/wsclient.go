@@ -335,7 +335,7 @@ func (c *WSClient) Call(ctx context.Context, method string, params any) (json.Ra
 			case msg := <-respCh:
 				notifications = append(notifications, drainNotifications(notifCh)...)
 				if msg.Error != nil {
-					return nil, notifications, fmt.Errorf("ACP error %d: %s", msg.Error.Code, msg.Error.Message)
+					return nil, notifications, fmt.Errorf("ACP error %d: %w", msg.Error.Code, msg.Error)
 				}
 				return msg.Result, notifications, nil
 			default:
@@ -348,7 +348,7 @@ func (c *WSClient) Call(ctx context.Context, method string, params any) (json.Ra
 			// are still buffered — session/new's sessionId can ride one.
 			notifications = append(notifications, drainNotifications(notifCh)...)
 			if msg.Error != nil {
-				return nil, notifications, fmt.Errorf("ACP error %d: %s", msg.Error.Code, msg.Error.Message)
+				return nil, notifications, fmt.Errorf("ACP error %d: %w", msg.Error.Code, msg.Error)
 			}
 			return msg.Result, notifications, nil
 		}

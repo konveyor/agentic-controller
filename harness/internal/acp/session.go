@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/konveyor/migration-harness/internal/logging"
@@ -209,6 +211,90 @@ type PromptResult struct {
 	StopReason string       `json:"stopReason"`
 	Usage      *PromptUsage `json:"usage,omitempty"`
 	Chunks     []string     `json:"-"`
+
+	// closing collects the agent messages streamed after the most recent
+	// tool call (or the latest human steer): what the model says when it
+	// stops. Text before a tool call is narration about work it then does;
+	// the turn's conclusion is what follows the last call. One entry per
+	// goose message, so distinct messages are not run together.
+	closing []string
+	// closingMessageID is the goose message id the last closing entry
+	// belongs to.
+	closingMessageID string
+	// Notices are goose's own status notices for the turn
+	// (`_goose/unstable/session/update` status_message/notice), e.g.
+	// "Unable to continue: Context limit still exceeded after compaction".
+	// They are not agent text and would otherwise vanish with the pod.
+	Notices []string
+}
+
+// FinalMessage is the agent's closing message for the turn — the text after
+// the last tool call, or the whole reply when the agent called no tool. It
+// is also where goose reports most provider failures: the reply loop turns
+// them into assistant prose ("Ran into this error: …") and ends the turn
+// normally, so the client never sees an RPC error.
+func (r *PromptResult) FinalMessage() string {
+	return strings.Join(r.closing, "\n")
+}
+
+// ClosingProviderError reports whether any message in the closing text is
+// one of goose's provider-failure messages (see LooksLikeProviderError).
+func (r *PromptResult) ClosingProviderError() bool {
+	return slices.ContainsFunc(r.closing, LooksLikeProviderError)
+}
+
+// appendClosing adds a chunk to the closing text, continuing the current
+// goose message when the id matches and starting a new one otherwise.
+func (r *PromptResult) appendClosing(text, messageID string) {
+	if len(r.closing) > 0 && (messageID == "" || messageID == r.closingMessageID) {
+		r.closing[len(r.closing)-1] += text
+	} else {
+		r.closing = append(r.closing, text)
+	}
+	r.closingMessageID = messageID
+}
+
+// goose's provider-failure messages are whole assistant messages with
+// fixed openings or trailers (crates/goose/src/agents/agent.rs: the reply
+// loop's error arms, compaction failures, and the empty-response fallback).
+// Matching is anchored to the message so an agent quoting one of these
+// phrases in its own summary is not mistaken for a failure. Credits
+// exhaustion is not here: over ACP goose turns it into the session/prompt
+// RPC error, which SendPrompt now prints with its data.
+var (
+	providerErrorPrefixes = []string{
+		"Ran into this error",
+		"The provider refused this request.",
+		"The model returned an empty response.",
+	}
+	providerErrorSuffixes = []string{
+		"Please resend your message to try again.",
+	}
+)
+
+// LooksLikeProviderError reports whether one agent message is, or ends
+// with, one of goose's provider-failure messages. A turn ending on one
+// never reached the model, or lost it mid-way, yet from the outside it
+// looks like an ordinary end of turn. goose emits the failure as its own
+// message, but text it had already streamed can precede it in the same
+// entry when no message id separates them, so prefixes are also checked
+// at the start of each line.
+func LooksLikeProviderError(text string) bool {
+	t := strings.TrimSpace(text)
+	for _, m := range providerErrorSuffixes {
+		if strings.HasSuffix(t, m) {
+			return true
+		}
+	}
+	for line := range strings.SplitSeq(t, "\n") {
+		line = strings.TrimSpace(line)
+		for _, m := range providerErrorPrefixes {
+			if strings.HasPrefix(line, m) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type PromptUsage struct {
@@ -254,7 +340,9 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 					handlePromptNotification(n, result)
 				}
 				if msg.Error != nil {
-					return nil, fmt.Errorf("prompt error %d: %s", msg.Error.Code, msg.Error.Message)
+					// Hand back what streamed before the error: the closing
+					// message is worth most when the turn ends this way.
+					return result, fmt.Errorf("prompt error %d: %w", msg.Error.Code, msg.Error)
 				}
 				if err := json.Unmarshal(msg.Result, result); err != nil {
 					return nil, fmt.Errorf("parse prompt result: %w", err)
@@ -266,12 +354,14 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 		case msg := <-notifCh:
 			if isToolCall(msg) {
 				turnCount++
+				if maxTurns > 0 && turnCount >= maxTurns {
+					// Decide before handling the call: the text that
+					// introduced it is the last thing the agent said.
+					logging.Warn("max turns reached (%d), terminating", maxTurns)
+					return result, fmt.Errorf("max turns reached (%d)", maxTurns)
+				}
 			}
 			handlePromptNotification(msg, result)
-			if maxTurns > 0 && turnCount >= maxTurns {
-				logging.Warn("max turns reached (%d), terminating", maxTurns)
-				return result, fmt.Errorf("max turns reached (%d)", maxTurns)
-			}
 		case msg := <-respCh:
 			// Notifications buffered before the response still belong to
 			// this turn — drain them so a trailing chunk is not lost when
@@ -280,7 +370,9 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 				handlePromptNotification(n, result)
 			}
 			if msg.Error != nil {
-				return nil, fmt.Errorf("prompt error %d: %s", msg.Error.Code, msg.Error.Message)
+				// Hand back what streamed before the error: the closing
+				// message is worth most when the turn ends this way.
+				return result, fmt.Errorf("prompt error %d: %w", msg.Error.Code, msg.Error)
 			}
 			if err := json.Unmarshal(msg.Result, result); err != nil {
 				return nil, fmt.Errorf("parse prompt result: %w", err)
@@ -404,7 +496,15 @@ func isToolCall(msg *RPCResponse) bool {
 	return params.Update.SessionUpdate == "tool_call"
 }
 
+// gooseUpdateMethod carries goose's custom session updates (usage,
+// status notices); the harness declares the capability in Initialize.
+const gooseUpdateMethod = "_goose/unstable/session/update"
+
 func handlePromptNotification(msg *RPCResponse, result *PromptResult) {
+	if msg.Method == gooseUpdateMethod {
+		handleGooseNotice(msg, result)
+		return
+	}
 	if msg.Method != "session/update" {
 		return
 	}
@@ -417,6 +517,11 @@ func handlePromptNotification(msg *RPCResponse, result *PromptResult) {
 			Status        string          `json:"status,omitempty"`
 			Text          string          `json:"text,omitempty"`
 			Type          string          `json:"type,omitempty"`
+			Meta          struct {
+				Goose struct {
+					MessageID string `json:"messageId"`
+				} `json:"goose"`
+			} `json:"_meta"`
 		} `json:"update"`
 	}
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
@@ -429,14 +534,48 @@ func handlePromptNotification(msg *RPCResponse, result *PromptResult) {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		}
-		if err := json.Unmarshal(params.Update.Content, &content); err == nil {
+		if err := json.Unmarshal(params.Update.Content, &content); err == nil && content.Type == "text" {
 			result.Chunks = append(result.Chunks, content.Text)
+			result.appendClosing(content.Text, params.Update.Meta.Goose.MessageID)
 		}
+	case "user_message_chunk":
+		// A human steered the run mid-turn; the closing message is the
+		// reply to that, not what preceded it.
+		result.closing = nil
 	case "tool_call":
 		logging.Info("  tool: %s (%s)", params.Update.Title, params.Update.Status)
+		// Whatever was said so far introduced this call; the closing
+		// message starts over after it.
+		result.closing = nil
 	case "tool_call_update":
 		if params.Update.Status == "completed" || params.Update.Status == "failed" {
 			logging.Info("  tool: %s", params.Update.Status)
 		}
+	}
+}
+
+// handleGooseNotice records goose's status notices. goose sends its own
+// terminal failures this way rather than as agent text — "Unable to
+// continue: Context limit still exceeded after compaction" — and the tee
+// only relays them to whoever is watching.
+func handleGooseNotice(msg *RPCResponse, result *PromptResult) {
+	var params struct {
+		Update struct {
+			SessionUpdate string `json:"sessionUpdate"`
+			Status        struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"status"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return
+	}
+	if params.Update.SessionUpdate != "status_message" || params.Update.Status.Type != "notice" {
+		return
+	}
+	if m := strings.TrimSpace(params.Update.Status.Message); m != "" {
+		logging.Info("  goose: %s", m)
+		result.Notices = append(result.Notices, m)
 	}
 }

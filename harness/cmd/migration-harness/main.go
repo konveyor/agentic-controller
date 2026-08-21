@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -95,6 +96,9 @@ func runStage(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("hub resolution: %w", err)
 	}
+	// Model text is logged at stage end; whatever it says, the
+	// credentials goose inherits from this environment must not be in it.
+	red := newRedactor(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
 
 	if cfg.TargetBranch == creds.Branch {
 		return fmt.Errorf("TARGET_BRANCH %q must differ from source branch", cfg.TargetBranch)
@@ -338,7 +342,10 @@ func runStage(cmd *cobra.Command, args []string) error {
 		logging.Warn("run cancelled by an attached viewer")
 	}
 	if err != nil {
-		logging.Err("prompt failed: %v", err)
+		logging.Err("prompt failed: %s", red.redact(err.Error()))
+	}
+	if promptResult != nil && logAgentClosingMessage(promptResult, red) {
+		emitNotice("agent ended on goose's provider-error text — the model call may have failed; see the pod log")
 	}
 	emitPlan("completed", "completed", "in_progress")
 
@@ -551,4 +558,39 @@ func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir strin
 
 	logging.Ok("wrote %d analysis insights to %s", len(insights), analysisPath)
 	return true, nil
+}
+
+// closingMessageLimit bounds what a closing message adds to the pod log.
+// Enough for a summary or a provider error; a wall of text is cut, with
+// its full size noted.
+const closingMessageLimit = 4000
+
+// logAgentClosingMessage writes the agent's closing message (and any goose
+// notices) to the pod log, secrets redacted, and reports whether the message
+// is one of goose's provider-failure texts. The log line is the only durable record of what
+// the model said: the live transcript lives in the tee and dies with the
+// pod, and nothing else persists assistant text. goose reports provider
+// failures as assistant prose rather than RPC errors — without this a run
+// that never reached the model ends "stage succeeded — no changes to push"
+// with no trace of why.
+func logAgentClosingMessage(r *acp.PromptResult, red *redactor) (providerError bool) {
+	for _, n := range r.Notices {
+		logging.Warn("goose notice: %s", red.redact(n))
+	}
+	full := red.redact(strings.TrimSpace(r.FinalMessage()))
+	if full == "" {
+		logging.Info("agent closing message: none (%d text chunks during the turn)", len(r.Chunks))
+		return false
+	}
+	msg := full
+	if runes := []rune(full); len(runes) > closingMessageLimit {
+		msg = string(runes[:closingMessageLimit]) + fmt.Sprintf("… [truncated, %d bytes total]", len(full))
+	}
+	if r.ClosingProviderError() {
+		logging.Warn("agent closing message matches goose's provider-error text "+
+			"(the model call may have failed or been refused; goose ended the turn normally):\n%s", msg)
+		return true
+	}
+	logging.Info("agent closing message:\n%s", msg)
+	return false
 }

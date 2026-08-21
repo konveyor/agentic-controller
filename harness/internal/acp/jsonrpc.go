@@ -3,6 +3,7 @@ package acp
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"sync/atomic"
 )
 
@@ -79,7 +80,33 @@ type RPCError struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
+// Detail renders the error's data field for humans: a JSON string is
+// unquoted, anything else is compacted onto one line. Empty when the
+// agent sent none.
+func (e *RPCError) Detail() string {
+	d := bytes.TrimSpace(e.Data)
+	if len(d) == 0 || bytes.Equal(d, jsonNull) {
+		return ""
+	}
+	var str string
+	if err := json.Unmarshal(d, &str); err == nil {
+		return strings.TrimSpace(str)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, d); err == nil {
+		return compact.String()
+	}
+	return string(d)
+}
+
+// Error includes the data field. goose keeps the JSON-RPC message at the
+// boilerplate ("Internal error") and puts the cause in data ("Error getting
+// agent reply: Provider not set"); without data the cause is unrecoverable
+// once the pod is gone.
 func (e *RPCError) Error() string {
+	if d := e.Detail(); d != "" {
+		return e.Message + " — " + d
+	}
 	return e.Message
 }
 

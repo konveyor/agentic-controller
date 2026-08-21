@@ -3,11 +3,13 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -462,5 +464,242 @@ func TestPermissionStringIDAnswered(t *testing.T) {
 	kind, opt := selectedOption(t, reply)
 	if kind != "selected" || opt != "opt-ro" {
 		t.Fatalf("string-id ask not denied properly: %s/%s", kind, opt)
+	}
+}
+
+// The prompt error the harness logs must carry goose's data field.
+func TestSendPromptErrorIncludesGooseDetail(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer conn.Close()
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Errorf("read prompt: %v", err)
+			return
+		}
+		var promptReq struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(data, &promptReq); err != nil {
+			t.Errorf("parse prompt: %v", err)
+			return
+		}
+		// Text the agent streamed before dying, then what goose 1.45 answers
+		// when the session's provider never got built: message is
+		// boilerplate, data has the reason.
+		chunk := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":` +
+			`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Starting."}}}}`
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(chunk)); err != nil {
+			t.Errorf("send chunk: %v", err)
+			return
+		}
+		resp := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"error":{"code":-32603,"message":"Internal error",`+
+			`"data":"Error getting agent reply: Provider not set"}}`, promptReq.ID)
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(resp)); err != nil {
+			t.Errorf("send error: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server url: %v", err)
+	}
+	port, _ := strconv.Atoi(u.Port())
+	client, err := NewWSClient(u.Hostname(), port, "test-key")
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result, err := NewSessionClient(client).SendPrompt(ctx, "s1", []ContentBlock{{Type: "text", Text: "go"}}, 0)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	want := "prompt error -32603: Internal error — Error getting agent reply: Provider not set"
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+	var rpcErr *RPCError
+	if !errors.As(err, &rpcErr) || rpcErr.Code != -32603 {
+		t.Fatalf("error does not wrap the *RPCError: %v", err)
+	}
+	// The partial result survives the failure: it is where the closing
+	// message is when the turn ends like this.
+	if result == nil || result.FinalMessage() != "Starting." {
+		t.Fatalf("partial result not returned with the error: %+v", result)
+	}
+}
+
+// Max turns trips on a tool_call; the text that introduced that call is
+// the last thing the agent said and must survive as the closing message.
+func TestSendPromptMaxTurnsKeepsClosingText(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer conn.Close()
+		if _, _, err := conn.ReadMessage(); err != nil {
+			t.Errorf("read prompt: %v", err)
+			return
+		}
+		for _, u := range []string{
+			`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Let me run the build."}}`,
+			`{"sessionUpdate":"tool_call","toolCallId":"c1","title":"shell · mvn compile","status":"pending"}`,
+		} {
+			frame := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":` + u + `}}`
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(frame)); err != nil {
+				t.Errorf("send: %v", err)
+				return
+			}
+		}
+		// Keep the connection open; the client returns on its own.
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server url: %v", err)
+	}
+	port, _ := strconv.Atoi(u.Port())
+	client, err := NewWSClient(u.Hostname(), port, "test-key")
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result, err := NewSessionClient(client).SendPrompt(ctx, "s1", []ContentBlock{{Type: "text", Text: "go"}}, 1)
+	if err == nil || !strings.Contains(err.Error(), "max turns") {
+		t.Fatalf("expected max-turns error, got %v", err)
+	}
+	if result == nil || result.FinalMessage() != "Let me run the build." {
+		t.Fatalf("closing text lost at max turns: %+v", result)
+	}
+}
+
+func sessionUpdate(update string) *RPCResponse {
+	return &RPCResponse{
+		Method: "session/update",
+		Params: json.RawMessage(`{"sessionId":"s1","update":` + update + `}`),
+	}
+}
+
+func textChunk(text, messageID string) string {
+	return `{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":` + strconv.Quote(text) + `},` +
+		`"_meta":{"goose":{"messageId":` + strconv.Quote(messageID) + `}}}`
+}
+
+// The closing message is the text after the last tool call: narration that
+// introduces a call is not what the agent concluded with. Distinct goose
+// messages stay distinct; a mid-turn steer starts the closing text over.
+func TestPromptResultFinalMessageFollowsLastToolCall(t *testing.T) {
+	result := &PromptResult{}
+	for _, u := range []string{
+		textChunk("Let me look at the repository first.", "m1"),
+		`{"sessionUpdate":"tool_call","toolCallId":"c1","title":"shell · ls","status":"pending"}`,
+		`{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed"}`,
+		textChunk("**Round 1/10:** ", "m2"),
+		textChunk("Tell me something.", "m2"),
+		textChunk("I've reached the maximum number of actions I can do without user input.", "m3"),
+	} {
+		handlePromptNotification(sessionUpdate(u), result)
+	}
+	want := "**Round 1/10:** Tell me something.\nI've reached the maximum number of actions I can do without user input."
+	if got := result.FinalMessage(); got != want {
+		t.Fatalf("FinalMessage() = %q, want %q", got, want)
+	}
+	if len(result.Chunks) != 4 {
+		t.Fatalf("Chunks = %d, want 4 (all text is still collected)", len(result.Chunks))
+	}
+
+	// No tool call at all: the whole reply is the closing message.
+	result = &PromptResult{}
+	handlePromptNotification(sessionUpdate(textChunk("Tell me something.", "m1")), result)
+	if got := result.FinalMessage(); got != "Tell me something." {
+		t.Fatalf("FinalMessage() without tools = %q", got)
+	}
+
+	// A human steer mid-turn: the closing text is the reply to it.
+	handlePromptNotification(sessionUpdate(
+		`{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"stop and summarize"},`+
+			`"_meta":{"goose":{"steer":true}}}`), result)
+	handlePromptNotification(sessionUpdate(textChunk("Summary: nothing changed.", "m2")), result)
+	if got := result.FinalMessage(); got != "Summary: nothing changed." {
+		t.Fatalf("FinalMessage() after steer = %q", got)
+	}
+}
+
+// goose's own terminal notices travel on its custom update method, not as
+// agent text; they must be kept with the result.
+func TestPromptResultKeepsGooseNotices(t *testing.T) {
+	result := &PromptResult{}
+	notice := &RPCResponse{
+		Method: gooseUpdateMethod,
+		Params: json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"status_message",` +
+			`"status":{"type":"notice","message":"Unable to continue: Context limit still exceeded after compaction."}}}`),
+	}
+	usage := &RPCResponse{
+		Method: gooseUpdateMethod,
+		Params: json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","usage":{"totalTokens":5}}}`),
+	}
+	handlePromptNotification(usage, result)
+	handlePromptNotification(notice, result)
+	if len(result.Notices) != 1 || !strings.HasPrefix(result.Notices[0], "Unable to continue") {
+		t.Fatalf("Notices = %q", result.Notices)
+	}
+}
+
+func TestLooksLikeProviderError(t *testing.T) {
+	yes := []string{
+		"Ran into this error: Failed to call Bedrock: ValidationException.\n\nPlease retry if you think this is a transient or recoverable error.",
+		"Ran into this error trying to compact: throttled.\n\nPlease try again or create a new session",
+		"The provider refused this request.\n\nsafety\n\nPlease start a new session to continue",
+		"Connection reset by peer\n\nPlease resend your message to try again.",
+		"The model returned an empty response. Please resend your message to continue.",
+	}
+	for _, s := range yes {
+		if !LooksLikeProviderError(s) {
+			t.Errorf("expected provider error: %q", s)
+		}
+	}
+	// Streamed text followed by the failure in the same entry (no message
+	// id separated them): the failure starts a line.
+	yes = append(yes, "Here is the plan:\n1. Update pom.xml\nRan into this error: ThrottlingException.\n\nPlease retry if you think this is a transient or recoverable error.")
+	if !LooksLikeProviderError(yes[len(yes)-1]) {
+		t.Errorf("expected provider error after streamed text: %q", yes[len(yes)-1])
+	}
+	no := []string{
+		"Tell me something.",
+		"Done — committed 3 files.",
+		"The build log said \"Ran into this error: missing jakarta import\"; fixed in 2 files.",
+		"",
+	}
+	for _, s := range no {
+		if LooksLikeProviderError(s) {
+			t.Errorf("false positive: %q", s)
+		}
+	}
+
+	// Per message: a failure after an ordinary message is still a failure.
+	r := &PromptResult{}
+	r.appendClosing("Done with the first file.", "m1")
+	r.appendClosing("Ran into this error: 503.\n\nPlease retry if you think this is a transient or recoverable error.", "m2")
+	if !r.ClosingProviderError() {
+		t.Fatal("provider error in a later message not detected")
 	}
 }

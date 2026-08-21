@@ -1,0 +1,8 @@
+kind: bugfix
+
+description: >
+  The harness logs the agent's closing message (the text after its last tool
+  call) and goose's status notices at stage end, as a WARN when the message is
+  one of goose's provider-failure texts, and ACP/prompt errors now include
+  goose's error.data, so a failed session/prompt reads "Internal error — Error
+  getting agent reply: Provider not set" instead of a bare "Internal error".

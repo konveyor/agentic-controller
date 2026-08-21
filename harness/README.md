@@ -200,6 +200,8 @@ listener never binds keeps its `ACPReady` condition False (reason
 - **Credential isolation** — Hub and git push credentials are used by the harness only, cleared before goose starts. The agent commits locally; the harness pushes.
 - **ACP WebSocket** — connects to goose via JSON-RPC over WebSocket (ACP protocol).
 - **Exit status from ACP** — clean `SendPrompt` return = exit 0. Any error or goose crash = exit 1.
+  A provider failure that goose reports as assistant prose ("Ran into this error: …") is a clean
+  return: it is logged as a WARN closing message and notified to viewers, but still exits 0.
 
 ---
 
