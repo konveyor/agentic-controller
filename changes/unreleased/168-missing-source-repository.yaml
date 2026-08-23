@@ -1,0 +1,5 @@
+kind: bugfix
+
+description: >
+  Fail cleanly when a Hub application has no source repository instead of
+  panicking while resolving its git configuration.

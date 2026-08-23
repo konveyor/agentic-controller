@@ -466,6 +466,9 @@ func resolveFromHub(cfg *config.Config, hubClient *hub.Client) (*git.Credentials
 	if err != nil {
 		return nil, fmt.Errorf("fetch app: %w", err)
 	}
+	if app.Repository == nil {
+		return nil, fmt.Errorf("application %q has no source repository configured", app.Name)
+	}
 	logging.Ok("app: %s (id=%d), repo: %s", app.Name, app.ID, app.Repository.URL)
 
 	identity, err := hubClient.FetchGitCreds(appID)

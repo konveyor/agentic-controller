@@ -1,12 +1,15 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/konveyor/migration-harness/internal/config"
+	"github.com/konveyor/migration-harness/internal/hub"
 )
 
 func TestDiscoverSkills_NoSkills(t *testing.T) {
@@ -61,6 +64,28 @@ func TestDiscoverSkills_EmptySkillFile(t *testing.T) {
 	}
 	if len(paths) != 1 {
 		t.Errorf("expected 1 path (skill is mounted), got: %v", paths)
+	}
+}
+
+func TestResolveFromHub_NoRepository(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/applications/42" {
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":42,"name":"missing-repo","repository":null}`))
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{AppID: "42"}
+	_, err := resolveFromHub(cfg, hub.NewClient(server.URL, "test-token"))
+	if err == nil {
+		t.Fatal("expected an error for an application without a source repository")
+	}
+	if !strings.Contains(err.Error(), `application "missing-repo" has no source repository configured`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
