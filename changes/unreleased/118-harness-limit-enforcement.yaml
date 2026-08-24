@@ -1,0 +1,11 @@
+kind: feature
+description: >
+  Harness now enforces maxTurns and maxCost execution limits per ADR 0011:
+  maxTurns is enforced natively by the goose runtime via GOOSE_MAX_TURNS
+  (with a reserve held back for a wind-down handoff), maxCost is monitored
+  live via ACP usage_update and cancelled by the harness when the budget is
+  reached, and mode translates to GOOSE_MODE before the runtime launches.
+  On a limit being reached, the harness sends one handoff prompt asking the
+  agent to commit its work and write .konveyor/handoff.md, then exits via a
+  three-way contract (0 succeeded, 1 failed, 2 limit reached) with a usage
+  summary written to /dev/termination-log on every exit.
