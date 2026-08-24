@@ -1,0 +1,132 @@
+package params
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func writeParamsFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "params.json")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write params file: %v", err)
+	}
+	return path
+}
+
+func TestLoadMissingFileReturnsZeroValue(t *testing.T) {
+	f, err := Load(filepath.Join(t.TempDir(), "does-not-exist.json"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(f.Workflow) != 0 || len(f.Agent) != 0 || len(f.Execution) != 0 {
+		t.Errorf("expected zero-value File, got %+v", f)
+	}
+}
+
+func TestLoadMalformedJSONErrors(t *testing.T) {
+	path := writeParamsFile(t, "{not json")
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for malformed JSON, got nil")
+	}
+}
+
+func TestLoadParsesThreeSections(t *testing.T) {
+	path := writeParamsFile(t, `{
+		"workflow": {"application_name": "coolstore"},
+		"agent": {"source_url": "https://github.com/example/app", "dry_run": true},
+		"execution": {"mode": "auto", "maxTurns": 200}
+	}`)
+
+	f, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if f.Workflow["application_name"] != "coolstore" {
+		t.Errorf("Workflow[application_name] = %v", f.Workflow["application_name"])
+	}
+	if f.Agent["source_url"] != "https://github.com/example/app" {
+		t.Errorf("Agent[source_url] = %v", f.Agent["source_url"])
+	}
+	if f.Agent["dry_run"] != true {
+		t.Errorf("Agent[dry_run] = %v", f.Agent["dry_run"])
+	}
+	if f.Execution["mode"] != "auto" {
+		t.Errorf("Execution[mode] = %v", f.Execution["mode"])
+	}
+}
+
+func TestFileMaxTurns(t *testing.T) {
+	cases := []struct {
+		name      string
+		execution map[string]any
+		wantN     int
+		wantOK    bool
+	}{
+		{"present and positive", map[string]any{"maxTurns": float64(500)}, 500, true},
+		{"absent", map[string]any{"mode": "auto"}, 0, false},
+		{"zero", map[string]any{"maxTurns": float64(0)}, 0, false},
+		{"negative", map[string]any{"maxTurns": float64(-1)}, 0, false},
+		{"non-numeric", map[string]any{"maxTurns": "500"}, 0, false},
+		{"nil execution", nil, 0, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			n, ok := File{Execution: c.execution}.MaxTurns()
+			if n != c.wantN || ok != c.wantOK {
+				t.Errorf("MaxTurns() = (%d, %v), want (%d, %v)", n, ok, c.wantN, c.wantOK)
+			}
+		})
+	}
+}
+
+func TestRenderSectionEmptyWhenNoValues(t *testing.T) {
+	if got := RenderSection(File{}); got != "" {
+		t.Errorf("RenderSection(empty) = %q, want empty string", got)
+	}
+}
+
+func TestRenderSectionFormatsWorkflowAndAgent(t *testing.T) {
+	f := File{
+		Workflow: map[string]any{"application_name": "coolstore", "target_framework": "quarkus"},
+		Agent:    map[string]any{"source_url": "https://github.com/example/app", "dry_run": true},
+	}
+
+	got := RenderSection(f)
+
+	want := "### Workflow\n" +
+		"- application_name: coolstore\n" +
+		"- target_framework: quarkus\n" +
+		"\n" +
+		"### Agent\n" +
+		"- dry_run: true\n" +
+		"- source_url: https://github.com/example/app"
+	if got != want {
+		t.Errorf("RenderSection() =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestRenderSectionOmitsEmptySection(t *testing.T) {
+	got := RenderSection(File{Agent: map[string]any{"foo": "bar"}})
+
+	if strings.Contains(got, "### Workflow") {
+		t.Errorf("expected no Workflow section, got:\n%s", got)
+	}
+	if !strings.Contains(got, "### Agent") {
+		t.Errorf("expected Agent section, got:\n%s", got)
+	}
+}
+
+func TestRenderSectionFormatsWholeNumbersWithoutDecimal(t *testing.T) {
+	got := RenderSection(File{Agent: map[string]any{"max_fix_iterations": float64(5)}})
+
+	if !strings.Contains(got, "- max_fix_iterations: 5\n") && !strings.HasSuffix(got, "- max_fix_iterations: 5") {
+		t.Errorf("expected integer formatting, got:\n%s", got)
+	}
+	if strings.Contains(got, "5.") {
+		t.Errorf("expected no decimal point for whole number, got:\n%s", got)
+	}
+}

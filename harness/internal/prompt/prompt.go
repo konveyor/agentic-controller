@@ -1,9 +1,10 @@
 // Package prompt assembles the prompt sent to the agent for a stage.
 //
 // The prompt is layered: environment rules the harness imposes, then the
-// Agent's standing prompt, then the workflow guide, then the skill, then the
-// stage task. Later layers are more specific; the environment rules come first
-// because they constrain everything after them.
+// Agent's standing prompt, then the workflow guide, then the resolved
+// parameter values, then the skill, then the stage task. Later layers are
+// more specific; the environment rules come first because they constrain
+// everything after them.
 package prompt
 
 import (
@@ -47,6 +48,10 @@ type Layers struct {
 	Rules []Rule
 	// WorkflowGuide is the workflow's ambient guide.
 	WorkflowGuide string
+	// Parameters is the pre-rendered body of the "## Parameters" section
+	// (workflow and agent values as text, per ADR 0009). Empty when there
+	// are no parameter values to show.
+	Parameters string
 	// StageTask is the task for this stage.
 	StageTask string
 	// AskUser: the session mounts the harness's ask_user tool, so the
@@ -95,6 +100,12 @@ func Build(l Layers) string {
 	if l.WorkflowGuide != "" {
 		b.WriteString("## Workflow Guide\n\n")
 		b.WriteString(l.WorkflowGuide)
+		b.WriteString("\n\n")
+	}
+
+	if l.Parameters != "" {
+		b.WriteString("## Parameters\n\n")
+		b.WriteString(l.Parameters)
 		b.WriteString("\n\n")
 	}
 

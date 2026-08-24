@@ -1,0 +1,7 @@
+kind: feature
+description: >
+  Harness reads all parameter and execution-control values from the
+  controller-written /run/konveyor/params.json (ADR 0009) instead of
+  hard-coded KONVEYOR_PARAM_* env vars, and appends a "## Parameters"
+  section to the agent prompt so workflow and agent values are visible
+  with no skill involvement.

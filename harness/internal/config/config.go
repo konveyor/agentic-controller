@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/konveyor/migration-harness/internal/params"
 )
 
 const (
@@ -70,6 +72,11 @@ type Config struct {
 	AgentPrompt       string
 	WorkflowGuide     string
 	StageInstructions string
+
+	// Params is the parsed /run/konveyor/params.json (ADR 0009): workflow
+	// and agent parameter values, plus resolved execution controls. Its
+	// MaxTurns, when present, overrides the default above.
+	Params params.File
 }
 
 // envWithFallback reads primary first, falling back to fallback.
@@ -140,7 +147,12 @@ func LoadFromEnv() (*Config, error) {
 		StageInstructions: os.Getenv("KONVEYOR_INSTRUCTIONS"),
 	}
 
-	if n, err := strconv.Atoi(os.Getenv("KONVEYOR_PARAM_MAX_TURNS")); err == nil && n > 0 {
+	paramsFile, err := params.Load(paramsFilePath())
+	if err != nil {
+		return nil, fmt.Errorf("load params: %w", err)
+	}
+	cfg.Params = paramsFile
+	if n, ok := paramsFile.MaxTurns(); ok {
 		cfg.MaxTurns = n
 	}
 
@@ -170,6 +182,16 @@ func envSwitchedOff(name string) bool {
 		return true
 	}
 	return false
+}
+
+// paramsFilePath returns the path to the controller-written params.json
+// (ADR 0009). HARNESS_PARAMS_FILE overrides the contract path — mainly
+// so tests aren't reading from /run/konveyor.
+func paramsFilePath() string {
+	if v := os.Getenv("HARNESS_PARAMS_FILE"); v != "" {
+		return v
+	}
+	return params.FilePath
 }
 
 // workflowGuideFromEnv reads the workflow guide the controller injects.

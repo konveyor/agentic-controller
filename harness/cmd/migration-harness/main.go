@@ -23,7 +23,7 @@ import (
 	"github.com/konveyor/migration-harness/internal/goose"
 	"github.com/konveyor/migration-harness/internal/hub"
 	"github.com/konveyor/migration-harness/internal/logging"
-
+	"github.com/konveyor/migration-harness/internal/params"
 	"github.com/konveyor/migration-harness/internal/prompt"
 	"github.com/konveyor/migration-harness/internal/tee"
 	"github.com/konveyor/migration-harness/internal/termination"
@@ -374,6 +374,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 		AgentPrompt:   cfg.AgentPrompt,
 		Rules:         rules,
 		WorkflowGuide: cfg.WorkflowGuide,
+		Parameters:    params.RenderSection(cfg.Params),
 		StageTask:     cfg.StageInstructions,
 		AskUser:       len(mcpServers) > 0,
 	})

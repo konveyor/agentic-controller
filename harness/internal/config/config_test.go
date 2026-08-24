@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ func clearKonveyorEnv(t *testing.T) {
 		"KONVEYOR_MODEL_PRIMARY_PROVIDER",
 		"KONVEYOR_MODEL_PRIMARY_ENDPOINT",
 		"KONVEYOR_MODEL_PRIMARY_API_KEY",
-		"KONVEYOR_PARAM_MAX_TURNS",
+		"HARNESS_PARAMS_FILE",
 		"HUB_BASE_URL",
 		"HUB_TOKEN",
 		"APP_ID",
@@ -136,10 +137,10 @@ func TestLoadFromEnv(t *testing.T) {
 		}
 	})
 
-	t.Run("reads optional param overrides", func(t *testing.T) {
+	t.Run("overrides max turns from params.json execution section", func(t *testing.T) {
 		clearKonveyorEnv(t)
 		setRequiredEnv(t)
-		t.Setenv("KONVEYOR_PARAM_MAX_TURNS", "500")
+		t.Setenv("HARNESS_PARAMS_FILE", writeParamsFile(t, `{"execution": {"maxTurns": 500}}`))
 
 		cfg, err := LoadFromEnv()
 		if err != nil {
@@ -213,6 +214,60 @@ func TestLoadFromEnv(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("no params.json leaves the default max turns", func(t *testing.T) {
+		clearKonveyorEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("HARNESS_PARAMS_FILE", filepath.Join(t.TempDir(), "does-not-exist.json"))
+
+		cfg, err := LoadFromEnv()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.MaxTurns != DefaultMaxTurns {
+			t.Errorf("MaxTurns = %d, want default %d", cfg.MaxTurns, DefaultMaxTurns)
+		}
+	})
+
+	t.Run("errors on malformed params.json", func(t *testing.T) {
+		clearKonveyorEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("HARNESS_PARAMS_FILE", writeParamsFile(t, "{not json"))
+
+		if _, err := LoadFromEnv(); err == nil {
+			t.Fatal("expected error for malformed params.json, got nil")
+		}
+	})
+
+	t.Run("populates Params from params.json for prompt rendering", func(t *testing.T) {
+		clearKonveyorEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("HARNESS_PARAMS_FILE", writeParamsFile(t, `{
+			"workflow": {"application_name": "coolstore"},
+			"agent": {"source_url": "https://github.com/example/app"}
+		}`))
+
+		cfg, err := LoadFromEnv()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.Params.Workflow["application_name"] != "coolstore" {
+			t.Errorf("Params.Workflow[application_name] = %v", cfg.Params.Workflow["application_name"])
+		}
+		if cfg.Params.Agent["source_url"] != "https://github.com/example/app" {
+			t.Errorf("Params.Agent[source_url] = %v", cfg.Params.Agent["source_url"])
+		}
+	})
+}
+
+// writeParamsFile writes content to a temp params.json and returns its path.
+func writeParamsFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "params.json")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write params file: %v", err)
+	}
+	return path
 }
 
 // The legacy KONVEYOR_MODEL_PRIMARY_* env vars are still read as

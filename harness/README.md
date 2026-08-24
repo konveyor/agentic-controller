@@ -66,9 +66,9 @@ All configuration is via environment variables — there is no config file or `i
 | `KONVEYOR_LLM_ENDPOINT` | — | Custom LLM endpoint URL (fallback: `KONVEYOR_MODEL_PRIMARY_ENDPOINT`) |
 | `KONVEYOR_LLM_API_KEY` | — | LLM API key (fallback: `KONVEYOR_MODEL_PRIMARY_API_KEY`) |
 | `HUB_TOKEN` | — | Hub authentication token |
-| `KONVEYOR_PARAM_MAX_TURNS` | `200` | Max tool-call turns before terminating |
 | `HARNESS_WORK_DIR` | `/workspace/repo` | Clone directory |
 | `HARNESS_SKILLS_DIR` | `/opt/skills` | Skills mount directory |
+| `HARNESS_PARAMS_FILE` | `/run/konveyor/params.json` | Path to the controller-written parameter file (ADR 0009) |
 | `KONVEYOR_PROMPT` | — | Agent-level standing instructions |
 | `KONVEYOR_WORKFLOW_GUIDE` | — | Workflow guide context |
 | `KONVEYOR_INSTRUCTIONS` | — | Stage-specific task instructions |
@@ -76,6 +76,25 @@ All configuration is via environment variables — there is no config file or `i
 | `HARNESS_HITL_STEER` | `on` | `off` makes the run stream watch-only: viewer steer/cancel frames for the run session are refused instead of relayed |
 | `HARNESS_HITL_TIMEOUT_SECONDS` | `180` | How long a permission ask or an `ask_user` question waits for an attached viewer; values above 600 are clamped to 600 |
 | `HARNESS_HITL_ASK` | `on` | `off` leaves the `ask_user` tool out of the session (the agent then has no way to block on a human answer) |
+
+### Parameters (`/run/konveyor/params.json`)
+
+Max tool-call turns (default `200`) and other execution controls, plus
+workflow/agent parameter values, are delivered via a three-section JSON file
+mounted by the controller (ADR 0009), not individual `KONVEYOR_PARAM_*` env
+vars:
+
+```json
+{
+  "workflow": { "application_name": "coolstore" },
+  "agent": { "source_url": "https://github.com/example/app", "dry_run": true },
+  "execution": { "mode": "auto", "maxTurns": 200, "maxCost": "10.00" }
+}
+```
+
+`execution.maxTurns`, when present, overrides the default max turns. Workflow
+and agent values are also appended to the agent's prompt as a `## Parameters`
+section so the agent sees them without any skill involvement.
 
 ---
 

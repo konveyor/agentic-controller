@@ -9,6 +9,7 @@ func fullLayers() Layers {
 	return Layers{
 		AgentPrompt:   "AGENT PROMPT",
 		WorkflowGuide: "WORKFLOW GUIDE",
+		Parameters:    "PARAMETERS BODY",
 		StageTask:     "STAGE TASK",
 	}
 }
@@ -21,7 +22,7 @@ func TestBuildPutsStagingRulesFirst(t *testing.T) {
 	}
 
 	rules := strings.Index(got, "Working Environment")
-	for _, later := range []string{"AGENT PROMPT", "WORKFLOW GUIDE", "STAGE TASK"} {
+	for _, later := range []string{"AGENT PROMPT", "WORKFLOW GUIDE", "PARAMETERS BODY", "STAGE TASK"} {
 		if strings.Index(got, later) < rules {
 			t.Errorf("%q appears before the staging rules; rules must come first", later)
 		}
@@ -31,7 +32,7 @@ func TestBuildPutsStagingRulesFirst(t *testing.T) {
 func TestBuildOrdersLayersLeastToMostSpecific(t *testing.T) {
 	got := Build(fullLayers())
 
-	order := []string{"AGENT PROMPT", "WORKFLOW GUIDE", "STAGE TASK"}
+	order := []string{"AGENT PROMPT", "WORKFLOW GUIDE", "PARAMETERS BODY", "STAGE TASK"}
 	for i := 1; i < len(order); i++ {
 		if strings.Index(got, order[i]) < strings.Index(got, order[i-1]) {
 			t.Errorf("%q should come after %q", order[i], order[i-1])
@@ -42,13 +43,21 @@ func TestBuildOrdersLayersLeastToMostSpecific(t *testing.T) {
 func TestBuildOmitsEmptyLayers(t *testing.T) {
 	got := Build(Layers{})
 
-	for _, header := range []string{"## Workflow Guide", "## Stage Task"} {
+	for _, header := range []string{"## Workflow Guide", "## Parameters", "## Stage Task"} {
 		if strings.Contains(got, header) {
 			t.Errorf("empty layer produced %q header", header)
 		}
 	}
 	if !strings.Contains(got, "## Working Guidelines") {
 		t.Error("working guidelines should always be included")
+	}
+}
+
+func TestBuildIncludesParametersSection(t *testing.T) {
+	got := Build(Layers{Parameters: "### Agent\n- foo: bar"})
+
+	if !strings.Contains(got, "## Parameters\n\n### Agent\n- foo: bar") {
+		t.Errorf("parameters section missing or malformed:\n%s", got)
 	}
 }
 
