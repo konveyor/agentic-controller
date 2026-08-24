@@ -77,6 +77,12 @@ type Config struct {
 	// and agent parameter values, plus resolved execution controls. Its
 	// MaxTurns, when present, overrides the default above.
 	Params params.File
+
+	// CostLimit is params.ReserveFraction of the parsed
+	// execution.maxCost, in USD; 0 when maxCost is unset. SendPrompt
+	// cancels the run when cumulative usage_update cost reaches this
+	// threshold (ADR 0011).
+	CostLimit float64
 }
 
 // envWithFallback reads primary first, falling back to fallback.
@@ -154,6 +160,14 @@ func LoadFromEnv() (*Config, error) {
 	cfg.Params = paramsFile
 	if n, ok := paramsFile.MaxTurns(); ok {
 		cfg.MaxTurns = n
+	}
+
+	if paramsFile.Execution.MaxCost != "" {
+		parsed, err := strconv.ParseFloat(paramsFile.Execution.MaxCost, 64)
+		if err != nil {
+			return nil, fmt.Errorf("execution.maxCost %q is not numeric: %w", paramsFile.Execution.MaxCost, err)
+		}
+		cfg.CostLimit = parsed * params.ReserveFraction
 	}
 
 	// Default-ON kill switches: the one E2E path must exercise the tee

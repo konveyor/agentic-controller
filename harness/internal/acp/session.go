@@ -286,6 +286,20 @@ type PromptResult struct {
 	Usage      *PromptUsage `json:"usage,omitempty"`
 	Chunks     []string     `json:"-"`
 
+	CostLimitReached bool `json:"-"`
+	// Cost is the last cost.amount observed during THIS call via
+	// usage_update (0 if the provider never reported one — ACP 0011
+	// documents cost as optional).
+	Cost float64 `json:"-"`
+	// TurnsUsed counts tool_call notifications observed during THIS
+	// call. Reporting only — nothing reads this to decide when to stop;
+	// the runtime enforces turn limits natively now (ADR 0011).
+	TurnsUsed int `json:"-"`
+	// ContextUsed / ContextSize are the last usage_update occupancy
+	// snapshot observed during THIS call (0 if never reported).
+	ContextUsed int `json:"-"`
+	ContextSize int `json:"-"`
+
 	// closing collects the agent messages streamed after the most recent
 	// tool call (or the latest human steer): what the model says when it
 	// stops. Text before a tool call is narration about work it then does;
@@ -378,9 +392,13 @@ type PromptUsage struct {
 }
 
 // SendPrompt sends a prompt to a session and collects the streaming
-// response. maxTurns limits the number of tool calls before the prompt
-// is terminated. If maxTurns is 0, no limit is enforced.
-func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, content []ContentBlock, maxTurns int) (*PromptResult, error) {
+// response. costLimit is the cumulative usage_update cost.amount
+// threshold above which the harness sends its own session/cancel; 0
+// disables cost monitoring. Turn limits are enforced natively by the
+// runtime (GOOSE_MAX_TURNS) — SendPrompt does not count turns to decide
+// when to stop; TurnsUsed on the result is for reporting only (ADR
+// 0011).
+func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, content []ContentBlock, costLimit float64) (*PromptResult, error) {
 	req := newRequest("session/prompt", &PromptParams{
 		SessionID: sessionID,
 		Prompt:    content,
@@ -396,7 +414,26 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 	}
 
 	result := &PromptResult{}
-	turnCount := 0
+	sawCost := false
+	cancelSent := false
+
+	process := func(n *RPCResponse) {
+		if isToolCall(n) {
+			result.TurnsUsed++
+		}
+		handlePromptNotification(n, result)
+		trackUsage(n, result, &sawCost)
+	}
+
+	maybeCancelForCost := func() {
+		if costLimit > 0 && !cancelSent && result.Cost >= costLimit {
+			cancelSent = true
+			result.CostLimitReached = true
+			if err := c.ws.Notify("session/cancel", map[string]any{"sessionId": sessionID}); err != nil {
+				logging.Warn("send session/cancel for cost limit: %v", err)
+			}
+		}
+	}
 
 	// Agent-initiated requests (permission asks) no longer appear here —
 	// the demux dispatches them to answerAgentRequest on their own
@@ -411,7 +448,7 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 			select {
 			case msg := <-respCh:
 				for _, n := range drainNotifications(notifCh) {
-					handlePromptNotification(n, result)
+					process(n)
 				}
 				if msg.Error != nil {
 					// Hand back what streamed before the error: the closing
@@ -426,22 +463,14 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 				return nil, fmt.Errorf("websocket connection closed during prompt")
 			}
 		case msg := <-notifCh:
-			if isToolCall(msg) {
-				turnCount++
-				if maxTurns > 0 && turnCount >= maxTurns {
-					// Decide before handling the call: the text that
-					// introduced it is the last thing the agent said.
-					logging.Warn("max turns reached (%d), terminating", maxTurns)
-					return result, fmt.Errorf("max turns reached (%d)", maxTurns)
-				}
-			}
-			handlePromptNotification(msg, result)
+			process(msg)
+			maybeCancelForCost()
 		case msg := <-respCh:
 			// Notifications buffered before the response still belong to
 			// this turn — drain them so a trailing chunk is not lost when
 			// select picks respCh first (mirrors WSClient.Call).
 			for _, n := range drainNotifications(notifCh) {
-				handlePromptNotification(n, result)
+				process(n)
 			}
 			if msg.Error != nil {
 				// Hand back what streamed before the error: the closing
@@ -450,6 +479,9 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 			}
 			if err := json.Unmarshal(msg.Result, result); err != nil {
 				return nil, fmt.Errorf("parse prompt result: %w", err)
+			}
+			if costLimit > 0 && !sawCost {
+				logging.Warn("maxCost is configured but no usage_update reported cost — cost enforcement had no effect on this prompt")
 			}
 			return result, nil
 		}
@@ -627,8 +659,57 @@ func isToolCall(msg *RPCResponse) bool {
 
 // gooseUpdateMethod carries goose's custom session updates (usage,
 // status notices); the harness declares the capability in Initialize.
+// Duplicated from the tee package's own constant of the same name —
+// these are two independent JSON-RPC clients and neither package
+// imports the other's internals.
 const gooseUpdateMethod = "_goose/unstable/session/update"
 
+// trackUsage extracts cost/context data from a usage_update frame
+// (ADR 0011) into result. A frame with no cost field leaves
+// result.Cost unchanged rather than resetting it to zero — cost is
+// documented as optional (ADR 0011: "optional cost data"); sawCost
+// distinguishes "never reported" from "reported and zero" so the
+// caller can warn when cost enforcement never got any data at all.
+//
+// Context occupancy's field name is unconfirmed against real goose:
+// ADR 0011's example JSON uses "size", but this repo's own tee test
+// fixture (internal/tee/tee_test.go) uses "contextLimit" for the same
+// concept. Both are accepted defensively; "size" wins if a frame
+// somehow carries both.
+func trackUsage(msg *RPCResponse, result *PromptResult, sawCost *bool) {
+	if msg.Method != gooseUpdateMethod {
+		return
+	}
+	var params struct {
+		Update struct {
+			SessionUpdate string `json:"sessionUpdate"`
+			Used          int    `json:"used"`
+			Size          int    `json:"size"`
+			ContextLimit  int    `json:"contextLimit"`
+			Cost          *struct {
+				Amount float64 `json:"amount"`
+			} `json:"cost"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return
+	}
+	if params.Update.SessionUpdate != "usage_update" {
+		return
+	}
+	if params.Update.Cost != nil {
+		result.Cost = params.Update.Cost.Amount
+		*sawCost = true
+	}
+	size := params.Update.Size
+	if size == 0 {
+		size = params.Update.ContextLimit
+	}
+	if size > 0 {
+		result.ContextUsed = params.Update.Used
+		result.ContextSize = size
+	}
+}
 func handlePromptNotification(msg *RPCResponse, result *PromptResult) {
 	if msg.Method == gooseUpdateMethod {
 		handleGooseNotice(msg, result)

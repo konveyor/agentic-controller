@@ -132,3 +132,9 @@ func TestRenderSectionFormatsWholeNumbersWithoutDecimal(t *testing.T) {
 		t.Errorf("expected no decimal point for whole number, got:\n%s", got)
 	}
 }
+
+func TestReserveFractionIsAFractionOfOne(t *testing.T) {
+	if ReserveFraction <= 0 || ReserveFraction >= 1 {
+		t.Fatalf("ReserveFraction = %v, want a value strictly between 0 and 1", ReserveFraction)
+	}
+}

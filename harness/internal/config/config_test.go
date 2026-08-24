@@ -258,6 +258,43 @@ func TestLoadFromEnv(t *testing.T) {
 			t.Errorf("Params.Agent[source_url] = %v", cfg.Params.Agent["source_url"])
 		}
 	})
+
+	t.Run("computes CostLimit from execution.maxCost with the reserve fraction applied", func(t *testing.T) {
+		clearKonveyorEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("HARNESS_PARAMS_FILE", writeParamsFile(t, `{"execution": {"maxCost": "10.00"}}`))
+
+		cfg, err := LoadFromEnv()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.CostLimit != 8.5 {
+			t.Errorf("CostLimit = %v, want 8.5 (10.00 * 0.85)", cfg.CostLimit)
+		}
+	})
+
+	t.Run("no maxCost leaves CostLimit at zero", func(t *testing.T) {
+		clearKonveyorEnv(t)
+		setRequiredEnv(t)
+
+		cfg, err := LoadFromEnv()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.CostLimit != 0 {
+			t.Errorf("CostLimit = %v, want 0", cfg.CostLimit)
+		}
+	})
+
+	t.Run("errors on non-numeric maxCost", func(t *testing.T) {
+		clearKonveyorEnv(t)
+		setRequiredEnv(t)
+		t.Setenv("HARNESS_PARAMS_FILE", writeParamsFile(t, `{"execution": {"maxCost": "not-a-number"}}`))
+
+		if _, err := LoadFromEnv(); err == nil {
+			t.Fatal("expected error for non-numeric maxCost, got nil")
+		}
+	})
 }
 
 // writeParamsFile writes content to a temp params.json and returns its path.

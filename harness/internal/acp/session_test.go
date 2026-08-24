@@ -718,59 +718,6 @@ func TestSendPromptErrorIncludesGooseDetail(t *testing.T) {
 	}
 }
 
-// Max turns trips on a tool_call; the text that introduced that call is
-// the last thing the agent said and must survive as the closing message.
-func TestSendPromptMaxTurnsKeepsClosingText(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Errorf("upgrade: %v", err)
-			return
-		}
-		defer conn.Close()
-		if _, _, err := conn.ReadMessage(); err != nil {
-			t.Errorf("read prompt: %v", err)
-			return
-		}
-		for _, u := range []string{
-			`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Let me run the build."}}`,
-			`{"sessionUpdate":"tool_call","toolCallId":"c1","title":"shell · mvn compile","status":"pending"}`,
-		} {
-			frame := `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":` + u + `}}`
-			if err := conn.WriteMessage(websocket.TextMessage, []byte(frame)); err != nil {
-				t.Errorf("send: %v", err)
-				return
-			}
-		}
-		// Keep the connection open; the client returns on its own.
-		_, _, _ = conn.ReadMessage()
-	}))
-	defer srv.Close()
-
-	u, err := url.Parse(srv.URL)
-	if err != nil {
-		t.Fatalf("parse test server url: %v", err)
-	}
-	port, _ := strconv.Atoi(u.Port())
-	client, err := NewWSClient(u.Hostname(), port, "test-key")
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer client.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	result, err := NewSessionClient(client).SendPrompt(ctx, "s1", []ContentBlock{{Type: "text", Text: "go"}}, 1)
-	if err == nil || !strings.Contains(err.Error(), "max turns") {
-		t.Fatalf("expected max-turns error, got %v", err)
-	}
-	if result == nil || result.FinalMessage() != "Let me run the build." {
-		t.Fatalf("closing text lost at max turns: %+v", result)
-	}
-}
-
 func sessionUpdate(update string) *RPCResponse {
 	return &RPCResponse{
 		Method: "session/update",

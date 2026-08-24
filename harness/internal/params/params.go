@@ -17,6 +17,11 @@ import (
 // (ADR 0009) — any harness implementation must read this file.
 const Path = "/run/konveyor/params.json"
 
+// ReserveFraction is the portion of a configured maxTurns/maxCost
+// budget the runtime is allowed to consume before the harness reserves
+// the remainder for its wind-down handoff prompt (ADR 0011).
+const ReserveFraction = 0.85
+
 // Execution is the controller's resolved execution controls (ADR 0011) —
 // first-class CRD fields with defined semantics, unlike the open-ended
 // workflow/agent param maps, so they get their own typed section.

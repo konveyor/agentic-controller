@@ -3,6 +3,7 @@ package goose
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/konveyor/migration-harness/internal/logging"
+	"github.com/konveyor/migration-harness/internal/params"
 )
 
 // ServeProcess manages a goose serve process.
@@ -66,6 +68,14 @@ type ServeConfig struct {
 	Model    string
 	APIKey   string
 	Endpoint string
+	// Mode sets GOOSE_MODE (auto/approve); empty defaults to "auto"
+	// (ADR 0011).
+	Mode string
+	// MaxTurns is the configured (not yet reserved) turn budget.
+	// StartServe reserves params.ReserveFraction of it for the
+	// harness's wind-down handoff prompt when setting GOOSE_MAX_TURNS
+	// (ADR 0011) — 0 means unset (runtime default applies).
+	MaxTurns int
 }
 
 func StartServe(ctx context.Context, cfg ServeConfig) (*ServeProcess, error) {
@@ -91,6 +101,7 @@ func StartServe(ctx context.Context, cfg ServeConfig) (*ServeProcess, error) {
 		"--with-builtin", "developer",
 	)
 	env, tempDirs := providerEnv(provider, model, apiKey, endpoint)
+	env = append(env, executionEnv(cfg.Mode, cfg.MaxTurns)...)
 	if secretKey != "" {
 		env = append(env, "GOOSE_SERVER__SECRET_KEY="+secretKey)
 	}
@@ -257,6 +268,27 @@ func providerEnv(provider, model, apiKey, endpoint string) (env []string, tempDi
 	}
 
 	return env, tempDirs
+}
+
+// executionEnv translates execution controls into the env vars goose
+// expects (ADR 0011). GOOSE_MODE is always set (default "auto" when
+// mode is empty, so behavior is explicit even without a params.json
+// execution.mode value). GOOSE_MAX_TURNS is set only when maxTurns > 0,
+// reserving params.ReserveFraction of it for the harness's wind-down
+// handoff prompt — the runtime is the sole turn counter now (ADR 0011).
+func executionEnv(mode string, maxTurns int) []string {
+	if mode == "" {
+		mode = "auto"
+	}
+	env := []string{"GOOSE_MODE=" + mode}
+	if maxTurns > 0 {
+		native := int(math.Floor(float64(maxTurns) * params.ReserveFraction))
+		if native < 1 {
+			native = 1
+		}
+		env = append(env, fmt.Sprintf("GOOSE_MAX_TURNS=%d", native))
+	}
+	return env
 }
 
 func filterEnvKey(env []string, key string) []string {

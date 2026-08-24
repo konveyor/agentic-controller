@@ -134,3 +134,26 @@ func assertEnvNotPresent(t *testing.T, env []string, key string) {
 		}
 	}
 }
+
+func TestExecutionEnvSetsModeAndDefaultsToAuto(t *testing.T) {
+	env := executionEnv("approve", 0)
+	assertEnvContains(t, env, "GOOSE_MODE", "approve")
+
+	env = executionEnv("", 0)
+	assertEnvContains(t, env, "GOOSE_MODE", "auto")
+}
+
+func TestExecutionEnvOmitsMaxTurnsWhenUnset(t *testing.T) {
+	env := executionEnv("auto", 0)
+	assertEnvNotPresent(t, env, "GOOSE_MAX_TURNS")
+}
+
+func TestExecutionEnvAppliesReserveFraction(t *testing.T) {
+	env := executionEnv("auto", 200)
+	assertEnvContains(t, env, "GOOSE_MAX_TURNS", "170")
+}
+
+func TestExecutionEnvClampsSmallBudgetsToAtLeastOne(t *testing.T) {
+	env := executionEnv("auto", 1)
+	assertEnvContains(t, env, "GOOSE_MAX_TURNS", "1")
+}

@@ -35,10 +35,20 @@ var rootCmd = &cobra.Command{
 	Short: "Thin git plumbing wrapper for goose-based migration stages",
 }
 
+// exitCode carries runStage's exit code out of cobra's RunE closure —
+// cobra's own Execute() error handling only distinguishes "no error"
+// from "error", which cannot express the harness's three-way exit-code
+// contract (ADR 0011: 0 succeeded, 1 failed, 2 limit reached).
+var exitCode int
+
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run a single migration stage (plan, execute, or verify)",
-	RunE:  runStage,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		code, err := runStage(cmd, args)
+		exitCode = code
+		return err
+	},
 }
 
 // askUserCmd is the stdio MCP server goose spawns for the ask_user tool
@@ -72,18 +82,31 @@ func main() {
 		// Surface the failure message on the pod termination log so the reason
 		// reaches the AgentRun's Ready condition, not solely the logs (#143).
 		_ = termination.Write(err.Error())
-		os.Exit(1)
+		if exitCode == 0 {
+			// Safety net: an error surfaced from outside runStage (e.g. a
+			// cobra flag-parsing error, so RunE never ran) leaves exitCode
+			// at its zero value — that must still mean failure.
+			exitCode = 1
+		}
+		os.Exit(exitCode)
 	}
+	os.Exit(exitCode)
 }
 
-func runStage(cmd *cobra.Command, args []string) error {
+func runStage(cmd *cobra.Command, args []string) (int, error) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// Written on the way out regardless of how runStage returns — early
+	// setup failures keep this safe default; a real prompt outcome
+	// overwrites it below (ADR 0011: the blob is written "on exit").
+	term := terminationBlob{ExitCode: 1, Outcome: outcomeFailed.String()}
+	defer func() { writeTerminationLog(terminationLogPath(), term) }()
 
 	// 1. Load config from env
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
-		return fmt.Errorf("config: %w", err)
+		return 1, fmt.Errorf("config: %w", err)
 	}
 
 	// 2. Resolve app info + git creds from Hub
@@ -123,14 +146,14 @@ func runStage(cmd *cobra.Command, args []string) error {
 
 	creds, err := resolveFromHub(cfg, hubClient)
 	if err != nil {
-		return fmt.Errorf("hub resolution: %w", err)
+		return 1, fmt.Errorf("hub resolution: %w", err)
 	}
 	// Model text is logged at stage end; whatever it says, the
 	// credentials goose inherits from this environment must not be in it.
 	red := newRedactor(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
 
 	if cfg.TargetBranch == creds.Branch {
-		return fmt.Errorf("TARGET_BRANCH %q must differ from source branch", cfg.TargetBranch)
+		return 1, fmt.Errorf("TARGET_BRANCH %q must differ from source branch", cfg.TargetBranch)
 	}
 	creds.Branch = cfg.TargetBranch
 
@@ -140,20 +163,20 @@ func runStage(cmd *cobra.Command, args []string) error {
 
 	repo, err := git.Clone(ctx, creds, cloneDir)
 	if err != nil {
-		return fmt.Errorf("clone: %w", err)
+		return 1, fmt.Errorf("clone: %w", err)
 	}
 
 	if err := git.ConfigureAuthor(repo, cfg.GitAuthorName, cfg.GitAuthorEmail); err != nil {
-		return fmt.Errorf("configure git author: %w", err)
+		return 1, fmt.Errorf("configure git author: %w", err)
 	}
 
 	if err := git.StripCredentials(repo); err != nil {
-		return fmt.Errorf("strip credentials: %w", err)
+		return 1, fmt.Errorf("strip credentials: %w", err)
 	}
 	hub.ClearEnv()
 
 	if err := git.CheckoutBranch(repo, creds.Branch); err != nil {
-		return fmt.Errorf("checkout branch %s: %w", creds.Branch, err)
+		return 1, fmt.Errorf("checkout branch %s: %w", creds.Branch, err)
 	}
 	logging.Ok("cloned to %s, branch %s", cloneDir, creds.Branch)
 
@@ -169,7 +192,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 	// 4. Discover skills early — controls which setup steps run
 	skillPaths, err := discoverSkills()
 	if err != nil {
-		return fmt.Errorf("discover skills: %w", err)
+		return 1, fmt.Errorf("discover skills: %w", err)
 	}
 	hasSkills := len(skillPaths) > 0
 
@@ -181,11 +204,11 @@ func runStage(cmd *cobra.Command, args []string) error {
 	// image knows that (ADR 0015).
 	manifest, err := skill.ReadManifest(skillsDir())
 	if err != nil {
-		return fmt.Errorf("read skill manifest: %w", err)
+		return 1, fmt.Errorf("read skill manifest: %w", err)
 	}
 	rules, err := skill.RuleContent(skillsDir(), manifest)
 	if err != nil {
-		return fmt.Errorf("read rules: %w", err)
+		return 1, fmt.Errorf("read rules: %w", err)
 	}
 	if len(rules) > 0 {
 		names := make([]string, 0, len(rules))
@@ -211,10 +234,10 @@ func runStage(cmd *cobra.Command, args []string) error {
 
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return fmt.Errorf("resolve home dir: %w", err)
+			return 1, fmt.Errorf("resolve home dir: %w", err)
 		}
 		if err := symlinkSkillsDir(home, skillsDir()); err != nil {
-			return fmt.Errorf("skill symlink: %w", err)
+			return 1, fmt.Errorf("skill symlink: %w", err)
 		}
 		logging.Ok("symlinked %s/.agents/skills → %s", home, skillsDir())
 	}
@@ -234,7 +257,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 				".gitignore",
 				".konveyor/analysis.json",
 			}, "harness: add grounding data"); err != nil {
-				return fmt.Errorf("commit harness files: %w", err)
+				return 1, fmt.Errorf("commit harness files: %w", err)
 			}
 		}
 	}
@@ -255,16 +278,18 @@ func runStage(cmd *cobra.Command, args []string) error {
 		Model:        cfg.Model,
 		APIKey:       cfg.APIKey,
 		Endpoint:     cfg.Endpoint,
+		Mode:         cfg.Params.Execution.Mode,
+		MaxTurns:     cfg.MaxTurns,
 	})
 	if err != nil {
-		return fmt.Errorf("start goose serve: %w", err)
+		return 1, fmt.Errorf("start goose serve: %w", err)
 	}
 	defer srv.Stop()
 
 	// 6. Connect ACP, create session
 	wsClient, err := acp.WaitReadyDial(ctx, "127.0.0.1", srv.Port(), srv.SecretKey(), 30*time.Second)
 	if err != nil {
-		return fmt.Errorf("connect to goose: %w", err)
+		return 1, fmt.Errorf("connect to goose: %w", err)
 	}
 	defer wsClient.Close()
 
@@ -288,7 +313,7 @@ func runStage(cmd *cobra.Command, args []string) error {
 	}
 	sessionID, err := session.CreateSession(ctx, cloneDir, mcpServers)
 	if err != nil {
-		return fmt.Errorf("create session: %w", err)
+		return 1, fmt.Errorf("create session: %w", err)
 	}
 	if len(mcpServers) > 0 {
 		logging.Ok("ask_user tool mounted (questions reach attached viewers; HARNESS_HITL_ASK=off to disable)")
@@ -388,52 +413,76 @@ func runStage(cmd *cobra.Command, args []string) error {
 	}
 	w, err := watcher.New(cloneDir, pushFn)
 	if err != nil {
-		return fmt.Errorf("create watcher: %w", err)
+		return 1, fmt.Errorf("create watcher: %w", err)
 	}
 	if err := w.Start(ctx); err != nil {
-		return fmt.Errorf("start watcher: %w", err)
+		return 1, fmt.Errorf("start watcher: %w", err)
 	}
 	defer w.Stop()
 
-	// 9. Send single ACP prompt (blocks until goose finishes or MaxTurns is hit)
+	// 9. Send the primary ACP prompt (blocks until goose finishes
+	// naturally, hits its native GOOSE_MAX_TURNS, or the harness cancels
+	// it for cost — ADR 0011).
 	logging.Header("Running Stage")
 	logging.Info("max turns: %d", cfg.MaxTurns)
 	emitPlan("completed", "in_progress", "pending")
 	if teeSrv != nil {
 		teeSrv.SetRunActive(true)
 	}
-	promptResult, err := session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
+	primaryResult, err := session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
 		{Type: "text", Text: stagePrompt},
-	}, cfg.MaxTurns)
+	}, cfg.CostLimit)
 	if teeSrv != nil {
 		teeSrv.SetRunActive(false)
 	}
+
+	stageOutcome, limit := classifyOutcome(primaryResult, err)
 
 	// An unanswered ask_user question is a HITL gate the harness stopped the
 	// turn on: it also surfaces as stopReason=cancelled (the harness fired
 	// session/cancel), so check it before the viewer-cancel case and give it
 	// its own message rather than blaming a viewer.
 	hitlUnanswered := session.HITLGateUnanswered()
-	// A viewer's session/cancel surfaces as a clean stop with
-	// stopReason=cancelled — a deliberate human abort, not a success.
-	cancelled := err == nil && promptResult != nil && promptResult.StopReason == "cancelled"
+	viewerCancelled := err == nil && primaryResult != nil &&
+		primaryResult.StopReason == "cancelled" && !primaryResult.CostLimitReached && !hitlUnanswered
 	switch {
 	case hitlUnanswered:
 		logging.Err("run stopped: an ask_user question went unanswered (HITL gate, fail-closed)")
-	case cancelled:
+	case viewerCancelled:
 		logging.Warn("run cancelled by an attached viewer")
 	}
 	if err != nil {
 		logging.Err("prompt failed: %s", red.redact(err.Error()))
 	}
-	if promptResult != nil && logAgentClosingMessage(promptResult, red) {
+	if primaryResult != nil && logAgentClosingMessage(primaryResult, red) {
 		emitNotice("agent ended on goose's provider-error text — the model call may have failed; see the pod log")
+	}
+
+	// 9b. One-shot handoff prompt when a limit was reached (ADR 0011).
+	// A handoff-prompt error is logged only — the limit-reached outcome
+	// stands regardless; the watcher has been auto-pushing throughout
+	// the run, so real work isn't lost even if this best-effort round
+	// trip fails.
+	var handoffResult *acp.PromptResult
+	if stageOutcome == outcomeLimitReached {
+		logging.Warn("execution limit reached (%s) — sending handoff prompt", limit)
+		var handoffErr error
+		handoffResult, handoffErr = session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
+			{Type: "text", Text: handoffPromptText},
+		}, 0)
+		if handoffErr != nil {
+			logging.Warn("handoff prompt: %v — continuing, the limit-reached outcome stands", handoffErr)
+		}
+		if handoffResult != nil {
+			logAgentClosingMessage(handoffResult, red)
+		}
 	}
 	emitPlan("completed", "completed", "in_progress")
 
-	// 10. Check goose health
+	// 10. Check goose health — a crash overrides any outcome above.
 	if !srv.Alive() {
 		logging.Err("goose serve crashed")
+		stageOutcome, limit = outcomeFailed, limitNone
 	}
 
 	// 11. Check for uncommitted work
@@ -446,34 +495,65 @@ func runStage(cmd *cobra.Command, args []string) error {
 	// 12. Stop watcher before final push
 	w.Stop()
 
-	// 13. Determine exit status from ACP/goose signals
-	stageFailed := err != nil || !srv.Alive() || cancelled || hitlUnanswered
-
-	// 14. Final push (use a fresh context — the signal context may
+	// 13. Final push (use a fresh context — the signal context may
 	// already be cancelled after SIGINT)
 	logging.Header("Final Push")
 	pushCtx, pushCancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer pushCancel()
-	pushed, err := emitPush("git push (final)", func() (bool, error) {
+	pushed, pushErr := emitPush("git push (final)", func() (bool, error) {
 		return git.Push(pushCtx, creds, repo, creds.Branch, baseSHA)
 	})
-	if err != nil {
-		emitNotice("stage failed — final push error: %v", err)
-		return fmt.Errorf("final push: %w", err)
+	if pushErr != nil {
+		emitNotice("stage failed — final push error: %v", pushErr)
+		return 1, fmt.Errorf("final push: %w", pushErr)
 	}
 	emitPlan("completed", "completed", "completed")
 
+	// 14. Usage stats and termination log, regardless of outcome.
+	if primaryResult != nil {
+		u := combineUsage(primaryResult, handoffResult)
+		term = terminationBlob{
+			ExitCode:     stageOutcome.exitCode(),
+			Outcome:      stageOutcome.String(),
+			LimitReached: string(limit),
+			StopReason:   primaryResult.StopReason,
+			Usage:        &u,
+		}
+	} else {
+		term = terminationBlob{ExitCode: stageOutcome.exitCode(), Outcome: stageOutcome.String()}
+	}
+
 	// 15. Exit. pushed is false when the run produced no commits, so the
 	// notices must not claim work landed on the branch.
-	if stageFailed {
+	switch stageOutcome {
+	case outcomeSucceeded:
+		stageSucceeded = true
+		if pushed {
+			emitNotice("stage succeeded — results pushed to branch %s", creds.Branch)
+		} else {
+			emitNotice("stage succeeded — no changes to push")
+		}
+		logging.Ok("stage succeeded")
+		return 0, nil
+
+	case outcomeLimitReached:
+		if pushed {
+			emitNotice("execution limit reached (%s) — handoff committed, results pushed to branch %s", limit, creds.Branch)
+		} else {
+			emitNotice("execution limit reached (%s) — no commits to push", limit)
+		}
+		logging.Ok("stage stopped at execution limit (%s) — handoff committed", limit)
+		return 2, nil
+
+	default: // outcomeFailed
 		switch {
 		case hitlUnanswered && pushed:
 			emitNotice("run stopped — an ask_user question went unanswered (no human to decide); partial work pushed to branch %s", creds.Branch)
 		case hitlUnanswered:
 			emitNotice("run stopped — an ask_user question went unanswered (no human to decide); no commits to push")
-		case cancelled && pushed:
+		case viewerCancelled && pushed:
 			emitNotice("run cancelled by viewer — partial work pushed to branch %s", creds.Branch)
-		case cancelled:
+		case viewerCancelled:
 			emitNotice("run cancelled by viewer — no commits to push")
 		case pushed:
 			emitNotice("stage failed — partial work pushed to branch %s", creds.Branch)
@@ -482,19 +562,11 @@ func runStage(cmd *cobra.Command, args []string) error {
 		}
 		if hitlUnanswered {
 			logging.Err("stage failed: ask_user question unanswered (HITL gate)")
-			return fmt.Errorf("stage failed: ask_user question unanswered (HITL gate)")
+			return 1, fmt.Errorf("stage failed: ask_user question unanswered (HITL gate)")
 		}
 		logging.Err("stage failed")
-		return fmt.Errorf("stage failed")
+		return 1, fmt.Errorf("stage failed")
 	}
-	stageSucceeded = true
-	if pushed {
-		emitNotice("stage succeeded — results pushed to branch %s", creds.Branch)
-	} else {
-		emitNotice("stage succeeded — no changes to push")
-	}
-	logging.Ok("stage succeeded")
-	return nil
 }
 
 func symlinkSkillsDir(homeDir, skillsSrc string) error {
