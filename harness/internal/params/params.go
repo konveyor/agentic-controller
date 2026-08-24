@@ -12,10 +12,19 @@ import (
 	"strings"
 )
 
-// FilePath is the in-Sandbox path where the controller mounts the
+// Path is the in-Sandbox path where the controller mounts the
 // three-section parameter file. Part of the harness/controller contract
 // (ADR 0009) — any harness implementation must read this file.
-const FilePath = "/run/konveyor/params.json"
+const Path = "/run/konveyor/params.json"
+
+// Execution is the controller's resolved execution controls (ADR 0011) —
+// first-class CRD fields with defined semantics, unlike the open-ended
+// workflow/agent param maps, so they get their own typed section.
+type Execution struct {
+	Mode     string `json:"mode,omitempty"`
+	MaxTurns int    `json:"maxTurns,omitempty"`
+	MaxCost  string `json:"maxCost,omitempty"`
+}
 
 // File is the three-section structure the controller writes: workflow
 // and agent parameter values, plus resolved execution controls. Any
@@ -23,7 +32,7 @@ const FilePath = "/run/konveyor/params.json"
 type File struct {
 	Workflow  map[string]any `json:"workflow,omitempty"`
 	Agent     map[string]any `json:"agent,omitempty"`
-	Execution map[string]any `json:"execution,omitempty"`
+	Execution Execution      `json:"execution"`
 }
 
 // Load reads and parses the params file at path. A missing file is not
@@ -45,14 +54,13 @@ func Load(path string) (File, error) {
 	return f, nil
 }
 
-// MaxTurns extracts the execution section's maxTurns override, if
+// MaxTurns reports the execution section's maxTurns override, if
 // present and a positive number.
 func (f File) MaxTurns() (int, bool) {
-	n, ok := f.Execution["maxTurns"].(float64)
-	if !ok || n <= 0 {
+	if f.Execution.MaxTurns <= 0 {
 		return 0, false
 	}
-	return int(n), true
+	return f.Execution.MaxTurns, true
 }
 
 // RenderSection renders the workflow and agent parameter values as the

@@ -185,13 +185,13 @@ func envSwitchedOff(name string) bool {
 }
 
 // paramsFilePath returns the path to the controller-written params.json
-// (ADR 0009). HARNESS_PARAMS_FILE overrides the contract path — mainly
-// so tests aren't reading from /run/konveyor.
+// (ADR 0009). HARNESS_PARAMS_FILE overrides the contract path, for tests
+// and for running the harness outside a Sandbox pod (see hack/harness-*).
 func paramsFilePath() string {
 	if v := os.Getenv("HARNESS_PARAMS_FILE"); v != "" {
 		return v
 	}
-	return params.FilePath
+	return params.Path
 }
 
 // workflowGuideFromEnv reads the workflow guide the controller injects.

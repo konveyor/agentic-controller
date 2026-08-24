@@ -21,7 +21,7 @@ func TestLoadMissingFileReturnsZeroValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(f.Workflow) != 0 || len(f.Agent) != 0 || len(f.Execution) != 0 {
+	if len(f.Workflow) != 0 || len(f.Agent) != 0 || f.Execution != (Execution{}) {
 		t.Errorf("expected zero-value File, got %+v", f)
 	}
 }
@@ -54,24 +54,26 @@ func TestLoadParsesThreeSections(t *testing.T) {
 	if f.Agent["dry_run"] != true {
 		t.Errorf("Agent[dry_run] = %v", f.Agent["dry_run"])
 	}
-	if f.Execution["mode"] != "auto" {
-		t.Errorf("Execution[mode] = %v", f.Execution["mode"])
+	if f.Execution.Mode != "auto" {
+		t.Errorf("Execution.Mode = %v", f.Execution.Mode)
+	}
+	if f.Execution.MaxTurns != 200 {
+		t.Errorf("Execution.MaxTurns = %v", f.Execution.MaxTurns)
 	}
 }
 
 func TestFileMaxTurns(t *testing.T) {
 	cases := []struct {
 		name      string
-		execution map[string]any
+		execution Execution
 		wantN     int
 		wantOK    bool
 	}{
-		{"present and positive", map[string]any{"maxTurns": float64(500)}, 500, true},
-		{"absent", map[string]any{"mode": "auto"}, 0, false},
-		{"zero", map[string]any{"maxTurns": float64(0)}, 0, false},
-		{"negative", map[string]any{"maxTurns": float64(-1)}, 0, false},
-		{"non-numeric", map[string]any{"maxTurns": "500"}, 0, false},
-		{"nil execution", nil, 0, false},
+		{"present and positive", Execution{MaxTurns: 500}, 500, true},
+		{"absent", Execution{Mode: "auto"}, 0, false},
+		{"zero", Execution{MaxTurns: 0}, 0, false},
+		{"negative", Execution{MaxTurns: -1}, 0, false},
+		{"zero-value execution", Execution{}, 0, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
