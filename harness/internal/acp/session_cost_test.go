@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -281,5 +282,59 @@ func TestSendPromptAcceptsContextLimitFieldName(t *testing.T) {
 
 	if result.ContextUsed != 1234 || result.ContextSize != 200000 {
 		t.Errorf("contextLimit field name not recognized: got (%d, %d)", result.ContextUsed, result.ContextSize)
+	}
+}
+
+// TestSendPromptReturnsConnectionLostWithPartialResultOnAbruptClose is a
+// regression test for live-observed goose 1.36.0 behavior: hitting the
+// native GOOSE_MAX_TURNS limit does not produce a graceful JSON-RPC
+// response — the websocket connection just closes. SendPrompt must
+// surface this as ErrConnectionLost while still returning whatever
+// partial result (TurnsUsed etc.) it had accumulated, so the caller can
+// tell "real progress then disconnect" apart from "no response at all."
+func TestSendPromptReturnsConnectionLostWithPartialResultOnAbruptClose(t *testing.T) {
+	s := newDemuxServer(t)
+	c := s.dial(t)
+	sc := NewSessionClient(c)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	done := make(chan struct {
+		result *PromptResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := sc.SendPrompt(ctx, "s1", []ContentBlock{{Type: "text", Text: "go"}}, 0)
+		done <- struct {
+			result *PromptResult
+			err    error
+		}{result, err}
+	}()
+
+	s.next() // the session/prompt request
+
+	// Simulate goose hitting its native turn limit mid-generation: some
+	// real tool_call notifications arrive, then the connection drops with
+	// no final response — never a graceful stopReason.
+	for i := 0; i < 3; i++ {
+		s.push(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call"}}}`)
+	}
+	s.mu.Lock()
+	s.conn.Close()
+	s.mu.Unlock()
+
+	out := <-done
+	if !errors.Is(out.err, ErrConnectionLost) {
+		t.Fatalf("err = %v, want ErrConnectionLost", out.err)
+	}
+	if out.result == nil {
+		t.Fatal("result should not be nil — partial progress must survive the disconnect")
+	}
+	// At least one of the 3 pushed notifications is guaranteed to be
+	// processed before the close is observed (the exact count racing
+	// against the close isn't the point — surviving partial progress is).
+	if out.result.TurnsUsed < 1 {
+		t.Errorf("TurnsUsed = %d, want >= 1 (some progress made before the disconnect)", out.result.TurnsUsed)
 	}
 }

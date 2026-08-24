@@ -436,7 +436,7 @@ func runStage(cmd *cobra.Command, args []string) (int, error) {
 		teeSrv.SetRunActive(false)
 	}
 
-	stageOutcome, limit := classifyOutcome(primaryResult, err)
+	stageOutcome, limit := classifyOutcome(primaryResult, err, params.NativeTurnLimit(cfg.MaxTurns))
 
 	// An unanswered ask_user question is a HITL gate the harness stopped the
 	// turn on: it also surfaces as stopReason=cancelled (the harness fired
@@ -539,10 +539,16 @@ func runStage(cmd *cobra.Command, args []string) (int, error) {
 	case outcomeLimitReached:
 		if pushed {
 			emitNotice("execution limit reached (%s) — handoff committed, results pushed to branch %s", limit, creds.Branch)
+			logging.Ok("stage stopped at execution limit (%s) — handoff committed", limit)
 		} else {
+			// The handoff prompt itself only gets the runtime's native
+			// per-prompt turn budget too — for a very small configured
+			// maxTurns, that may not be enough for the agent to actually
+			// write .konveyor/handoff.md and commit before its own turns
+			// run out. Report what actually happened, not what was hoped for.
 			emitNotice("execution limit reached (%s) — no commits to push", limit)
+			logging.Warn("stage stopped at execution limit (%s) — handoff prompt ran but produced no commit", limit)
 		}
-		logging.Ok("stage stopped at execution limit (%s) — handoff committed", limit)
 		return 2, nil
 
 	default: // outcomeFailed

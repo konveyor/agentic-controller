@@ -22,6 +22,24 @@ const Path = "/run/konveyor/params.json"
 // the remainder for its wind-down handoff prompt (ADR 0011).
 const ReserveFraction = 0.85
 
+// NativeTurnLimit reserves ReserveFraction of a configured maxTurns for
+// the runtime's own native enforcement (e.g. GOOSE_MAX_TURNS) — the same
+// value the goose package sets as the env var. Exposed here so callers
+// that need to independently recognize "the runtime's native limit was
+// reached" (e.g. by comparing it against turns actually used) compute
+// the identical number, not a second copy of the same arithmetic.
+// Returns 0 (unset) when maxTurns <= 0.
+func NativeTurnLimit(maxTurns int) int {
+	if maxTurns <= 0 {
+		return 0
+	}
+	native := int(math.Floor(float64(maxTurns) * ReserveFraction))
+	if native < 1 {
+		native = 1
+	}
+	return native
+}
+
 // Execution is the controller's resolved execution controls (ADR 0011) —
 // first-class CRD fields with defined semantics, unlike the open-ended
 // workflow/agent param maps, so they get their own typed section.

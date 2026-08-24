@@ -138,3 +138,21 @@ func TestReserveFractionIsAFractionOfOne(t *testing.T) {
 		t.Fatalf("ReserveFraction = %v, want a value strictly between 0 and 1", ReserveFraction)
 	}
 }
+
+func TestNativeTurnLimit(t *testing.T) {
+	cases := []struct {
+		maxTurns int
+		want     int
+	}{
+		{maxTurns: 200, want: 170},
+		{maxTurns: 3, want: 2},
+		{maxTurns: 1, want: 1}, // clamped to at least 1
+		{maxTurns: 0, want: 0}, // unset stays unset
+		{maxTurns: -5, want: 0},
+	}
+	for _, c := range cases {
+		if got := NativeTurnLimit(c.maxTurns); got != c.want {
+			t.Errorf("NativeTurnLimit(%d) = %d, want %d", c.maxTurns, got, c.want)
+		}
+	}
+}

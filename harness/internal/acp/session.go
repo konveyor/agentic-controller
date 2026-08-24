@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -11,6 +12,15 @@ import (
 
 	"github.com/konveyor/migration-harness/internal/logging"
 )
+
+// ErrConnectionLost is returned by SendPrompt when the websocket closes
+// abruptly mid-prompt with no final response. Confirmed empirically: this
+// goose version does not report a graceful stopReason when its native
+// GOOSE_MAX_TURNS limit is hit — it drops the connection instead. Callers
+// combine this with the returned (partial) *PromptResult's TurnsUsed to
+// distinguish a likely turn-limit hit (real progress, then disconnect)
+// from a genuine early failure (disconnect before any turn ran).
+var ErrConnectionLost = errors.New("websocket connection closed during prompt")
 
 // SessionClient wraps WSClient with ACP session operations.
 type SessionClient struct {
@@ -460,7 +470,7 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 				}
 				return result, nil
 			default:
-				return nil, fmt.Errorf("websocket connection closed during prompt")
+				return result, ErrConnectionLost
 			}
 		case msg := <-notifCh:
 			process(msg)

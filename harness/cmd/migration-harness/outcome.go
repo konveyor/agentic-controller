@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 
 	"github.com/konveyor/migration-harness/internal/acp"
@@ -53,10 +54,10 @@ const (
 )
 
 // stopReasonMaxTurns is the ACP spec's documented stopReason for a
-// runtime-native turn limit. Not verified against a real goose process
-// in this environment (no goose binary/LLM credentials available) — if
-// goose reports a different string in practice, this is the one line
-// to change, plus a regression test.
+// runtime-native turn limit. Kept as a fallback in case a future goose
+// version reports it gracefully, but empirically (live-tested against
+// goose 1.36.0 + Vertex AI), this is NOT what actually happens — see
+// the acp.ErrConnectionLost handling in classifyOutcome below.
 const stopReasonMaxTurns = "max_turn_requests"
 
 // handoffPromptText is sent once when an execution limit is reached
@@ -65,10 +66,22 @@ const stopReasonMaxTurns = "max_turn_requests"
 const handoffPromptText = "You have reached your execution limit. Commit your current work and write a handoff to `.konveyor/handoff.md` documenting what you completed and what remains."
 
 // classifyOutcome maps a SendPrompt result to a run outcome and, when
-// the outcome is a limit, which limit fired. Isolated from I/O so it's
-// unit-testable without a live goose connection.
-func classifyOutcome(result *acp.PromptResult, err error) (outcome, limitKind) {
+// the outcome is a limit, which limit fired. nativeMaxTurns is the
+// GOOSE_MAX_TURNS value actually configured for this run (0 if maxTurns
+// was unset) — see the TurnsUsed comparison below for why it's needed.
+// Isolated from I/O so it's unit-testable without a live goose connection.
+func classifyOutcome(result *acp.PromptResult, err error, nativeMaxTurns int) (outcome, limitKind) {
 	if err != nil {
+		// goose does not gracefully report a stopReason when its native
+		// GOOSE_MAX_TURNS limit is hit — it drops the websocket connection
+		// instead (confirmed empirically; ADR 0011 assumed a graceful
+		// "max_turn_requests" stopReason this goose version does not send).
+		// Real turn progress plus an abrupt disconnect is the best signal
+		// available that the native limit fired, rather than a genuine
+		// early failure (disconnect before any turn ran).
+		if errors.Is(err, acp.ErrConnectionLost) && result != nil && result.TurnsUsed > 0 {
+			return outcomeLimitReached, limitMaxTurns
+		}
 		return outcomeFailed, limitNone
 	}
 	switch {
@@ -80,6 +93,14 @@ func classifyOutcome(result *acp.PromptResult, err error) (outcome, limitKind) {
 		// failed stage.
 		return outcomeFailed, limitNone
 	case result.StopReason == stopReasonMaxTurns:
+		return outcomeLimitReached, limitMaxTurns
+	case nativeMaxTurns > 0 && result.TurnsUsed >= nativeMaxTurns:
+		// Confirmed empirically: goose reports a clean "end_turn" even
+		// when it silently truncated the task at its native
+		// GOOSE_MAX_TURNS ceiling — stopReason does not distinguish
+		// "genuinely done" from "cut off by the limit" at all. Turns
+		// actually used reaching the configured ceiling is the only
+		// reliable signal this goose version gives us.
 		return outcomeLimitReached, limitMaxTurns
 	default:
 		return outcomeSucceeded, limitNone

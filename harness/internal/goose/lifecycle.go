@@ -3,7 +3,6 @@ package goose
 import (
 	"context"
 	"fmt"
-	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -281,11 +280,7 @@ func executionEnv(mode string, maxTurns int) []string {
 		mode = "auto"
 	}
 	env := []string{"GOOSE_MODE=" + mode}
-	if maxTurns > 0 {
-		native := int(math.Floor(float64(maxTurns) * params.ReserveFraction))
-		if native < 1 {
-			native = 1
-		}
+	if native := params.NativeTurnLimit(maxTurns); native > 0 {
 		env = append(env, fmt.Sprintf("GOOSE_MAX_TURNS=%d", native))
 	}
 	return env

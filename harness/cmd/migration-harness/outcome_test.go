@@ -29,11 +29,12 @@ func TestOutcomeExitCode(t *testing.T) {
 
 func TestClassifyOutcome(t *testing.T) {
 	cases := []struct {
-		name      string
-		result    *acp.PromptResult
-		err       error
-		wantOut   outcome
-		wantLimit limitKind
+		name           string
+		result         *acp.PromptResult
+		err            error
+		nativeMaxTurns int
+		wantOut        outcome
+		wantLimit      limitKind
 	}{
 		{
 			name:      "error is a failure",
@@ -66,10 +67,63 @@ func TestClassifyOutcome(t *testing.T) {
 			wantOut:   outcomeFailed,
 			wantLimit: limitNone,
 		},
+		{
+			// Live-tested against goose 1.36.0 + Vertex AI: hitting
+			// GOOSE_MAX_TURNS does not produce a graceful stopReason — the
+			// websocket connection drops instead. Real turn progress plus
+			// that specific error is the best available signal that the
+			// native limit fired, not a genuine failure.
+			name:      "connection lost mid-prompt with real progress is limitReached/maxTurns",
+			result:    &acp.PromptResult{TurnsUsed: 9},
+			err:       acp.ErrConnectionLost,
+			wantOut:   outcomeLimitReached,
+			wantLimit: limitMaxTurns,
+		},
+		{
+			name:      "connection lost before any turn ran is a genuine failure",
+			result:    &acp.PromptResult{TurnsUsed: 0},
+			err:       acp.ErrConnectionLost,
+			wantOut:   outcomeFailed,
+			wantLimit: limitNone,
+		},
+		{
+			name:      "connection lost with nil result is a genuine failure",
+			result:    nil,
+			err:       acp.ErrConnectionLost,
+			wantOut:   outcomeFailed,
+			wantLimit: limitNone,
+		},
+		{
+			// Live-tested against goose 1.36.0 + Vertex AI: goose reports a
+			// clean "end_turn" even when it silently truncated the task at
+			// its native GOOSE_MAX_TURNS ceiling — stopReason alone cannot
+			// tell "genuinely done" apart from "cut off by the limit."
+			// TurnsUsed reaching the configured native ceiling is the only
+			// reliable signal available.
+			name:           "graceful end_turn that exactly used the native ceiling is limitReached/maxTurns",
+			result:         &acp.PromptResult{StopReason: "end_turn", TurnsUsed: 2},
+			nativeMaxTurns: 2,
+			wantOut:        outcomeLimitReached,
+			wantLimit:      limitMaxTurns,
+		},
+		{
+			name:           "graceful end_turn well under the native ceiling succeeds",
+			result:         &acp.PromptResult{StopReason: "end_turn", TurnsUsed: 3},
+			nativeMaxTurns: 170,
+			wantOut:        outcomeSucceeded,
+			wantLimit:      limitNone,
+		},
+		{
+			name:           "nativeMaxTurns unset (0) never triggers the ceiling check",
+			result:         &acp.PromptResult{StopReason: "end_turn", TurnsUsed: 0},
+			nativeMaxTurns: 0,
+			wantOut:        outcomeSucceeded,
+			wantLimit:      limitNone,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			gotOut, gotLimit := classifyOutcome(c.result, c.err)
+			gotOut, gotLimit := classifyOutcome(c.result, c.err, c.nativeMaxTurns)
 			if gotOut != c.wantOut || gotLimit != c.wantLimit {
 				t.Errorf("classifyOutcome() = (%v, %v), want (%v, %v)", gotOut, gotLimit, c.wantOut, c.wantLimit)
 			}
