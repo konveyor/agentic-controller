@@ -62,8 +62,14 @@ const stopReasonMaxTurns = "max_turn_requests"
 
 // handoffPromptText is sent once when an execution limit is reached
 // (ADR 0011). Wording is limit-agnostic — the agent doesn't need to
-// know whether it was turns or cost that triggered wind-down.
-const handoffPromptText = "You have reached your execution limit. Commit your current work and write a handoff to `.konveyor/handoff.md` documenting what you completed and what remains."
+// know whether it was turns or cost that triggered wind-down. It
+// explicitly tells the agent to stop rather than resume the original
+// task: live testing showed that without this, the agent — still
+// holding the unfinished original instructions in context, and given
+// a fresh native turn budget for this new prompt call — kept working
+// the original task after writing the handoff instead of ending its
+// turn.
+const handoffPromptText = "You have reached your execution limit and must stop working on the original task now, regardless of what remains incomplete. Do only this: commit your current work, then write a handoff to `.konveyor/handoff.md` documenting what you completed and what remains. Once that commit is made, end your turn immediately — do not resume the original task or perform any further actions."
 
 // classifyOutcome maps a SendPrompt result to a run outcome and, when
 // the outcome is a limit, which limit fired. nativeMaxTurns is the
