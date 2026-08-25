@@ -1,0 +1,23 @@
+# Gateway for xAI (Grok).
+#
+# Prerequisites — create a Secret with your real API key:
+#   kubectl create secret generic grok-credentials \
+#     --from-literal=api-key="<your-xai-api-key>"
+apiVersion: konveyor.io/v1alpha1
+kind: Gateway
+metadata:
+  name: grok
+spec:
+  # Provider must be "xai" — the harness maps it to goose's xAI provider
+  # and forwards XAI_API_KEY.
+  provider: xai
+  # xAI API host. The controller's verification probe appends /v1/models;
+  # goose defaults XAI_HOST to https://api.x.ai/v1.
+  endpoint: "https://api.x.ai"
+  credentialRef:
+    secretName: grok-credentials
+    key: api-key
+  model:
+    name: grok-4
+    contextWindow: 256000
+    tier: premium

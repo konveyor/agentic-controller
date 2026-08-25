@@ -212,6 +212,8 @@ func providerEnv(provider, model, apiKey, endpoint string) (env []string, tempDi
 			env = append(env, "OPENAI_API_KEY="+apiKey)
 		case "google":
 			env = append(env, "GOOGLE_API_KEY="+apiKey)
+		case "xai":
+			env = append(env, "XAI_API_KEY="+apiKey)
 		case "gcp_vertex_ai":
 			// uses ADC credentials, not an API key
 		case "aws_bedrock":
@@ -241,6 +243,10 @@ func providerEnv(provider, model, apiKey, endpoint string) (env []string, tempDi
 			env = append(env, "ANTHROPIC_HOST="+endpoint)
 		case "openai":
 			env = append(env, "OPENAI_HOST="+endpoint)
+		case "xai":
+			// goose defaults XAI_HOST to https://api.x.ai/v1; the Gateway
+			// endpoint (https://api.x.ai) is used only for the controller's
+			// /v1/models verification probe, so it is not forwarded here.
 		case "gcp_vertex_ai":
 			// endpoint configured via ADC project/region, not env var
 		case "aws_bedrock":
