@@ -295,6 +295,28 @@ func TestLoadFromEnv(t *testing.T) {
 			t.Fatal("expected error for non-numeric maxCost, got nil")
 		}
 	})
+
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{"NaN", "NaN"},
+		{"positive infinity", "+Inf"},
+		{"negative infinity", "-Inf"},
+		{"zero", "0"},
+		{"negative", "-1.5"},
+	} {
+		tc := tc
+		t.Run("errors on invalid maxCost: "+tc.name, func(t *testing.T) {
+			clearKonveyorEnv(t)
+			setRequiredEnv(t)
+			t.Setenv("HARNESS_PARAMS_FILE", writeParamsFile(t, `{"execution": {"maxCost": "`+tc.value+`"}}`))
+
+			if _, err := LoadFromEnv(); err == nil {
+				t.Fatalf("expected error for maxCost=%q, got nil", tc.value)
+			}
+		})
+	}
 }
 
 // writeParamsFile writes content to a temp params.json and returns its path.

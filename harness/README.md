@@ -46,7 +46,7 @@ go build -o migration-harness ./cmd/migration-harness/
 
 ## Configuration
 
-All configuration is via environment variables — there is no config file or `init` command.
+Configuration comes from two sources: environment variables (required and optional) and the controller-mounted `/run/konveyor/params.json` file (execution controls and workflow/agent parameter values — see the Parameters section below).
 
 ### Required
 

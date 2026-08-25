@@ -70,14 +70,37 @@ func TestClassifyOutcome(t *testing.T) {
 		{
 			// Live-tested against goose 1.36.0 + Vertex AI: hitting
 			// GOOSE_MAX_TURNS does not produce a graceful stopReason — the
-			// websocket connection drops instead. Real turn progress plus
-			// that specific error is the best available signal that the
-			// native limit fired, not a genuine failure.
-			name:      "connection lost mid-prompt with real progress is limitReached/maxTurns",
-			result:    &acp.PromptResult{TurnsUsed: 9},
-			err:       acp.ErrConnectionLost,
-			wantOut:   outcomeLimitReached,
-			wantLimit: limitMaxTurns,
+			// websocket connection drops instead. TurnsUsed reaching the
+			// configured native ceiling plus the abrupt disconnect is the
+			// best available signal that the native limit fired.
+			name:           "connection lost with TurnsUsed == nativeMaxTurns is limitReached/maxTurns",
+			result:         &acp.PromptResult{TurnsUsed: 9},
+			err:            acp.ErrConnectionLost,
+			nativeMaxTurns: 9,
+			wantOut:        outcomeLimitReached,
+			wantLimit:      limitMaxTurns,
+		},
+		{
+			// A transient disconnect before the native ceiling is reached
+			// must not be misclassified as a turn limit — it is a genuine
+			// failure (network blip, pod restart, etc.).
+			name:           "connection lost with TurnsUsed < nativeMaxTurns is a genuine failure",
+			result:         &acp.PromptResult{TurnsUsed: 9},
+			err:            acp.ErrConnectionLost,
+			nativeMaxTurns: 170,
+			wantOut:        outcomeFailed,
+			wantLimit:      limitNone,
+		},
+		{
+			// nativeMaxTurns == 0 means maxTurns was not configured; an
+			// abrupt disconnect with no ceiling to compare against must not
+			// be mistaken for a limit.
+			name:           "connection lost with nativeMaxTurns unset (0) is a genuine failure",
+			result:         &acp.PromptResult{TurnsUsed: 9},
+			err:            acp.ErrConnectionLost,
+			nativeMaxTurns: 0,
+			wantOut:        outcomeFailed,
+			wantLimit:      limitNone,
 		},
 		{
 			name:      "connection lost before any turn ran is a genuine failure",

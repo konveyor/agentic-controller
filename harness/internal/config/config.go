@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -166,6 +167,9 @@ func LoadFromEnv() (*Config, error) {
 		parsed, err := strconv.ParseFloat(paramsFile.Execution.MaxCost, 64)
 		if err != nil {
 			return nil, fmt.Errorf("execution.maxCost %q is not numeric: %w", paramsFile.Execution.MaxCost, err)
+		}
+		if math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed <= 0 {
+			return nil, fmt.Errorf("execution.maxCost %q must be a finite positive number", paramsFile.Execution.MaxCost)
 		}
 		cfg.CostLimit = parsed * params.ReserveFraction
 	}

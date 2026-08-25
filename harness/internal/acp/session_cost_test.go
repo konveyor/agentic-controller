@@ -321,8 +321,11 @@ func TestSendPromptReturnsConnectionLostWithPartialResultOnAbruptClose(t *testin
 		s.push(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call"}}}`)
 	}
 	s.mu.Lock()
-	s.conn.Close()
+	err := s.conn.Close()
 	s.mu.Unlock()
+	if err != nil {
+		t.Errorf("close test connection: %v", err)
+	}
 
 	out := <-done
 	if !errors.Is(out.err, ErrConnectionLost) {

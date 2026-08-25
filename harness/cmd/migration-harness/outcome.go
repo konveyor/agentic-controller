@@ -69,7 +69,7 @@ const stopReasonMaxTurns = "max_turn_requests"
 // a fresh native turn budget for this new prompt call — kept working
 // the original task after writing the handoff instead of ending its
 // turn.
-const handoffPromptText = "You have reached your execution limit and must stop working on the original task now, regardless of what remains incomplete. Do only this: commit your current work, then write a handoff to `.konveyor/handoff.md` documenting what you completed and what remains. Once that commit is made, end your turn immediately — do not resume the original task or perform any further actions."
+const handoffPromptText = "You have reached your execution limit and must stop working on the original task now, regardless of what remains incomplete. Do only this: write a handoff to `.konveyor/handoff.md` documenting what you completed and what remains, then commit both your current work and `.konveyor/handoff.md` together in a single commit. Once that commit succeeds, end your turn immediately — do not resume the original task or perform any further actions."
 
 // classifyOutcome maps a SendPrompt result to a run outcome and, when
 // the outcome is a limit, which limit fired. nativeMaxTurns is the
@@ -85,7 +85,10 @@ func classifyOutcome(result *acp.PromptResult, err error, nativeMaxTurns int) (o
 		// Real turn progress plus an abrupt disconnect is the best signal
 		// available that the native limit fired, rather than a genuine
 		// early failure (disconnect before any turn ran).
-		if errors.Is(err, acp.ErrConnectionLost) && result != nil && result.TurnsUsed > 0 {
+		if errors.Is(err, acp.ErrConnectionLost) &&
+			result != nil &&
+			nativeMaxTurns > 0 &&
+			result.TurnsUsed >= nativeMaxTurns {
 			return outcomeLimitReached, limitMaxTurns
 		}
 		return outcomeFailed, limitNone
