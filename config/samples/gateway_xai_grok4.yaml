@@ -1,0 +1,15 @@
+apiVersion: konveyor.io/v1alpha1
+type: Gateway
+metadata:
+  name: xai-grok-4
+spec:
+  provider: xai
+  endpoint: https://api.x.ai
+  model:
+    name: grok-4
+    contextWindow: 131072
+    tier: premium
+  credentials:
+    secretRef:
+      name: xai-credentials
+      key: XAI_API_KEY

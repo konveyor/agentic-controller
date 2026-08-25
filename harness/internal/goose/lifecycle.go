@@ -216,6 +216,8 @@ func providerEnv(provider, model, apiKey, endpoint string) (env []string, tempDi
 			// uses ADC credentials, not an API key
 		case "aws_bedrock":
 			// uses AWS SDK credentials, not an API key
+		case "xai":
+			env = append(env, "XAI_API_KEY="+apiKey)
 		default:
 			logging.Warn("unmapped provider %q — API key not forwarded to goose", p)
 		}
@@ -245,6 +247,8 @@ func providerEnv(provider, model, apiKey, endpoint string) (env []string, tempDi
 			// endpoint configured via ADC project/region, not env var
 		case "aws_bedrock":
 			// endpoint derived from AWS_REGION by the AWS SDK
+		case "xai":
+			env = append(env, "XAI_HOST="+endpoint)
 		default:
 			logging.Warn("unmapped provider %q — endpoint not forwarded to goose", p)
 		}
