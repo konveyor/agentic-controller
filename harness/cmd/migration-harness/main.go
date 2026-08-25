@@ -466,29 +466,16 @@ func runStage(cmd *cobra.Command, args []string) (int, error) {
 	var handoffResult *acp.PromptResult
 	if stageOutcome == outcomeLimitReached {
 		logging.Warn("execution limit reached (%s) — sending handoff prompt", limit)
-		// Pass only the remaining cost budget so the handoff prompt cannot
-		// push cumulative spend past the configured ceiling. The primary
-		// prompt may have already consumed most of it; anything left is
-		// the handoff's allowance. 0 means no cost was reported yet (or
-		// cfg.CostLimit is 0 = unset), so fall through to 0 = unlimited
-		// only in the truly unset case.
-		var handoffCostLimit float64
-		if cfg.CostLimit > 0 && primaryResult != nil {
-			remaining := cfg.CostLimit - primaryResult.Cost
-			if remaining > 0 {
-				handoffCostLimit = remaining
-			}
-			// remaining <= 0: cost ceiling already reached; pass a tiny
-			// positive sentinel so SendPrompt still monitors cost and
-			// cancels immediately if any further spend is observed.
-			if remaining <= 0 {
-				handoffCostLimit = 0.001
-			}
-		}
+		// ACP cost is session-cumulative (combineUsage relies on the same
+		// fact): SendPrompt's costLimit is compared against the latest
+		// cost.amount for the whole session, not spend local to this
+		// call. So the handoff call reuses the same absolute ceiling —
+		// no remaining-budget arithmetic needed, and none of the risk of
+		// comparing a per-call delta against a cumulative total.
 		var handoffErr error
 		handoffResult, handoffErr = session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
 			{Type: "text", Text: handoffPromptText},
-		}, handoffCostLimit)
+		}, cfg.CostLimit)
 		if handoffErr != nil {
 			logging.Warn("handoff prompt: %v — continuing, the limit-reached outcome stands", handoffErr)
 		}
