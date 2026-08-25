@@ -470,6 +470,9 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 				}
 				return result, nil
 			default:
+				for _, n := range drainNotifications(notifCh) {
+					process(n)
+				}
 				return result, ErrConnectionLost
 			}
 		case msg := <-notifCh:

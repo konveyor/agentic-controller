@@ -126,7 +126,7 @@ func renderValues(label string, values map[string]any) string {
 func formatValue(v any) string {
 	switch t := v.(type) {
 	case float64:
-		if t == math.Trunc(t) {
+		if t == math.Trunc(t) && !math.IsInf(t, 0) && t >= math.MinInt64 && t <= math.MaxInt64 {
 			return strconv.FormatInt(int64(t), 10)
 		}
 		return strconv.FormatFloat(t, 'f', -1, 64)

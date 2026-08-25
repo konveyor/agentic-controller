@@ -285,6 +285,87 @@ func TestSendPromptAcceptsContextLimitFieldName(t *testing.T) {
 	}
 }
 
+// TestSendPromptHandoffUsesFullBudgetAfterReservedCancel is a regression
+// test for the harness's two-prompt handoff flow (ADR 0011): the primary
+// prompt is cancelled at the reserved fraction of the budget (e.g. 8.5 of
+// a 10.0 maxCost), and the follow-up handoff prompt on the same session
+// must be allowed to spend the rest of the full 10.0 ceiling — not get
+// cancelled immediately because cumulative cost already exceeds the
+// reserved fraction. Cancellation must fire only once cumulative cost
+// reaches the full budget passed to that call.
+func TestSendPromptHandoffUsesFullBudgetAfterReservedCancel(t *testing.T) {
+	s := newDemuxServer(t)
+	c := s.dial(t)
+	sc := NewSessionClient(c)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Primary prompt: costLimit is the reserved fraction (8.5 of 10.0).
+	done := make(chan struct{})
+	var primary *PromptResult
+	var primaryErr error
+	go func() {
+		primary, primaryErr = sc.SendPrompt(ctx, "s1", []ContentBlock{{Type: "text", Text: "go"}}, 8.5)
+		close(done)
+	}()
+
+	primaryReq := s.next()
+	primaryID := int64(primaryReq["id"].(float64))
+
+	s.push(usageUpdateFrame("s1", 50000, 200000, "9.00"))
+	cancelFrame := s.next()
+	if cancelFrame["method"] != "session/cancel" {
+		t.Fatalf("expected session/cancel on the primary prompt, got %v", cancelFrame)
+	}
+	s.push(`{"jsonrpc":"2.0","id":` + jsonInt(primaryID) + `,"result":{"stopReason":"cancelled"}}`)
+	<-done
+	if primaryErr != nil {
+		t.Fatalf("primary SendPrompt: %v", primaryErr)
+	}
+	if !primary.CostLimitReached || primary.Cost != 9.00 {
+		t.Fatalf("primary result = %+v, want CostLimitReached=true Cost=9.00", primary)
+	}
+
+	// Handoff prompt on the same session: costLimit is the full,
+	// unreserved budget (10.0). ACP cost is session-cumulative, so the
+	// first usage_update here reports the same 9.00 already spent by the
+	// primary — that must NOT trigger an immediate cancel.
+	done = make(chan struct{})
+	var handoff *PromptResult
+	var handoffErr error
+	go func() {
+		handoff, handoffErr = sc.SendPrompt(ctx, "s1", []ContentBlock{{Type: "text", Text: "handoff"}}, 10.0)
+		close(done)
+	}()
+
+	handoffReq := s.next()
+	handoffID := int64(handoffReq["id"].(float64))
+
+	s.push(usageUpdateFrame("s1", 50100, 200000, "9.10"))
+	select {
+	case m := <-s.inbound:
+		t.Fatalf("handoff cancelled before reaching the full budget: %v", m)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Cumulative cost now reaches the full budget — this must cancel.
+	s.push(usageUpdateFrame("s1", 50200, 200000, "10.00"))
+	cancelFrame = s.next()
+	if cancelFrame["method"] != "session/cancel" {
+		t.Fatalf("expected session/cancel once the handoff reaches the full budget, got %v", cancelFrame)
+	}
+
+	s.push(`{"jsonrpc":"2.0","id":` + jsonInt(handoffID) + `,"result":{"stopReason":"cancelled"}}`)
+	<-done
+	if handoffErr != nil {
+		t.Fatalf("handoff SendPrompt: %v", handoffErr)
+	}
+	if !handoff.CostLimitReached || handoff.Cost != 10.00 {
+		t.Fatalf("handoff result = %+v, want CostLimitReached=true Cost=10.00", handoff)
+	}
+}
+
 // TestSendPromptReturnsConnectionLostWithPartialResultOnAbruptClose is a
 // regression test for live-observed goose 1.36.0 behavior: hitting the
 // native GOOSE_MAX_TURNS limit does not produce a graceful JSON-RPC

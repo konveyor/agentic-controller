@@ -467,15 +467,16 @@ func runStage(cmd *cobra.Command, args []string) (int, error) {
 	if stageOutcome == outcomeLimitReached {
 		logging.Warn("execution limit reached (%s) — sending handoff prompt", limit)
 		// ACP cost is session-cumulative (combineUsage relies on the same
-		// fact): SendPrompt's costLimit is compared against the latest
-		// cost.amount for the whole session, not spend local to this
-		// call. So the handoff call reuses the same absolute ceiling —
-		// no remaining-budget arithmetic needed, and none of the risk of
-		// comparing a per-call delta against a cumulative total.
+		// fact), so the handoff call must compare against the full
+		// configured MaxCost, not the primary's reserved CostLimit —
+		// cumulative spend already sits at ~85% of MaxCost when the
+		// primary stops, so reusing CostLimit here would leave the
+		// handoff no room to write .konveyor/handoff.md and commit
+		// before being cancelled itself.
 		var handoffErr error
 		handoffResult, handoffErr = session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
 			{Type: "text", Text: handoffPromptText},
-		}, cfg.CostLimit)
+		}, cfg.MaxCost)
 		if handoffErr != nil {
 			logging.Warn("handoff prompt: %v — continuing, the limit-reached outcome stands", handoffErr)
 		}
@@ -501,21 +502,10 @@ func runStage(cmd *cobra.Command, args []string) (int, error) {
 	// 12. Stop watcher before final push
 	w.Stop()
 
-	// 13. Final push (use a fresh context — the signal context may
-	// already be cancelled after SIGINT)
-	logging.Header("Final Push")
-	pushCtx, pushCancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer pushCancel()
-	pushed, pushErr := emitPush("git push (final)", func() (bool, error) {
-		return git.Push(pushCtx, creds, repo, creds.Branch, baseSHA)
-	})
-	if pushErr != nil {
-		emitNotice("stage failed — final push error: %v", pushErr)
-		return 1, fmt.Errorf("final push: %w", pushErr)
-	}
-	emitPlan("completed", "completed", "completed")
-
-	// 14. Usage stats and termination log, regardless of outcome.
+	// 13. Usage stats and termination log, regardless of outcome. Set
+	// before the final push below so a push failure doesn't discard
+	// them — the deferred writeTerminationLog fires no matter how this
+	// function returns (ADR 0011: the blob is written "on exit").
 	if primaryResult != nil {
 		u := combineUsage(primaryResult, handoffResult)
 		term = terminationBlob{
@@ -528,6 +518,22 @@ func runStage(cmd *cobra.Command, args []string) (int, error) {
 	} else {
 		term = terminationBlob{ExitCode: stageOutcome.exitCode(), Outcome: stageOutcome.String()}
 	}
+
+	// 14. Final push (use a fresh context — the signal context may
+	// already be cancelled after SIGINT)
+	logging.Header("Final Push")
+	pushCtx, pushCancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer pushCancel()
+	pushed, pushErr := emitPush("git push (final)", func() (bool, error) {
+		return git.Push(pushCtx, creds, repo, creds.Branch, baseSHA)
+	})
+	if pushErr != nil {
+		emitNotice("stage failed — final push error: %v", pushErr)
+		term.ExitCode = 1
+		term.Outcome = outcomeFailed.String()
+		return 1, fmt.Errorf("final push: %w", pushErr)
+	}
+	emitPlan("completed", "completed", "completed")
 
 	// 15. Exit. pushed is false when the run produced no commits, so the
 	// notices must not claim work landed on the branch.

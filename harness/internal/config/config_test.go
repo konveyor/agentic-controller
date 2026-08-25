@@ -271,9 +271,12 @@ func TestLoadFromEnv(t *testing.T) {
 		if cfg.CostLimit != 8.5 {
 			t.Errorf("CostLimit = %v, want 8.5 (10.00 * 0.85)", cfg.CostLimit)
 		}
+		if cfg.MaxCost != 10.00 {
+			t.Errorf("MaxCost = %v, want 10.00 (unreserved)", cfg.MaxCost)
+		}
 	})
 
-	t.Run("no maxCost leaves CostLimit at zero", func(t *testing.T) {
+	t.Run("no maxCost leaves CostLimit and MaxCost at zero", func(t *testing.T) {
 		clearKonveyorEnv(t)
 		setRequiredEnv(t)
 
@@ -283,6 +286,9 @@ func TestLoadFromEnv(t *testing.T) {
 		}
 		if cfg.CostLimit != 0 {
 			t.Errorf("CostLimit = %v, want 0", cfg.CostLimit)
+		}
+		if cfg.MaxCost != 0 {
+			t.Errorf("MaxCost = %v, want 0", cfg.MaxCost)
 		}
 	})
 

@@ -81,9 +81,16 @@ type Config struct {
 
 	// CostLimit is params.ReserveFraction of the parsed
 	// execution.maxCost, in USD; 0 when maxCost is unset. SendPrompt
-	// cancels the run when cumulative usage_update cost reaches this
-	// threshold (ADR 0011).
+	// cancels the primary prompt when cumulative usage_update cost
+	// reaches this threshold (ADR 0011).
 	CostLimit float64
+	// MaxCost is the unreserved execution.maxCost ceiling, in USD; 0
+	// when unset. ACP cost is cumulative for the whole session, so the
+	// handoff prompt is allowed to spend up to this full budget rather
+	// than CostLimit's reserved fraction — otherwise cumulative spend
+	// already sits at ~85% of MaxCost when the primary prompt stops,
+	// leaving the handoff no room to run (ADR 0011).
+	MaxCost float64
 }
 
 // envWithFallback reads primary first, falling back to fallback.
@@ -171,6 +178,7 @@ func LoadFromEnv() (*Config, error) {
 		if math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed <= 0 {
 			return nil, fmt.Errorf("execution.maxCost %q must be a finite positive number", paramsFile.Execution.MaxCost)
 		}
+		cfg.MaxCost = parsed
 		cfg.CostLimit = parsed * params.ReserveFraction
 	}
 
