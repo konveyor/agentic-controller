@@ -38,3 +38,10 @@ go.work
 
 # Personal maintainer notes, cluster state and run logs
 .dev/
+graphify-out/
+.goose/
+__pycache__/
+node_modules/
+target/
+*.tmp
+*.bak
