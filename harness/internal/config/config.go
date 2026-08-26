@@ -175,11 +175,13 @@ func LoadFromEnv() (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("execution.maxCost %q is not numeric: %w", paramsFile.Execution.MaxCost, err)
 		}
-		if math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed <= 0 {
-			return nil, fmt.Errorf("execution.maxCost %q must be a finite positive number", paramsFile.Execution.MaxCost)
+		if math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 {
+			return nil, fmt.Errorf("execution.maxCost %q must be a finite non-negative number", paramsFile.Execution.MaxCost)
 		}
-		cfg.MaxCost = parsed
-		cfg.CostLimit = parsed * params.ReserveFraction
+		if parsed > 0 {
+			cfg.MaxCost = parsed
+			cfg.CostLimit = parsed * params.ReserveFraction
+		}
 	}
 
 	// Default-ON kill switches: the one E2E path must exercise the tee

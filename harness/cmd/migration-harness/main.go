@@ -531,6 +531,7 @@ func runStage(cmd *cobra.Command, args []string) (int, error) {
 		emitNotice("stage failed — final push error: %v", pushErr)
 		term.ExitCode = 1
 		term.Outcome = outcomeFailed.String()
+		term.LimitReached = ""
 		return 1, fmt.Errorf("final push: %w", pushErr)
 	}
 	emitPlan("completed", "completed", "completed")

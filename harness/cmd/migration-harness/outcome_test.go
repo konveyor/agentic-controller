@@ -143,6 +143,13 @@ func TestClassifyOutcome(t *testing.T) {
 			wantOut:        outcomeSucceeded,
 			wantLimit:      limitNone,
 		},
+		{
+			name:           "cost limit reached but clean end_turn before cancel succeeds with limitMaxCost",
+			result:         &acp.PromptResult{StopReason: "end_turn", CostLimitReached: true},
+			nativeMaxTurns: 0,
+			wantOut:        outcomeSucceeded,
+			wantLimit:      limitMaxCost,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -222,14 +229,10 @@ func TestWriteTerminationLogRoundTrip(t *testing.T) {
 }
 
 func TestWriteTerminationLogHandlesLargeBlob(t *testing.T) {
-	// Proves writeTerminationLog does not fail or corrupt the file when
-	// the blob exceeds the size-warning threshold — the warning itself
-	// goes through the logging package, which has no test-capturable
-	// sink, so this checks the observable behavior (a successful,
-	// intact write) rather than the log line.
+	// Proves writeTerminationLog writes intact when between warning threshold and hard limit.
 	path := filepath.Join(t.TempDir(), "termination-log")
-	huge := strings.Repeat("x", terminationLogSizeWarning+100)
-	term := terminationBlob{ExitCode: 1, Outcome: "failed", StopReason: huge}
+	large := strings.Repeat("x", terminationLogSizeWarning+100)
+	term := terminationBlob{ExitCode: 1, Outcome: "failed", StopReason: large}
 	writeTerminationLog(path, term)
 
 	data, err := os.ReadFile(path)
@@ -240,8 +243,37 @@ func TestWriteTerminationLogHandlesLargeBlob(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got.StopReason != huge {
-		t.Error("large blob was not written intact")
+	if got.StopReason != large {
+		t.Error("large blob under 4096 was not written intact")
+	}
+}
+
+func TestWriteTerminationLogBoundsOversizedBlob(t *testing.T) {
+	// Proves writeTerminationLog guarantees valid JSON <= 4096 bytes when blob exceeds ceiling.
+	path := filepath.Join(t.TempDir(), "termination-log")
+	oversized := strings.Repeat("x", maxTerminationLogBytes+500)
+	term := terminationBlob{
+		ExitCode:     2,
+		Outcome:      "limitReached",
+		LimitReached: "maxTurns",
+		StopReason:   oversized,
+		Usage:        &usage{TurnsUsed: 170},
+	}
+	writeTerminationLog(path, term)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if len(data) > maxTerminationLogBytes {
+		t.Fatalf("blob size = %d, exceeds max %d", len(data), maxTerminationLogBytes)
+	}
+	var got terminationBlob
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal trimmed blob: %v", err)
+	}
+	if got.ExitCode != 2 || got.Outcome != "limitReached" || got.LimitReached != "maxTurns" {
+		t.Errorf("critical fields lost during trim: got %+v", got)
 	}
 }
 

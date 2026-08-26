@@ -302,6 +302,25 @@ func TestLoadFromEnv(t *testing.T) {
 		}
 	})
 
+	for _, val := range []string{"0", "0.00"} {
+		t.Run("explicit zero maxCost "+val+" leaves CostLimit and MaxCost at zero", func(t *testing.T) {
+			clearKonveyorEnv(t)
+			setRequiredEnv(t)
+			t.Setenv("HARNESS_PARAMS_FILE", writeParamsFile(t, `{"execution": {"maxCost": "`+val+`"}}`))
+
+			cfg, err := LoadFromEnv()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.CostLimit != 0 {
+				t.Errorf("CostLimit = %v, want 0", cfg.CostLimit)
+			}
+			if cfg.MaxCost != 0 {
+				t.Errorf("MaxCost = %v, want 0", cfg.MaxCost)
+			}
+		})
+	}
+
 	for _, tc := range []struct {
 		name  string
 		value string
@@ -309,7 +328,6 @@ func TestLoadFromEnv(t *testing.T) {
 		{"NaN", "NaN"},
 		{"positive infinity", "+Inf"},
 		{"negative infinity", "-Inf"},
-		{"zero", "0"},
 		{"negative", "-1.5"},
 	} {
 		tc := tc

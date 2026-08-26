@@ -111,6 +111,13 @@ func classifyOutcome(result *acp.PromptResult, err error, nativeMaxTurns int) (o
 		// actually used reaching the configured ceiling is the only
 		// reliable signal this goose version gives us.
 		return outcomeLimitReached, limitMaxTurns
+	case result.CostLimitReached:
+		// Cost limit was exceeded during the turn, but goose finished
+		// naturally and returned a clean stopReason before the cancel
+		// landed. Keep outcomeSucceeded (exit 0) so a finished run is not
+		// retroactively failed, while recording limitMaxCost so terminationData
+		// reflects that the cost ceiling was hit.
+		return outcomeSucceeded, limitMaxCost
 	default:
 		return outcomeSucceeded, limitNone
 	}
@@ -163,9 +170,14 @@ type terminationBlob struct {
 	Usage        *usage `json:"usage,omitempty"`
 }
 
+// maxTerminationLogBytes is the kubelet's hard termination-message ceiling
+// (ADR 0011). Exceeding this causes the kubelet to truncate mid-JSON, breaking
+// unmarshaling in the controller.
+const maxTerminationLogBytes = 4096
+
 // terminationLogSizeWarning is a safety margin below the kubelet's
 // 4096-byte termination-message ceiling (ADR 0011) — a canary for a
-// future field addition that grows the blob, not a hard truncation.
+// future field addition that grows the blob.
 const terminationLogSizeWarning = 3500
 
 // defaultTerminationLogPath is where the kubelet reads a container's
@@ -182,15 +194,31 @@ func terminationLogPath() string {
 	return defaultTerminationLogPath
 }
 
-// writeTerminationLog marshals term and writes it to path. Failure is
-// logged, never fatal — it must never mask the real exit code.
+// writeTerminationLog marshals term and writes it to path, guaranteeing valid
+// JSON within the kubelet's 4096-byte ceiling. Failure is logged, never fatal —
+// it must never mask the real exit code.
 func writeTerminationLog(path string, term terminationBlob) {
 	data, err := json.Marshal(term)
 	if err != nil {
 		logging.Warn("termination log: marshal: %v", err)
 		return
 	}
-	if len(data) > terminationLogSizeWarning {
+	if len(data) > maxTerminationLogBytes {
+		logging.Warn("termination log: %d bytes exceeds %d-byte limit; trimming to fit", len(data), maxTerminationLogBytes)
+		if len(term.StopReason) > 200 {
+			term.StopReason = term.StopReason[:200] + "…"
+		}
+		data, err = json.Marshal(term)
+		if err != nil || len(data) > maxTerminationLogBytes {
+			// Fall back to minimal valid JSON preserving exitCode, outcome, and limitReached.
+			term = terminationBlob{
+				ExitCode:     term.ExitCode,
+				Outcome:      term.Outcome,
+				LimitReached: term.LimitReached,
+			}
+			data, _ = json.Marshal(term)
+		}
+	} else if len(data) > terminationLogSizeWarning {
 		logging.Warn("termination log: %d bytes, approaching the kubelet's 4096-byte limit", len(data))
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
