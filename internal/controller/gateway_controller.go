@@ -236,13 +236,31 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return r.patchStatus(ctx, &gateway, original)
 }
 
+// knownProviders is the set of provider identifiers (normalized form) the
+// controller and harness recognize. Providers outside this set still verify
+// with the OpenAI-compatible default, but the mismatch is logged — mirroring
+// the fallthrough warning in providerEnv (harness/internal/goose/lifecycle.go).
+var knownProviders = map[string]bool{
+	"anthropic":     true,
+	"openai":        true,
+	"xai":           true,
+	"gcp_vertex_ai": true,
+	"aws_bedrock":   true,
+}
+
+// normalizeProvider lowercases and converts hyphens to underscores so provider
+// matching stays in lockstep with the harness (providerEnv in
+// harness/internal/goose/lifecycle.go), which keys off the same normalization.
+func normalizeProvider(provider string) string {
+	return strings.ReplaceAll(strings.ToLower(provider), "-", "_")
+}
+
 // gatewayVerificationCurlCommand builds the shell command used by the
-// verification Job. The auth header style and models probe path vary by
-// provider: Anthropic uses x-api-key + anthropic-version, Google (Gemini)
-// uses x-goog-api-key against /v1beta/models, and everything else uses
-// Authorization: Bearer against /v1/models. When includeAuth is false the
-// auth header is omitted so keyless gateways are probed for reachability
-// without an empty credential.
+// verification Job. Anthropic's native API requires x-api-key +
+// anthropic-version, so it gets a dedicated auth header; every other provider
+// uses the OpenAI-compatible default (Authorization: Bearer against
+// /v1/models). When includeAuth is false the auth header is omitted so keyless
+// gateways are probed for reachability without an empty credential.
 func gatewayVerificationCurlCommand(provider string, includeAuth bool) string {
 	curl := "curl -sk --max-time 10 -o /dev/null -w '%{http_code}'"
 	authHeader, modelsPath := gatewayVerificationAuth(provider)
@@ -253,15 +271,13 @@ func gatewayVerificationCurlCommand(provider string, includeAuth bool) string {
 }
 
 // gatewayVerificationAuth returns the provider-specific auth header snippet
-// (curl -H flags) and the models probe path. Providers that deviate from the
-// OpenAI-compatible default (Authorization: Bearer + /v1/models) get a case
-// here; add new deviating providers alongside anthropic/google.
+// (curl -H flags) and the models probe path. Only Anthropic deviates from the
+// OpenAI-compatible default (Authorization: Bearer + /v1/models) today, because
+// its native API rejects Bearer; add new deviating providers as cases here.
 func gatewayVerificationAuth(provider string) (authHeader, modelsPath string) {
-	switch strings.ToLower(provider) {
+	switch normalizeProvider(provider) {
 	case "anthropic":
 		return ` -H "x-api-key: $LLM_API_KEY" -H "anthropic-version: ` + anthropicAPIVersion + `"`, "/v1/models"
-	case "google":
-		return ` -H "x-goog-api-key: $LLM_API_KEY"`, "/v1beta/models"
 	default:
 		return ` -H "Authorization: Bearer $LLM_API_KEY"`, "/v1/models"
 	}
@@ -286,6 +302,13 @@ func (r *GatewayReconciler) createVerificationJob(
 	// e.g. AWS SigV4) omits the auth header entirely — an empty
 	// credential would 401 under the ^2 check.
 	includeAuth := gateway.Spec.CredentialRef.Key != ""
+	if !knownProviders[normalizeProvider(gateway.Spec.Provider)] {
+		log.FromContext(ctx).Info(
+			"unrecognized gateway provider; verifying with default "+
+				"Authorization: Bearer against /v1/models",
+			"provider", gateway.Spec.Provider,
+		)
+	}
 	env := []corev1.EnvVar{{Name: "LLM_ENDPOINT", Value: gateway.Spec.Endpoint}}
 	if includeAuth {
 		env = append(env, corev1.EnvVar{

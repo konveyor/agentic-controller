@@ -1,7 +1,6 @@
 kind: bugfix
 description: >
-  Gateway connectivity verification now sends provider-correct auth headers
-  and models probe paths (Anthropic uses x-api-key + anthropic-version, Google
-  uses x-goog-api-key at /v1beta/models) instead of always sending
-  Authorization: Bearer against /v1/models, so Anthropic and Google gateways
-  can reach ConnectionVerified.
+  Gateway connectivity verification now sends Anthropic's required
+  x-api-key and anthropic-version headers instead of Authorization: Bearer,
+  so Anthropic gateways can reach ConnectionVerified; unrecognized providers
+  fall back to the OpenAI-compatible probe and are logged.

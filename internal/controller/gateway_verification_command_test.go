@@ -22,7 +22,17 @@ func TestGatewayVerificationCurlCommand(t *testing.T) {
 				`Authorization: Bearer $LLM_API_KEY`,
 				`$LLM_ENDPOINT/v1/models`,
 			},
-			wantNotContain: []string{"x-api-key", "x-goog-api-key", "/v1beta/models"},
+			wantNotContain: []string{"x-api-key"},
+		},
+		{
+			name:        "xai falls to the OpenAI-compatible default",
+			provider:    "xai",
+			includeAuth: true,
+			wantContains: []string{
+				`Authorization: Bearer $LLM_API_KEY`,
+				`$LLM_ENDPOINT/v1/models`,
+			},
+			wantNotContain: []string{"x-api-key"},
 		},
 		{
 			name:        "anthropic uses x-api-key + anthropic-version against /v1/models",
@@ -37,18 +47,7 @@ func TestGatewayVerificationCurlCommand(t *testing.T) {
 			wantNotContain: []string{`Authorization: Bearer`},
 		},
 		{
-			name:        "google uses x-goog-api-key against /v1beta/models",
-			provider:    "google",
-			includeAuth: true,
-			wantContains: []string{
-				verificationHTTPCodePattern,
-				`x-goog-api-key: $LLM_API_KEY`,
-				`$LLM_ENDPOINT/v1beta/models`,
-			},
-			wantNotContain: []string{"Authorization", "x-api-key:"},
-		},
-		{
-			name:        "provider matching is case-insensitive",
+			name:        "provider matching is case-insensitive and hyphen-normalized",
 			provider:    "Anthropic",
 			includeAuth: true,
 			wantContains: []string{
@@ -83,5 +82,23 @@ func TestGatewayVerificationCurlCommand(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestNormalizeProvider guards that provider normalization stays in lockstep
+// with the harness (providerEnv lowercases and converts hyphens to
+// underscores), so gcp-vertex-ai/aws-bedrock match the same keys in both.
+func TestNormalizeProvider(t *testing.T) {
+	cases := map[string]string{
+		"anthropic":     "anthropic",
+		"Anthropic":     "anthropic",
+		"gcp-vertex-ai": "gcp_vertex_ai",
+		"aws-bedrock":   "aws_bedrock",
+		"AWS-Bedrock":   "aws_bedrock",
+	}
+	for in, want := range cases {
+		if got := normalizeProvider(in); got != want {
+			t.Errorf("normalizeProvider(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
