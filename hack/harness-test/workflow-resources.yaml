@@ -18,7 +18,7 @@ spec:
   image: quay.io/konveyor/skills:plan
   displayName: Plan Stage
   version: "1.0.0"
-  description: Reads a project and produces PLAN.md with migration steps.
+  description: Analyzes a project and produces docs/plan.md with migration steps.
   type: skill
   tags:
     - migration
@@ -33,7 +33,7 @@ spec:
   image: quay.io/konveyor/skills:execute
   displayName: Execute Stage
   version: "1.0.0"
-  description: Reads PLAN.md and executes each migration step sequentially.
+  description: Reads docs/plan.md and executes each migration step sequentially.
   type: skill
   tags:
     - migration
@@ -48,7 +48,7 @@ spec:
   image: quay.io/konveyor/skills:verify
   displayName: Verify Stage
   version: "1.0.0"
-  description: Runs the build command, fixes errors, and iterates until the build passes.
+  description: Builds the project and fixes errors until it compiles, runs tests and runtime verification, and confirms the analysis violations were addressed.
   type: skill
   tags:
     - migration
@@ -124,9 +124,6 @@ spec:
     - name: max_turns
       type: number
       default: "200"
-    - name: max_fix_iterations
-      type: number
-      default: "3"
 
 ---
 apiVersion: konveyor.io/v1alpha1
@@ -138,13 +135,13 @@ spec:
   stages:
     - name: plan
       agentRef: migration-plan-agent
-      instructions: "Analyze the project structure using graphify and produce PLAN.md with migration steps"
+      instructions: "Load the plan skill and follow its SKILL.md exactly. Build the migration plan from the Kantra analysis results in .konveyor/analysis.json, reading the build manifest, layout, and source for context. Use the output structure defined in SKILL.md as the exact structure for docs/plan.md — reproduce every required section and field. Do not invent your own document structure."
     - name: execute
       agentRef: migration-execute-agent
-      instructions: "Execute each step in PLAN.md to migrate the code from Java EE to Quarkus"
+      instructions: "Load the execute skill and follow its SKILL.md exactly. Execute each step in docs/plan.md to migrate the code from Java EE to Quarkus. Create .konveyor/handoff.md and write your results as an ## Execute section in it, as defined in SKILL.md."
     - name: verify
       agentRef: migration-verify-agent
-      instructions: "Run mvn clean compile, fix any compilation errors, then run tests"
+      instructions: "Load the verify skill and follow its SKILL.md exactly. Run the build from docs/plan.md, fix build errors until it compiles, then run tests and runtime verification — grounded in .konveyor/analysis.json and the ## Execute section of .konveyor/handoff.md. Append your results as a ## Verify section in .konveyor/handoff.md as defined in SKILL.md."
 
 ---
 apiVersion: konveyor.io/v1alpha1

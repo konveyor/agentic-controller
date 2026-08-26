@@ -1,0 +1,7 @@
+kind: enhancement
+description: >
+  Stage skills (questionnaire, plan, execute, verify) no longer embed
+  execution control such as git operations, iteration counting, or
+  parameter env-var reads; committing and pushing are owned by the harness.
+  Workflow stage instructions now name their skill so the agent loads it
+  natively via goose skill discovery.

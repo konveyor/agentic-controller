@@ -282,9 +282,8 @@ type PromptParams struct {
 
 // PromptResult is the final response from session/prompt.
 type PromptResult struct {
-	StopReason string       `json:"stopReason"`
-	Usage      *PromptUsage `json:"usage,omitempty"`
-	Chunks     []string     `json:"-"`
+	StopReason string   `json:"stopReason"`
+	Chunks     []string `json:"-"`
 
 	// closing collects the agent messages streamed after the most recent
 	// tool call (or the latest human steer): what the model says when it
@@ -369,12 +368,6 @@ func LooksLikeProviderError(text string) bool {
 		}
 	}
 	return false
-}
-
-type PromptUsage struct {
-	TotalTokens  int `json:"totalTokens"`
-	InputTokens  int `json:"inputTokens"`
-	OutputTokens int `json:"outputTokens"`
 }
 
 // SendPrompt sends a prompt to a session and collects the streaming

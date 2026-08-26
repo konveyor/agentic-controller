@@ -1,238 +1,232 @@
 ---
 name: plan
 description: >
-  Reads a project and a goal statement, then produces PLAN.md in the repo root.
-  The plan is specific to THIS project — real file paths, real dependencies, real
-  layer ordering. Uses graphify to generate a code graph, then selectively reads
-  complex files. Does NOT execute any changes. Output is always PLAN.md and
-  nothing else. Use when starting a new migration to create the migration plan
-  before any code changes.
+  Analyzes a project by reading its build manifest, layout, and source, and uses
+  the Kantra analysis results (.konveyor/analysis.json) to work out the migration
+  approach and dependency-ordered steps toward the target named in the prompt, and
+  produces a single migration plan for approval. Produces docs/plan.md.
 ---
 
 # Plan Stage
 
-Reads the project, understands the goal, writes `PLAN.md`.
-Does NOT modify any source files — planning only.
+Analyzes the project deeply and writes a single migration plan for approval. The
+migration goal comes from the prompt. Does NOT modify any source files — planning
+only.
 
-## References
+## Inputs
 
-- [references/migration-plan-skill.md](references/migration-plan-skill.md) —
-  detailed planning methodology with graph-powered discovery, selective reading
-  strategy, and reference-driven plan generation
-- [references/migration-phases.md](references/migration-phases.md) — generic
-  migration phase guidance for migration types without a specific reference
+- `.konveyor/analysis.json` — Kantra rule violations and patterns, **if present**
 
-## How This Works
-
-1. **Reference-Driven**: You read a migration reference file (e.g., `javaee-quarkus.md`) that contains:
-   - Migration order (layer dependencies)
-   - Import/package transformations
-   - Pattern catalog (before/after examples for complex changes)
-   - Files to delete/create
-   - Verification commands
-
-2. **Graph-Powered**: The code graph (graph.json) provides:
-   - Architectural layers (communities)
-   - File relationships (edges)
-   - High-risk files (god nodes)
-   - Which files match which patterns (imports, annotations)
-
-3. **Selective Reading**: You DON'T read every file. You:
-   - Read the build manifest (1 file)
-   - Read the reference (1 file)
-   - Read 5-8 complex source files that need structural changes
-   - Use the graph for everything else (imports, annotations, counts)
-
-4. **Output**: Detailed PLAN.md with:
-   - Specific file paths (from graph)
-   - Specific transformations (from reference)
-   - Correct layer order (from reference + graph communities)
-   - Complex patterns marked with COMPLEX (from reference + god nodes)
 
 ---
 
-## Phase 1 — Generate Code Graph
+## Phase 1 — Analyze
 
-Run graphify on the project:
+### 1a. Read Prior Stage Outputs (if present)
 
-```bash
-graphify update
+1. If `.konveyor/analysis.json` exists, read it for rule violations and patterns
+
+If it doesn't exist, derive the source stack and target directly from the prompt
+and the code.
+
+### 1b. Understand the Project Architecture
+
+Read the build manifest and walk the source layout to understand the project.
+Do this by reading files — do not build or execute the project.
+
+1. **Build manifest** (pom.xml, build.gradle, package.json, *.csproj, etc.):
+   dependencies, modules/sub-projects, plugins, packaging type.
+2. **Directory layout and layers**: identify how the code separates into layers —
+   data models/entities, services/business logic, controllers/API, persistence,
+   configuration.
+3. **Dependency flow**: from imports and package structure, work out who depends
+   on what (typically Models → Services → Controllers).
+4. **High-risk abstractions**: files that many others import, or that carry the
+   most framework-specific patterns. Mark these as COMPLEX in the plan — changes
+   here ripple across many files.
+
+### 1c. Match Patterns to Files
+
+Use the domain skill's patterns to identify which files need migration. Check each
+file's imports, annotations, and configuration against the domain skill's
+transformation rules to classify it:
+
+- Simple (import/annotation replacement only)
+- Complex (structural changes needed)
+- Delete (file will be removed)
+- Create (new file needed)
+
+Use the analysis results as well: if `.konveyor/analysis.json` is present, each
+incident pins a `file`, `line`, and `message` for a required change — cross-check
+your classification against it and make sure every flagged incident maps to a step.
+
+### 1d. Build Migration Order
+
+Map the layers you identified to the domain skill's phase order:
+
+```
+Build manifest (1 file)          → Phase 1: Build config
+Data models (5 files)            → Phase 2: Models
+Services (8 files)               → Phase 3: Services
+Controllers / API (12 files)     → Phase 4: API
 ```
 
-This produces `graph.json` in the repo root.
+This gives you the migration sequence WITHOUT reading every file in full.
+
+### 1e. Selectively Read Complex Source Files (max 5-8)
+
+Read files where the layout and manifest alone aren't enough — structural changes,
+high-risk abstractions, complex patterns from the domain skill. Don't fully read
+files that only need import or annotation changes.
 
 ---
 
-## Phase 2 — Understand the Goal
+## Phase 2 — Write the Plan
 
-Your overall migration goal is provided in the prompt above under
-"Migration Context" and "Stage Task". Parse these to extract:
-
-- **What** needs to change (e.g. javax to jakarta, Python 2 to 3, .NET Framework to .NET 8)
-- **Scope** — all files? specific layers? specific patterns?
-- **Target state** — what does "done" look like?
-- **Constraints** — anything to preserve, avoid, or be careful about?
-
----
-
-## Phase 3 — Discover the Project
-
-### 3a. Read the Graph
-
-Read `graph.json` to understand the project architecture:
-
-1. **Communities (architectural layers)**:
-   - Community 0 might be build files (pom.xml, package.json)
-   - Smaller communities often = data models (few dependencies)
-   - Medium communities = services, business logic
-   - Large, high-degree communities = API/controllers
-
-2. **God nodes (high-risk abstractions)**:
-   - Nodes with degree > 20 are central to the system
-   - Mark these as COMPLEX in the plan
-   - Changes here ripple across many files
-
-3. **Dependency flow**:
-   - Use edges to understand: who depends on what?
-   - Models → Services → Controllers (typical layering)
-
-### 3b. Match Patterns to Graph
-
-Check `/opt/skills/*/references/` for domain-specific migration patterns
-from loaded migration skills. These references contain migration order,
-import mappings, and pattern catalogs for the specific migration type.
-
-Use these patterns to identify which graph nodes need migration:
-
-**Example (if a Java EE migration skill is loaded)**:
-- Look for nodes where `attrs.annotations` contains `@MessageDriven` → Mark as COMPLEX
-- Look for nodes where `attrs.imports` contains `javax.ejb` → EJB conversion needed
-- Count nodes where `attrs.imports` contains `javax.persistence` → simple import replacement
-
-### 3c. Build Migration Order
-
-Map graph communities to migration layers:
-- Community 0 (1 file: pom.xml) → Layer 1: Build
-- Community 28 (5 files: *Entity.java) → Layer 2: Models
-- Community 91 (8 files: *Service.java) → Layer 3: Services
-- Community 164 (12 files: *Controller.java) → Layer 4: API
-
-This gives you the migration sequence WITHOUT reading every file.
-
----
-
-## Phase 4 — Read Selectively (max 5-8 files)
-
-### When to Read a Source File
-
-**READ these**:
-- Build manifest (pom.xml, package.json, .csproj) — ALWAYS
-- Files matching complex patterns:
-  - MDB conversions (before/after structure is very different)
-  - Security config changes
-  - Lifecycle listeners (e.g., WebLogic ApplicationLifecycleListener)
-  - JNDI lookups that need refactoring
-- God nodes (high-degree) that use complex patterns
-
-**DON'T READ these** (the graph is enough):
-- Files that only need import changes (javax → jakarta)
-- Files that only need annotation changes (@Stateless → @ApplicationScoped)
-- Simple entity/model classes
-- Simple REST controllers with basic CRUD
-
-**Rules:**
-- Read ONE file at a time
-- Read ONLY files where the graph is not enough
-- If uncertain about a file, mark the step COMPLEX and move on
-- Total: ~8-10 file reads across all phases
-
----
-
-## Phase 5 — Write PLAN.md
-
-Write `PLAN.md` to the project root with this structure:
+Write a single `docs/plan.md` — a summary of what will be migrated followed by
+step-by-step migration instructions the execute stage follows. Use the structure
+below exactly; do NOT invent your own headings.
 
 ```markdown
-# PLAN.md
+# Migration Plan
 
 ## Goal
-<restate the goal in one sentence>
-- Reference used: <name of reference file, or "none">
+<restate the migration goal in one sentence>
 
-## Project Summary
-- Type: <Maven/Node/Python/.NET/etc>
+## Source → Target
+<source framework/version> → <target framework/version>
+
+## Scope
 - Files affected: <N>
-- Estimated complexity: <Low/Medium/High>
-- Hardest steps: <list the 1-3 most complex items>
+- Estimated complexity: Low/Medium/High
+- Hardest areas: <list 1-3 most complex>
+
+## Key Decisions Applied
+<only where the prompt, target, or source left something unclear or unspecified
+and you had to choose — list each such decision, the option chosen, and the
+reasoning. If everything was clear, state "none".>
+
+## Approach
+<phase-by-phase summary from the domain skill>
 
 ## Steps
 
 ### Step 1: <title>
+- Phase: <domain-skill-phase-name>
 - File: <exact path from repo root>
-- Action: <CREATE | MODIFY | DELETE>
-- What to do: <specific instructions for this file>
-- Why: <reason — what pattern is being changed>
-- Depends on: <step numbers this must come after, or "none">
-- Verify: <how to know this step is done correctly>
+- Action: CREATE | MODIFY | DELETE
+- What to do: <specific instructions>
+- Why: <what pattern is being changed>
+- Depends on: <step numbers, or "none">
+- Verify: <how to know this step is done>
 
-### Step 2: <title>
 ...
 
 ## Verification
-<exact command(s) to run after all steps are done>
+- Build: <build command, e.g. mvn clean compile, dotnet build, npm run build>
+- Test: <test command if tests exist, e.g. mvn test, npm test, pytest — omit if none>
+- Blackbox: if a README exists with run instructions, include steps to start the app and verify key business flows still work
 
 ## Notes
-<gotchas, special cases, decisions made>
+<gotchas, special cases>
 ```
 
 ### Rules for writing steps
 
-1. **One file per step** — never combine two files in one step
-2. **Exact paths** — use real paths from graph.json, not placeholders
-3. **Dependency order** — steps that others depend on come first
-4. **Layer order** — build config → app config → utils → persistence → models → services → REST/controllers → tests → cleanup/deletions
-5. **Hard steps flagged** — add `COMPLEX:` prefix to title for MDB, JNDI, architecture changes, lifecycle listeners
-6. **DELETE steps last** — after all modifications are done
+1. **Phase on every step** — every step must have a `Phase:` matching a domain skill phase
+2. **One file per step** — never combine two files in one step
+3. **Exact paths** — use real paths from the repo, not placeholders
+4. **Dependency order** — steps that others depend on come first
+5. **Phase order** — follow the domain skill's phase ordering
+6. **Hard steps flagged** — add `COMPLEX:` prefix for structural changes
+7. **DELETE steps last** — after all modifications are done
 
 ### Step detail levels
 
-**Mechanical** (simple find-replace changes):
+Match the detail to the change. Examples:
+
+**Mechanical (simple find-replace):**
+
 ```markdown
-### Step 5: Migrate imports in Order.java
-- File: src/main/java/com/example/model/Order.java
+### Step 5: Migrate imports in <file>
+- Phase: <domain-skill-phase-name>
+- File: <exact path>
 - Action: MODIFY
-- What to do: Replace all `javax.persistence.*` → `jakarta.persistence.*`
-- Why: Quarkus uses Jakarta EE namespace
+- What to do: Replace all old namespace imports with new namespace imports
+- Why: Target framework uses different namespace
 - Depends on: Step 1
-- Verify: No `javax.` imports remain in file
+- Verify: No old namespace imports remain
 ```
 
-**Complex** (structural/architectural changes):
+**Complex (structural/architectural — use domain skill patterns):**
+
 ```markdown
-### Step 14: COMPLEX — Convert message listener to new API
+### Step 14: COMPLEX — Convert message listener
+- Phase: <domain-skill-phase-name>
 - File: <path>
 - Action: MODIFY
 - What to do:
-    - BEFORE: <old pattern — e.g., @MessageDriven listener with JMS API>
-    - AFTER: <new pattern — e.g., @Incoming reactive consumer>
+    - BEFORE: <old pattern from domain skill>
+    - AFTER: <new pattern from domain skill>
     - Specific changes:
         1. Remove: <old imports/annotations/methods>
         2. Add: <new imports/annotations>
         3. Replace: <method signatures, configuration>
-    - Affected files: <list config files that also need updates>
-- Why: <why the old pattern is not supported>
-- Depends on: Step X (prerequisite changes), Step Y (configuration)
-- Verify: <grep checks, compile commands>
+- Why: <from domain skill — why the old pattern isn't supported>
+- Depends on: Step X, Step Y
+- Verify: <from domain skill — grep checks, compile commands>
+```
+
+If a complex change also requires config file updates, create a separate step
+for each config file — one file per step, always.
+
+**CREATE (new file):**
+
+```markdown
+### Step 3: Create Quarkus application.properties
+- Phase: <domain-skill-phase-name>
+- File: src/main/resources/application.properties
+- Action: CREATE
+- What to do: Create file with <specific content from domain skill>
+- Why: <target framework requires this config file>
+- Depends on: Step 1
+- Verify: File exists with required properties
+```
+
+**DELETE (remove file):**
+
+```markdown
+### Step 20: Remove legacy deployment descriptor
+- Phase: <domain-skill-phase-name>
+- File: src/main/webapp/WEB-INF/web.xml
+- Action: DELETE
+- What to do: Delete this file — no longer needed by target framework
+- Why: <target framework does not use deployment descriptors>
+- Depends on: Step 14, Step 15
+- Verify: File no longer exists
 ```
 
 ---
 
-## Important
+## Phase 3 — Approval
+
+You MUST write `docs/plan.md` — planning is not done until it is written. Create
+the `docs/` directory if it does not exist.
+
+If the harness runs this stage in an approval mode that surfaces the plan to a
+human, present `docs/plan.md` for approval before finishing.
+
+- If the plan is **approved**: the stage is complete.
+- If the plan is **rejected**: ask what needs to change, revise `docs/plan.md`, and
+  re-present for approval. Repeat until approved.
+
+Otherwise, finish once `docs/plan.md` is written.
+
+---
+
+## Rules
 
 - Do NOT modify source files — planning only
 - Do NOT execute any migration steps
-- Do NOT skip graphify — the graph is essential for later stages
-- Read selectively — the graph gives you most of what you need
-- Report which reference you used in the Goal section of PLAN.md
-- When done, run: `git add PLAN.md graph.json && git commit -m "Add migration plan"`
-- Do NOT commit `graphify-out/`, `.goose/`, or other generated artifacts
+- Analyze by reading files — do not build or execute the project
+- You MUST write `docs/plan.md` before finishing
