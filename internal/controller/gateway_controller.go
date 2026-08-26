@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -46,6 +47,10 @@ const (
 
 	// verificationHTTPCodePattern requires a 2xx status from the probe.
 	verificationHTTPCodePattern = "^2"
+
+	// anthropicAPIVersion is sent as the anthropic-version header when
+	// probing native Anthropic endpoints, which reject Authorization: Bearer.
+	anthropicAPIVersion = "2023-06-01"
 )
 
 // GatewayReconciler reconciles a Gateway object.
@@ -232,15 +237,34 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 // gatewayVerificationCurlCommand builds the shell command used by the
-// verification Job. When includeAuth is true, the request sends
-// Authorization: Bearer $LLM_API_KEY. Keyless credentials omit the header
-// so gateways are probed for reachability without an empty Bearer token.
-func gatewayVerificationCurlCommand(includeAuth bool) string {
+// verification Job. The auth header style and models probe path vary by
+// provider: Anthropic uses x-api-key + anthropic-version, Google (Gemini)
+// uses x-goog-api-key against /v1beta/models, and everything else uses
+// Authorization: Bearer against /v1/models. When includeAuth is false the
+// auth header is omitted so keyless gateways are probed for reachability
+// without an empty credential.
+func gatewayVerificationCurlCommand(provider string, includeAuth bool) string {
 	curl := "curl -sk --max-time 10 -o /dev/null -w '%{http_code}'"
+	authHeader, modelsPath := gatewayVerificationAuth(provider)
 	if includeAuth {
-		curl += ` -H "Authorization: Bearer $LLM_API_KEY"`
+		curl += authHeader
 	}
-	return curl + ` "$LLM_ENDPOINT/v1/models" | grep -qE '` + verificationHTTPCodePattern + `'`
+	return curl + ` "$LLM_ENDPOINT` + modelsPath + `" | grep -qE '` + verificationHTTPCodePattern + `'`
+}
+
+// gatewayVerificationAuth returns the provider-specific auth header snippet
+// (curl -H flags) and the models probe path. Providers that deviate from the
+// OpenAI-compatible default (Authorization: Bearer + /v1/models) get a case
+// here; add new deviating providers alongside anthropic/google.
+func gatewayVerificationAuth(provider string) (authHeader, modelsPath string) {
+	switch strings.ToLower(provider) {
+	case "anthropic":
+		return ` -H "x-api-key: $LLM_API_KEY" -H "anthropic-version: ` + anthropicAPIVersion + `"`, "/v1/models"
+	case "google":
+		return ` -H "x-goog-api-key: $LLM_API_KEY"`, "/v1beta/models"
+	default:
+		return ` -H "Authorization: Bearer $LLM_API_KEY"`, "/v1/models"
+	}
 }
 
 // createVerificationJob creates a Job that verifies connectivity to the
@@ -259,8 +283,8 @@ func (r *GatewayReconciler) createVerificationJob(
 	// The agent base image includes curl. Only 2xx counts as success so
 	// 401/403 (invalid or missing API key) fail verification instead of
 	// marking ConnectionVerified. Keyless credentialRef (empty key,
-	// e.g. AWS SigV4) omits Authorization entirely — an empty Bearer
-	// would 401 under the ^2 check.
+	// e.g. AWS SigV4) omits the auth header entirely — an empty
+	// credential would 401 under the ^2 check.
 	includeAuth := gateway.Spec.CredentialRef.Key != ""
 	env := []corev1.EnvVar{{Name: "LLM_ENDPOINT", Value: gateway.Spec.Endpoint}}
 	if includeAuth {
@@ -301,7 +325,7 @@ func (r *GatewayReconciler) createVerificationJob(
 							Command: []string{
 								"sh", "-c",
 								// Use env vars to avoid shell injection.
-								gatewayVerificationCurlCommand(includeAuth),
+								gatewayVerificationCurlCommand(gateway.Spec.Provider, includeAuth),
 							},
 							Env: env,
 						},
