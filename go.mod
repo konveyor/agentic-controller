@@ -2,6 +2,8 @@ module github.com/konveyor/agentic-controller
 
 go 1.26.2
 
+toolchain go1.26.6
+
 require (
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/onsi/ginkgo/v2 v2.27.4
