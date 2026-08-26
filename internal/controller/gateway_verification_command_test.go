@@ -5,6 +5,10 @@ import (
 	"testing"
 )
 
+// headerNameAPIKey is Anthropic's auth header, asserted absent for
+// OpenAI-compatible providers.
+const headerNameAPIKey = "x-api-key"
+
 func TestGatewayVerificationCurlCommand(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -15,34 +19,34 @@ func TestGatewayVerificationCurlCommand(t *testing.T) {
 	}{
 		{
 			name:        "default provider uses Authorization: Bearer against /v1/models",
-			provider:    "openai",
+			provider:    providerOpenAI,
 			includeAuth: true,
 			wantContains: []string{
 				verificationHTTPCodePattern,
 				`Authorization: Bearer $LLM_API_KEY`,
-				`$LLM_ENDPOINT/v1/models`,
+				endpointModelsProbe,
 			},
-			wantNotContain: []string{"x-api-key"},
+			wantNotContain: []string{headerNameAPIKey},
 		},
 		{
 			name:        "xai falls to the OpenAI-compatible default",
-			provider:    "xai",
+			provider:    providerXAI,
 			includeAuth: true,
 			wantContains: []string{
 				`Authorization: Bearer $LLM_API_KEY`,
-				`$LLM_ENDPOINT/v1/models`,
+				endpointModelsProbe,
 			},
-			wantNotContain: []string{"x-api-key"},
+			wantNotContain: []string{headerNameAPIKey},
 		},
 		{
 			name:        "anthropic uses x-api-key + anthropic-version against /v1/models",
-			provider:    "anthropic",
+			provider:    providerAnthropic,
 			includeAuth: true,
 			wantContains: []string{
 				verificationHTTPCodePattern,
 				`x-api-key: $LLM_API_KEY`,
 				`anthropic-version: ` + anthropicAPIVersion,
-				`$LLM_ENDPOINT/v1/models`,
+				endpointModelsProbe,
 			},
 			wantNotContain: []string{`Authorization: Bearer`},
 		},
@@ -52,19 +56,19 @@ func TestGatewayVerificationCurlCommand(t *testing.T) {
 			includeAuth: true,
 			wantContains: []string{
 				`x-api-key: $LLM_API_KEY`,
-				`$LLM_ENDPOINT/v1/models`,
+				endpointModelsProbe,
 			},
 			wantNotContain: []string{`Authorization: Bearer`},
 		},
 		{
-			name:        "keyless omits the auth header but keeps the provider path",
-			provider:    "anthropic",
+			name:        "keyless omits the auth header but keeps the probe path",
+			provider:    providerAnthropic,
 			includeAuth: false,
 			wantContains: []string{
 				verificationHTTPCodePattern,
-				`$LLM_ENDPOINT/v1/models`,
+				endpointModelsProbe,
 			},
-			wantNotContain: []string{"x-api-key", "Authorization"},
+			wantNotContain: []string{headerNameAPIKey, "Authorization"},
 		},
 	}
 
@@ -90,11 +94,11 @@ func TestGatewayVerificationCurlCommand(t *testing.T) {
 // underscores), so gcp-vertex-ai/aws-bedrock match the same keys in both.
 func TestNormalizeProvider(t *testing.T) {
 	cases := map[string]string{
-		"anthropic":     "anthropic",
-		"Anthropic":     "anthropic",
-		"gcp-vertex-ai": "gcp_vertex_ai",
-		"aws-bedrock":   "aws_bedrock",
-		"AWS-Bedrock":   "aws_bedrock",
+		providerAnthropic: providerAnthropic,
+		"Anthropic":       providerAnthropic,
+		"gcp-vertex-ai":   providerGCPVertex,
+		"aws-bedrock":     providerAWSBedrock,
+		"AWS-Bedrock":     providerAWSBedrock,
 	}
 	for in, want := range cases {
 		if got := normalizeProvider(in); got != want {

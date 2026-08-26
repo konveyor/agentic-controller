@@ -173,7 +173,7 @@ var _ = Describe("CRD Validation", func() {
 					Namespace: testNamespace,
 				},
 				Spec: konveyoriov1alpha1.GatewaySpec{
-					Provider: "anthropic",
+					Provider: providerAnthropic,
 					Endpoint: "https://api.anthropic.com",
 					CredentialRef: konveyoriov1alpha1.GatewayCredentialRef{
 						SecretName: "anthropic-credentials",

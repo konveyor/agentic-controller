@@ -51,6 +51,19 @@ const (
 	// anthropicAPIVersion is sent as the anthropic-version header when
 	// probing native Anthropic endpoints, which reject Authorization: Bearer.
 	anthropicAPIVersion = "2023-06-01"
+
+	// endpointModelsProbe is the models endpoint the connectivity probe
+	// requests. All currently-supported providers expose an
+	// OpenAI-compatible /v1/models under $LLM_ENDPOINT.
+	endpointModelsProbe = "$LLM_ENDPOINT/v1/models"
+
+	// Provider identifiers in normalized form (see normalizeProvider), kept
+	// in sync with the harness providerEnv switch.
+	providerAnthropic  = "anthropic"
+	providerOpenAI     = "openai"
+	providerXAI        = "xai"
+	providerGCPVertex  = "gcp_vertex_ai"
+	providerAWSBedrock = "aws_bedrock"
 )
 
 // GatewayReconciler reconciles a Gateway object.
@@ -241,11 +254,11 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 // with the OpenAI-compatible default, but the mismatch is logged — mirroring
 // the fallthrough warning in providerEnv (harness/internal/goose/lifecycle.go).
 var knownProviders = map[string]bool{
-	"anthropic":     true,
-	"openai":        true,
-	"xai":           true,
-	"gcp_vertex_ai": true,
-	"aws_bedrock":   true,
+	providerAnthropic:  true,
+	providerOpenAI:     true,
+	providerXAI:        true,
+	providerGCPVertex:  true,
+	providerAWSBedrock: true,
 }
 
 // normalizeProvider lowercases and converts hyphens to underscores so provider
@@ -263,23 +276,22 @@ func normalizeProvider(provider string) string {
 // gateways are probed for reachability without an empty credential.
 func gatewayVerificationCurlCommand(provider string, includeAuth bool) string {
 	curl := "curl -sk --max-time 10 -o /dev/null -w '%{http_code}'"
-	authHeader, modelsPath := gatewayVerificationAuth(provider)
 	if includeAuth {
-		curl += authHeader
+		curl += gatewayVerificationAuthHeader(provider)
 	}
-	return curl + ` "$LLM_ENDPOINT` + modelsPath + `" | grep -qE '` + verificationHTTPCodePattern + `'`
+	return curl + ` "` + endpointModelsProbe + `" | grep -qE '` + verificationHTTPCodePattern + `'`
 }
 
-// gatewayVerificationAuth returns the provider-specific auth header snippet
-// (curl -H flags) and the models probe path. Only Anthropic deviates from the
-// OpenAI-compatible default (Authorization: Bearer + /v1/models) today, because
-// its native API rejects Bearer; add new deviating providers as cases here.
-func gatewayVerificationAuth(provider string) (authHeader, modelsPath string) {
+// gatewayVerificationAuthHeader returns the provider-specific auth header
+// snippet (curl -H flags). Only Anthropic deviates from the OpenAI-compatible
+// default (Authorization: Bearer) today, because its native API rejects
+// Bearer; add new deviating providers as cases here.
+func gatewayVerificationAuthHeader(provider string) string {
 	switch normalizeProvider(provider) {
-	case "anthropic":
-		return ` -H "x-api-key: $LLM_API_KEY" -H "anthropic-version: ` + anthropicAPIVersion + `"`, "/v1/models"
+	case providerAnthropic:
+		return ` -H "x-api-key: $LLM_API_KEY" -H "anthropic-version: ` + anthropicAPIVersion + `"`
 	default:
-		return ` -H "Authorization: Bearer $LLM_API_KEY"`, "/v1/models"
+		return ` -H "Authorization: Bearer $LLM_API_KEY"`
 	}
 }
 
