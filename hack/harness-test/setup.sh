@@ -44,7 +44,7 @@ echo ""
 echo "=== Building skill images ==="
 
 SKILL_IMAGE="quay.io/konveyor/skills"
-SKILL_DIRS=(plan execute verify javaee-to-quarkus)
+SKILL_DIRS=(plan execute verify)
 
 for SKILL in "${SKILL_DIRS[@]}"; do
     SKILL_PATH="$REPO_ROOT/catalog/skills/$SKILL"
