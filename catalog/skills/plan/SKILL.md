@@ -2,7 +2,7 @@
 name: plan
 description: >
   Analyzes a project by reading its build manifest, layout, and source, and uses
-  the Kantra analysis results (.konveyor/analysis.json) to work out the migration
+  the Konveyor analysis results (.konveyor/analysis.json) to work out the migration
   approach and dependency-ordered steps toward the target named in the prompt, and
   produces a single migration plan for approval. Produces docs/plan.md.
 ---
@@ -47,11 +47,11 @@ Do this by reading files — do not build or execute the project.
 
 ### 1c. Match Patterns to Files
 
-Use the domain skill's patterns to identify which files need migration. Check each
-file's imports, annotations, and configuration against the domain skill's
+Use the target's migration patterns to identify which files need migration. Check
+each file's imports, declarations, and configuration against the target's
 transformation rules to classify it:
 
-- Simple (import/annotation replacement only)
+- Simple (mechanical import or declaration replacement only)
 - Complex (structural changes needed)
 - Delete (file will be removed)
 - Create (new file needed)
@@ -62,7 +62,7 @@ your classification against it and make sure every flagged incident maps to a st
 
 ### 1d. Build Migration Order
 
-Map the layers you identified to the domain skill's phase order:
+Map the layers you identified to the migration phase order:
 
 ```
 Build manifest (1 file)          → Phase 1: Build config
@@ -76,8 +76,8 @@ This gives you the migration sequence WITHOUT reading every file in full.
 ### 1e. Selectively Read Complex Source Files (max 5-8)
 
 Read files where the layout and manifest alone aren't enough — structural changes,
-high-risk abstractions, complex patterns from the domain skill. Don't fully read
-files that only need import or annotation changes.
+high-risk abstractions, complex migration patterns. Don't fully read
+files that only need mechanical import or declaration changes.
 
 ---
 
@@ -107,12 +107,12 @@ and you had to choose — list each such decision, the option chosen, and the
 reasoning. If everything was clear, state "none".>
 
 ## Approach
-<phase-by-phase summary from the domain skill>
+<phase-by-phase summary of the migration approach>
 
 ## Steps
 
 ### Step 1: <title>
-- Phase: <domain-skill-phase-name>
+- Phase: <migration-phase-name>
 - File: <exact path from repo root>
 - Action: CREATE | MODIFY | DELETE
 - What to do: <specific instructions>
@@ -133,11 +133,11 @@ reasoning. If everything was clear, state "none".>
 
 ### Rules for writing steps
 
-1. **Phase on every step** — every step must have a `Phase:` matching a domain skill phase
+1. **Phase on every step** — every step must have a `Phase:` matching a migration phase
 2. **One file per step** — never combine two files in one step
 3. **Exact paths** — use real paths from the repo, not placeholders
 4. **Dependency order** — steps that others depend on come first
-5. **Phase order** — follow the domain skill's phase ordering
+5. **Phase order** — follow the migration phase ordering
 6. **Hard steps flagged** — add `COMPLEX:` prefix for structural changes
 7. **DELETE steps last** — after all modifications are done
 
@@ -149,7 +149,7 @@ Match the detail to the change. Examples:
 
 ```markdown
 ### Step 5: Migrate imports in <file>
-- Phase: <domain-skill-phase-name>
+- Phase: <migration-phase-name>
 - File: <exact path>
 - Action: MODIFY
 - What to do: Replace all old namespace imports with new namespace imports
@@ -158,23 +158,23 @@ Match the detail to the change. Examples:
 - Verify: No old namespace imports remain
 ```
 
-**Complex (structural/architectural — use domain skill patterns):**
+**Complex (structural/architectural — use migration patterns):**
 
 ```markdown
 ### Step 14: COMPLEX — Convert message listener
-- Phase: <domain-skill-phase-name>
+- Phase: <migration-phase-name>
 - File: <path>
 - Action: MODIFY
 - What to do:
-    - BEFORE: <old pattern from domain skill>
-    - AFTER: <new pattern from domain skill>
+    - BEFORE: <old framework pattern>
+    - AFTER: <new framework pattern>
     - Specific changes:
         1. Remove: <old imports/annotations/methods>
         2. Add: <new imports/annotations>
         3. Replace: <method signatures, configuration>
-- Why: <from domain skill — why the old pattern isn't supported>
+- Why: <why the old pattern isn't supported by the target>
 - Depends on: Step X, Step Y
-- Verify: <from domain skill — grep checks, compile commands>
+- Verify: <grep checks, compile commands>
 ```
 
 If a complex change also requires config file updates, create a separate step
@@ -184,10 +184,10 @@ for each config file — one file per step, always.
 
 ```markdown
 ### Step 3: Create Quarkus application.properties
-- Phase: <domain-skill-phase-name>
+- Phase: <migration-phase-name>
 - File: src/main/resources/application.properties
 - Action: CREATE
-- What to do: Create file with <specific content from domain skill>
+- What to do: Create file with <specific content for the target>
 - Why: <target framework requires this config file>
 - Depends on: Step 1
 - Verify: File exists with required properties
@@ -197,7 +197,7 @@ for each config file — one file per step, always.
 
 ```markdown
 ### Step 20: Remove legacy deployment descriptor
-- Phase: <domain-skill-phase-name>
+- Phase: <migration-phase-name>
 - File: src/main/webapp/WEB-INF/web.xml
 - Action: DELETE
 - What to do: Delete this file — no longer needed by target framework
