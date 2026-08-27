@@ -560,4 +560,165 @@ var _ = Describe("AgentRun Controller", func() {
 			Expect(k8sClient.Delete(ctx, agent)).To(Succeed())
 		})
 	})
+
+	Context("when the run's pod is stuck on a fatal startup error", func() {
+		const (
+			name       = "ar-ctrl-imagepull"
+			agentName  = "ar-ctrl-agent-imagepull"
+			gwName     = "ar-prov-imagepull"
+			secretName = "ar-secret-imagepull"
+		)
+
+		It("should fail the run with the kubelet waiting reason", func() {
+			cleanup := makeReadyGateway(gwName, secretName)
+			defer cleanup()
+
+			agent := &konveyoriov1alpha1.Agent{
+				ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.AgentSpec{
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+			waitForAgentReady(agentName)
+
+			run := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+				Spec:       konveyoriov1alpha1.AgentRunSpec{AgentRef: agentName, Gateway: gwName},
+			}
+			Expect(k8sClient.Create(ctx, run)).To(Succeed())
+
+			runKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			var fetchedRun konveyoriov1alpha1.AgentRun
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, runKey, &fetchedRun)).To(Succeed())
+				g.Expect(fetchedRun.Status.SandboxName).NotTo(BeEmpty())
+			}, timeout, interval).Should(Succeed())
+
+			By("simulating the sandbox pod with its init container in ImagePullBackOff")
+			// The controller reads the pod by the Sandbox name, so the pod
+			// must carry it (Agent Sandbox names the pod after the Sandbox).
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fetchedRun.Status.SandboxName,
+					Namespace: testNamespace,
+					Labels:    map[string]string{labelAgentRun: name},
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy:  corev1.RestartPolicyNever,
+					InitContainers: []corev1.Container{{Name: "skill-loader", Image: "bad/image:nope"}},
+					Containers:     []corev1.Container{{Name: agentContainerName, Image: testAgentImage}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+			pod.Status.Phase = corev1.PodPending
+			pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{
+				Name: "skill-loader",
+				State: corev1.ContainerState{
+					Waiting: &corev1.ContainerStateWaiting{
+						Reason:  "ImagePullBackOff",
+						Message: `Back-off pulling image "bad/image:nope"`,
+					},
+				},
+			}}
+			Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+
+			By("verifying the run fails fast with reason ImagePullBackOff")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, runKey, &fetchedRun)).To(Succeed())
+				g.Expect(fetchedRun.Status.Phase).To(Equal(konveyoriov1alpha1.AgentRunPhaseFailed))
+				cond := meta.FindStatusCondition(fetchedRun.Status.Conditions, konveyoriov1alpha1.AgentRunConditionSucceeded)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal("ImagePullBackOff"))
+				g.Expect(cond.Message).To(ContainSubstring("skill-loader"))
+				g.Expect(fetchedRun.Status.CompletionTime).NotTo(BeNil())
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, pod)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, agent)).To(Succeed())
+		})
+	})
+
+	Context("when the run's pod does not start before the startup deadline", func() {
+		const (
+			name       = "ar-ctrl-deadline"
+			agentName  = "ar-ctrl-agent-deadline"
+			gwName     = "ar-prov-deadline"
+			secretName = "ar-secret-deadline"
+		)
+
+		It("should fail the run with StartupDeadlineExceeded", func() {
+			cleanup := makeReadyGateway(gwName, secretName)
+			defer cleanup()
+
+			agent := &konveyoriov1alpha1.Agent{
+				ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.AgentSpec{
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+			waitForAgentReady(agentName)
+
+			By("creating a run with a short per-run startup deadline")
+			deadline := int32(2)
+			run := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.AgentRunSpec{
+					AgentRef:               agentName,
+					Gateway:                gwName,
+					StartupDeadlineSeconds: &deadline,
+				},
+			}
+			Expect(k8sClient.Create(ctx, run)).To(Succeed())
+
+			runKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			var fetchedRun konveyoriov1alpha1.AgentRun
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, runKey, &fetchedRun)).To(Succeed())
+				g.Expect(fetchedRun.Status.SandboxName).NotTo(BeEmpty())
+			}, timeout, interval).Should(Succeed())
+
+			By("simulating a pod that stays Pending (unschedulable)")
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fetchedRun.Status.SandboxName,
+					Namespace: testNamespace,
+					Labels:    map[string]string{labelAgentRun: name},
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers:    []corev1.Container{{Name: agentContainerName, Image: testAgentImage}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+			pod.Status.Phase = corev1.PodPending
+			pod.Status.Conditions = []corev1.PodCondition{{
+				Type:    corev1.PodScheduled,
+				Status:  corev1.ConditionFalse,
+				Reason:  corev1.PodReasonUnschedulable,
+				Message: "0/3 nodes are available",
+			}}
+			Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+
+			By("verifying the run fails once the deadline elapses")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, runKey, &fetchedRun)).To(Succeed())
+				g.Expect(fetchedRun.Status.Phase).To(Equal(konveyoriov1alpha1.AgentRunPhaseFailed))
+				cond := meta.FindStatusCondition(fetchedRun.Status.Conditions, konveyoriov1alpha1.AgentRunConditionSucceeded)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(konveyoriov1alpha1.AgentRunReasonStartupDeadlineExceeded))
+				g.Expect(fetchedRun.Status.CompletionTime).NotTo(BeNil())
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, pod)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, agent)).To(Succeed())
+		})
+	})
 })

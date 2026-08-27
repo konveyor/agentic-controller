@@ -370,6 +370,19 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              startupDeadlineSeconds:
+                description: |-
+                  StartupDeadlineSeconds bounds how long a run may take to reach a
+                  running state before the controller fails it, guarding against pods
+                  that never start — stuck unschedulable or on a slow image pull.
+                  Measured from Sandbox creation. Fatal pod errors (ImagePullBackOff,
+                  CrashLoopBackOff, InvalidImageName, CreateContainerConfigError) fail
+                  the run immediately regardless of this deadline. 0 or unset uses the
+                  controller default (--agentrun-startup-deadline); when neither is
+                  set, no deadline is enforced and only fatal pod errors fail the run.
+                format: int32
+                minimum: 0
+                type: integer
               workflowParams:
                 description: |-
                   WorkflowParams carries the resolved, type-coerced workflow-level
