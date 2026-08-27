@@ -243,7 +243,7 @@ kubectl get agents
 
 An AgentRun triggers execution of an Agent. It references an Agent,
 selects a Gateway, carries task-specific instructions, and sets the
-environment the harness needs. The controller validates the
+environment the entry point needs. The controller validates the
 configuration, creates an Agent Sandbox, and tracks the run to
 completion.
 

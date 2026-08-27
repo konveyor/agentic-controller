@@ -84,61 +84,6 @@ func StripCredentials(repo *gogit.Repository) error {
 	return nil
 }
 
-func EnsureGitignore(repoDir string, patterns []string) error {
-	gitignorePath := filepath.Join(repoDir, ".gitignore")
-	existing, _ := os.ReadFile(gitignorePath)
-	content := string(existing)
-
-	lines := strings.Split(content, "\n")
-	knownLines := make(map[string]bool)
-	for _, line := range lines {
-		knownLines[strings.TrimSpace(line)] = true
-	}
-	var toAdd []string
-	for _, p := range patterns {
-		if !knownLines[p] {
-			toAdd = append(toAdd, p)
-		}
-	}
-	if len(toAdd) == 0 {
-		return nil
-	}
-
-	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open .gitignore: %w", err)
-	}
-	defer f.Close()
-
-	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
-		f.WriteString("\n")
-	}
-	for _, p := range toAdd {
-		f.WriteString(p + "\n")
-	}
-	return nil
-}
-
-func CommitFiles(repo *gogit.Repository, paths []string, msg string) error {
-	wt, err := repo.Worktree()
-	if err != nil {
-		return fmt.Errorf("get worktree: %w", err)
-	}
-	for _, p := range paths {
-		if _, err := wt.Add(p); err != nil {
-			continue
-		}
-	}
-	_, err = wt.Commit(msg, &gogit.CommitOptions{})
-	if errors.Is(err, gogit.ErrEmptyCommit) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-	return nil
-}
-
 // ConfigureAuthor sets the git commit identity (user.name / user.email)
 // used for the agent's local commits. go-git derives both the author and
 // the committer from these values.

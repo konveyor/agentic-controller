@@ -219,19 +219,6 @@ func runStage(cmd *cobra.Command, args []string) (int, error) {
 	}
 
 	if hasSkills {
-		if err := git.EnsureGitignore(cloneDir, []string{
-			"graphify-out/",
-			".goose/",
-			"__pycache__/",
-			"node_modules/",
-			"target/",
-			"*.tmp",
-			"*.swp",
-			"*.bak",
-		}); err != nil {
-			logging.Warn("gitignore: %v", err)
-		}
-
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return 1, fmt.Errorf("resolve home dir: %w", err)
@@ -240,25 +227,12 @@ func runStage(cmd *cobra.Command, args []string) (int, error) {
 			return 1, fmt.Errorf("skill symlink: %w", err)
 		}
 		logging.Ok("symlinked %s/.agents/skills → %s", home, skillsDir())
-	}
 
-	if hasSkills {
-		// 4b. Write analysis to workspace (if resolved from Hub)
-		wroteAnalysis, err := fetchAndWriteAnalysis(hubClient, cfg.AppID, cloneDir)
-		if err != nil {
+		// 4b. Write analysis to workspace (if resolved from Hub). Uncommitted:
+		// the entry point never commits files itself; all commits are authored
+		// by the agent.
+		if err := fetchAndWriteAnalysis(hubClient, cfg.AppID, cloneDir); err != nil {
 			logging.Warn("analysis fetch: %v", err)
-		}
-
-		// 4c. Commit harness-managed files so they survive on the branch.
-		// Only commit when there is actual grounding data (analysis.json);
-		// .gitignore patterns take effect locally without a commit.
-		if wroteAnalysis {
-			if err := git.CommitFiles(repo, []string{
-				".gitignore",
-				".konveyor/analysis.json",
-			}, "harness: add grounding data"); err != nil {
-				return 1, fmt.Errorf("commit harness files: %w", err)
-			}
 		}
 	}
 
@@ -719,37 +693,37 @@ func isIntermediateWorkflowStage(cfg *config.Config) bool {
 	return stage < count
 }
 
-func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir string) (bool, error) {
+func fetchAndWriteAnalysis(hubClient *hub.Client, appIDStr string, workDir string) error {
 	appID, err := hub.ParseAppID(appIDStr)
 	if err != nil {
-		return false, fmt.Errorf("invalid APP_ID %q: %w", appIDStr, err)
+		return fmt.Errorf("invalid APP_ID %q: %w", appIDStr, err)
 	}
 	insights, err := hubClient.FetchAnalysis(appID)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if len(insights) == 0 {
 		logging.Info("no analysis results for app %s", appIDStr)
-		return false, nil
+		return nil
 	}
 
 	analysisDir := filepath.Join(workDir, ".konveyor")
 	if err := os.MkdirAll(analysisDir, 0o755); err != nil {
-		return false, fmt.Errorf("create .konveyor dir: %w", err)
+		return fmt.Errorf("create .konveyor dir: %w", err)
 	}
 
 	data, err := json.MarshalIndent(insights, "", "  ")
 	if err != nil {
-		return false, fmt.Errorf("marshal analysis: %w", err)
+		return fmt.Errorf("marshal analysis: %w", err)
 	}
 
 	analysisPath := filepath.Join(analysisDir, "analysis.json")
 	if err := os.WriteFile(analysisPath, data, 0o644); err != nil {
-		return false, fmt.Errorf("write analysis: %w", err)
+		return fmt.Errorf("write analysis: %w", err)
 	}
 
 	logging.Ok("wrote %d analysis insights to %s", len(insights), analysisPath)
-	return true, nil
+	return nil
 }
 
 // closingMessageLimit bounds what a closing message adds to the pod log.

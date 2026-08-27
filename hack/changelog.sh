@@ -95,7 +95,7 @@ cmd_validate() {
     # Check description
     local desc
     desc=$("${YQ}" eval '.description // ""' "${file}")
-    desc=$(echo "${desc}" | xargs) # trim whitespace
+    desc=$(echo "${desc}" | tr '\n' ' ' | awk '{$1=$1;print}') # trim whitespace
     if [ -z "${desc}" ]; then
       echo "  ERROR: ${name}: description is required and must be non-empty"
       errors=$((errors + 1))
@@ -201,7 +201,7 @@ cmd_assemble() {
 
       local desc
       desc=$("${YQ}" eval '.description // ""' "${file}")
-      desc=$(echo "${desc}" | xargs) # trim + collapse whitespace
+      desc=$(echo "${desc}" | tr '\n' ' ' | awk '{$1=$1;print}') # trim + collapse whitespace
 
       # Ensure trailing punctuation
       case "${desc}" in

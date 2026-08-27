@@ -1,0 +1,5 @@
+kind: enhancement
+description: >
+  Slim the harness to a minimal entry point (bookends only) by removing
+  harness-added commits, and define the 1-page Agent Entry Point contract
+  document covering parameter delivery, execution semantics, and git lifecycle.

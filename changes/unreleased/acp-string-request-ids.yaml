@@ -1,4 +1,4 @@
-kind: bug
+kind: bugfix
 
 description: >
   Accept string ids on agent-initiated ACP requests. goose sends

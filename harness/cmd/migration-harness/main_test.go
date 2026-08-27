@@ -302,3 +302,32 @@ func TestTokenRevocationDecision(t *testing.T) {
 		})
 	}
 }
+
+func TestFetchAndWriteAnalysis(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/applications/42/analysis/insights" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id": 1, "description": "sample insight"}]`))
+	}))
+	defer server.Close()
+
+	workDir := t.TempDir()
+	hubClient := hub.NewClient(server.URL, "token")
+	err := fetchAndWriteAnalysis(hubClient, "42", workDir)
+	if err != nil {
+		t.Fatalf("fetchAndWriteAnalysis failed: %v", err)
+	}
+
+	analysisFile := filepath.Join(workDir, ".konveyor", "analysis.json")
+	data, err := os.ReadFile(analysisFile)
+	if err != nil {
+		t.Fatalf("reading analysis.json failed: %v", err)
+	}
+	if !strings.Contains(string(data), "sample insight") {
+		t.Errorf("unexpected content: %s", string(data))
+	}
+}

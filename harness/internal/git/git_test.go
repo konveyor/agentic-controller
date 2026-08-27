@@ -268,8 +268,15 @@ func TestConfigureAuthorAppliesToCommit(t *testing.T) {
 	}
 
 	os.WriteFile(filepath.Join(cloneDir, ".gitignore"), []byte("*.tmp\n"), 0644)
-	if err := CommitFiles(repo, []string{".gitignore"}, "harness: author test"); err != nil {
-		t.Fatalf("CommitFiles: %v", err)
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if _, err := wt.Add(".gitignore"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := wt.Commit("author test", &gogit.CommitOptions{}); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 
 	head, err := repo.Head()
@@ -287,79 +294,6 @@ func TestConfigureAuthorAppliesToCommit(t *testing.T) {
 	if commit.Committer.Name != "Jane Dev" || commit.Committer.Email != "jane@example.com" {
 		t.Errorf("committer = %q <%q>, want %q <%q>",
 			commit.Committer.Name, commit.Committer.Email, "Jane Dev", "jane@example.com")
-	}
-}
-
-func TestCommitFiles(t *testing.T) {
-	remoteDir, _ := setupBareRemote(t)
-	seedBareRepo(t, remoteDir)
-	cloneDir, repo := cloneLocal(t, remoteDir)
-
-	if err := ConfigureAuthor(repo, "migration-agent", "migration-agent@konveyor.io"); err != nil {
-		t.Fatalf("ConfigureAuthor: %v", err)
-	}
-	if err := CheckoutBranch(repo, "test-commit-files"); err != nil {
-		t.Fatalf("CheckoutBranch: %v", err)
-	}
-
-	os.WriteFile(filepath.Join(cloneDir, ".gitignore"), []byte("*.tmp\n"), 0644)
-	os.MkdirAll(filepath.Join(cloneDir, ".konveyor"), 0755)
-	os.WriteFile(filepath.Join(cloneDir, ".konveyor", "analysis.json"), []byte("{}\n"), 0644)
-
-	err := CommitFiles(repo, []string{".gitignore", ".konveyor/analysis.json"}, "harness: test commit")
-	if err != nil {
-		t.Fatalf("CommitFiles: %v", err)
-	}
-
-	head, err := repo.Head()
-	if err != nil {
-		t.Fatalf("Head: %v", err)
-	}
-	commit, err := repo.CommitObject(head.Hash())
-	if err != nil {
-		t.Fatalf("CommitObject: %v", err)
-	}
-	if commit.Message != "harness: test commit" {
-		t.Errorf("commit message = %q, want %q", commit.Message, "harness: test commit")
-	}
-	if commit.Author.Name != "migration-agent" {
-		t.Errorf("author = %q, want %q", commit.Author.Name, "migration-agent")
-	}
-
-	tree, err := commit.Tree()
-	if err != nil {
-		t.Fatalf("Tree: %v", err)
-	}
-	if _, err := tree.File(".gitignore"); err != nil {
-		t.Error(".gitignore not in commit tree")
-	}
-	if _, err := tree.File(".konveyor/analysis.json"); err != nil {
-		t.Error(".konveyor/analysis.json not in commit tree")
-	}
-}
-
-func TestCommitFilesNoChanges(t *testing.T) {
-	remoteDir, _ := setupBareRemote(t)
-	seedBareRepo(t, remoteDir)
-	_, repo := cloneLocal(t, remoteDir)
-
-	if err := ConfigureAuthor(repo, "migration-agent", "migration-agent@konveyor.io"); err != nil {
-		t.Fatalf("ConfigureAuthor: %v", err)
-	}
-	if err := CheckoutBranch(repo, "test-no-changes"); err != nil {
-		t.Fatalf("CheckoutBranch: %v", err)
-	}
-
-	headBefore, _ := repo.Head()
-
-	err := CommitFiles(repo, []string{".gitignore", ".konveyor/analysis.json"}, "should not commit")
-	if err != nil {
-		t.Fatalf("CommitFiles: %v", err)
-	}
-
-	headAfter, _ := repo.Head()
-	if headBefore.Hash() != headAfter.Hash() {
-		t.Error("HEAD changed despite no files to commit")
 	}
 }
 

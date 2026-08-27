@@ -1,36 +1,46 @@
-# migration-harness
+# Agent Entry Point (`migration-harness`)
 
-**Thin single-stage runner** that handles git plumbing and [goose](https://github.com/block/goose) lifecycle for AI-powered code migrations. The harness does not know what stage it is running — migration intelligence lives in [SkillCards](../CONTEXT.md).
+**Minimal single-stage entry point (bookends only)** that handles git plumbing, parameter delivery, and [goose](https://github.com/block/goose) runtime lifecycle for AI agent workloads. It is the reference implementation of the [Agent Entry Point Contract](../docs/entry-point.md).
+
+The entry point manages workspace setup and teardown only — all migration intelligence, tool use, and git commits belong to the agent runtime and its [SkillCards](../CONTEXT.md).
 
 ---
 
 ## How It Works
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                  migration-harness run                │
-│                                                      │
-│  1. Load config from env                             │
-│  2. Resolve app + git creds from Hub API             │
-│  3. Clone repo, strip creds, checkout target branch  │
-│  4. Write analysis insights to .konveyor/            │
-│  5. Start goose serve (ACP)                          │
-│  6. Discover skills from /opt/skills/*/SKILL.md      │
-│  7. Build prompt from context layers                 │
-│  8. Start filesystem watcher (incremental push)      │
-│  9. Send single ACP prompt (blocks until completion) │
-│ 10. Final push                                       │
-└──────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                  migration-harness run                   │
+│                                                          │
+│  Setup (Bookend 1):                                      │
+│  1. Load config from env & /run/konveyor/params.json     │
+│  2. Resolve app + git creds from Hub API (if configured) │
+│  3. Clone repo, configure author, strip push creds       │
+│  4. Write analysis insights to .konveyor/ (uncommitted)  │
+│  5. Start goose serve (ACP loopback :4001)               │
+│  6. Discover skills and assemble layered prompt          │
+│  7. Start ACP tee (:4000) for live streaming & HITL      │
+│  8. Start filesystem watcher (incremental push)          │
+│                                                          │
+│  Execution:                                              │
+│  9. Send ACP prompt — agent executes and commits locally │
+│                                                          │
+│  Teardown (Bookend 2):                                   │
+│ 10. Wind-down handoff prompt if budget limit reached     │
+│ 11. Final push of agent-authored commits                 │
+│ 12. Write usage & outcome to /dev/termination-log        │
+│ 13. Revoke Hub token and exit (0=ok, 1=err, 2=limit)     │
+└──────────────────────────────────────────────────────────┘
 ```
 
-The harness sends **one prompt** per stage. The AgentWorkflowRun controller handles stage sequencing — the harness is identical in every stage image.
+The entry point sends **one prompt** per stage. The AgentWorkflowRun controller handles stage sequencing — the entry point binary is identical in every stage image.
 
 ---
 
 ## Prerequisites
 
 - **Go 1.21+** (to build)
-- **[goose](https://github.com/block/goose)** (started by the harness via `goose serve`)
+- **[goose](https://github.com/block/goose)** (started by the entry point via `goose serve`)
 - **git**
 
 ---
@@ -69,6 +79,7 @@ Configuration comes from two sources: environment variables (required and option
 | `HARNESS_WORK_DIR` | `/workspace/repo` | Clone directory |
 | `HARNESS_SKILLS_DIR` | `/opt/skills` | Skills mount directory |
 | `HARNESS_PARAMS_FILE` | `/run/konveyor/params.json` | Path to the controller-written parameter file (ADR 0009) |
+| `HARNESS_TERMINATION_LOG_PATH` | `/dev/termination-log` | Path for the termination log JSON blob |
 | `KONVEYOR_PROMPT` | — | Agent-level standing instructions |
 | `KONVEYOR_WORKFLOW_GUIDE` | — | Workflow guide context |
 | `KONVEYOR_INSTRUCTIONS` | — | Stage-specific task instructions |
@@ -79,10 +90,7 @@ Configuration comes from two sources: environment variables (required and option
 
 ### Parameters (`/run/konveyor/params.json`)
 
-Max tool-call turns (default `200`) and other execution controls, plus
-workflow/agent parameter values, are delivered via a three-section JSON file
-mounted by the controller (ADR 0009), not individual `KONVEYOR_PARAM_*` env
-vars:
+Execution limits and mode, plus workflow/agent parameter values, are delivered via a three-section JSON file mounted by the controller (ADR 0009):
 
 ```json
 {
@@ -92,46 +100,54 @@ vars:
 }
 ```
 
-`execution.maxTurns`, when present, overrides the default max turns. Workflow
-and agent values are also appended to the agent's prompt as a `## Parameters`
-section so the agent sees them without any skill involvement.
+- `execution.mode` sets runtime supervision (`auto` or `approve`).
+- `execution.maxTurns` configures runtime turn limits.
+- `execution.maxCost` sets cumulative spend budget monitored via ACP.
+- Workflow and agent values are appended to the agent's prompt under `## Parameters`.
 
 ---
 
-## Git Lifecycle
+## Git Lifecycle & Commit Authorship
 
-1. **Clone** — harness clones using Hub-provided credentials
-2. **Strip credentials** — strips any embedded credentials from the remote URL (safety net — auth is passed via transport, not URL)
-3. **Clear env** — Hub token is cleared from the process environment
-4. **Checkout branch** — checks out `TARGET_BRANCH`
-5. **Agent commits** — the agent commits locally with descriptive messages (per skill instructions)
-6. **Watcher** — background fsnotify watcher pushes agent commits after a 30s quiet period
-7. **Final push** — catches anything the watcher missed (runs even on failure)
+1. **Clone** — entry point clones using Hub-provided credentials
+2. **Configure author** — configures git commit identity (`user.name`, `user.email`)
+3. **Strip credentials** — strips push credentials from the remote URL before launching the runtime
+4. **Clear env** — Hub token is cleared from the process environment
+5. **Checkout branch** — checks out `TARGET_BRANCH`
+6. **Agent commits** — the agent authors all commits locally with descriptive messages. The entry point **never creates commits of its own**.
+7. **Watcher** — background fsnotify watcher pushes agent commits after a 30s quiet period
+8. **Final push** — pushes agent commits on stage completion. If no new commits were created, push is skipped to avoid empty remote branches.
 
-The agent commits locally but never sees push credentials — only the harness binary pushes.
+---
+
+## Exit Code Contract (ADR 0011)
+
+| Exit Code | Meaning | Controller Status |
+|-----------|---------|-------------------|
+| `0` | Succeeded — agent completed work | `Phase: Succeeded` |
+| `1` | Failed — execution error or crash | `Phase: Failed` |
+| `2` | Limit reached — budget exhausted, handoff committed | `Phase: Succeeded`, `type=LimitReached` |
 
 ---
 
 ## Skill Discovery
 
-The harness globs `/opt/skills/*/SKILL.md` at startup. Skills are mounted into agent pods by the controller via SkillCard init containers. The harness concatenates all discovered skills into the prompt alongside environment-provided context layers.
-
-Two kinds of skills:
-
-- **Stage skills** (plan, execute, verify) — define *process*: what to do
-- **Domain skills** (e.g. javaee-to-quarkus) — define *knowledge*: how to do it
+The entry point globs `/opt/skills/*/SKILL.md` at startup. Skills are mounted into agent pods by the controller via SkillCard init containers. The entry point concatenates all discovered skills and always-loaded rules into the prompt alongside environment-provided context layers.
 
 ---
 
 ## Architecture
 
 ```
-cmd/migration-harness/main.go    CLI entry point (cobra, single "run" command)
+cmd/migration-harness/
+├── main.go        CLI entry point (cobra, single "run" command)
+└── outcome.go     Outcome classification & termination log
 internal/
-├── config/        Env-var configuration
-├── acp/           ACP WebSocket client (session, prompt)
+├── config/        Env-var & params.json configuration
+├── acp/           ACP WebSocket client (session, prompt, cost monitoring)
 ├── goose/         goose serve lifecycle (start, health, stop)
 ├── tee/           Pod-facing ACP endpoint: pipe, live tee, HITL relay
+├── askuser/       ask_user stdio MCP server for in-turn human elicitation
 ├── hub/           Konveyor Hub API client (app, creds, analysis)
 ├── git/           Credential-isolated git operations (go-git)
 ├── watcher/       Debounced filesystem watcher (fsnotify)
@@ -142,13 +158,13 @@ internal/
 
 goose gives every WebSocket connection a private agent with no
 cross-connection fan-out, so a client dialing the pod could never see the
-run's live session. The harness therefore owns the pod ACP port and
+run's live session. The entry point therefore owns the pod ACP port and
 fronts goose:
 
 ```text
-viewer ──(hub WS proxy)──▶ pod:4000 = harness tee ──▶ 127.0.0.1:4001 = goose serve
+viewer ──(hub WS proxy)──▶ pod:4000 = entry point tee ──▶ 127.0.0.1:4001 = goose serve
                                        ▲
-                        harness's own run connection (session, prompt)
+                        entry point's own run connection (session, prompt)
 ```
 
 **Watching the sandboxed run.** Attached viewers receive the run
@@ -159,21 +175,21 @@ session's stream in standard ACP vocabulary, unmodified:
   locations), `session_info_update` (which carries the active run id in
   `_meta.goose.activeRunId`) — plus its `_goose/unstable/session/update`
   channel (`usage_update` token/context spend, `status_message`
-  notices), which the harness enables by declaring the
+  notices), which the entry point enables by declaring the
   `customNotifications` client capability at initialize.
-- harness lifecycle the goose stream cannot see, emitted as synthetic
+- Entry point lifecycle the goose stream cannot see, emitted as synthetic
   frames on the run's sessionId with the same vocabulary: a `plan`
   ladder (prepare workspace → agent works the stage → push results),
   `tool_call` / `tool_call_update` for watcher and final git pushes, and
   a closing `status_message` with the stage outcome. A small replay ring
-  catches late-attaching viewers up on harness status (goose history is
+  catches late-attaching viewers up on status (goose history is
   replayable via `session/load` as usual).
 - Each attached client also gets a verbatim frame pipe to its own goose
   connection — interactive chat is unchanged.
 
 **Redirecting the run (in-turn HITL).** goose scopes an active prompt to
 the connection that started it, so the tee routes viewer frames naming
-the run session onto the harness's run connection instead of the
+the run session onto the entry point's run connection instead of the
 viewer's private pipe:
 
 - `_goose/unstable/session/steer` — inject operator guidance into the
@@ -183,9 +199,8 @@ viewer's private pipe:
   The viewer supplies `expectedRunId` from the teed
   `session_info_update`, and goose's response relays back under the
   viewer's own request id.
-- `session/cancel` — stop the turn; the harness treats a cancelled stop
-  reason as a deliberate human abort (stage fails, partial work still
-  pushed).
+- `session/cancel` — stop the turn; treated as a deliberate human abort
+  (stage fails, partial work still pushed).
 - A viewer `session/prompt` on the run session is rejected while the run
   is active — two connections prompting one session would interleave its
   history — with goose's own guidance text pointing at steer. After the
@@ -198,51 +213,14 @@ viewer's private pipe:
 offered to attached viewers (`kperm-*` ids, first answer wins, relayed
 verbatim). Everything else fails closed: nobody attached denies
 immediately, and an ask no viewer answers within
-`HARNESS_HITL_TIMEOUT_SECONDS` denies too — an ask that self-approves on
-a timer is no ask at all. After a timeout the viewers are considered
-unresponsive and follow-up asks deny fast until a new attach or any
-viewer interaction shows a human is back, which caps the deny/retry turn
-burn.
+`HARNESS_HITL_TIMEOUT_SECONDS` denies too.
 
 **Questions from the agent (`ask_user`).** The session mounts a stdio
-MCP server that is the harness binary itself (`migration-harness
+MCP server that is the entry point binary itself (`migration-harness
 ask-user-mcp`), giving the agent one tool: `ask_user(question, options?)`.
 A call becomes an MCP `elicitation/create` that goose relays over ACP to
-the harness (the harness advertises `clientCapabilities.elicitation.form`
-at initialize), the harness offers it to attached viewers exactly like a
-permission ask (`kask-*` ids, first answer wins, a viewer attaching
-mid-question is shown the pending ask), and the `{action, content}` answer
-travels back to the tool, which tells the model "The human answered: …".
-The tool call blocks the turn for the whole round trip — this is the
-in-turn "stop and confirm" that prose questions cannot express (an
-assistant message ending on a question is just a finished turn). Fail
-closed as everywhere else: nobody attached, or no answer within
-`HARNESS_HITL_TIMEOUT_SECONDS`, cancels the question — the tool then tells
-the model no human answered, and the prompt guidelines tell it to say what
-it needed and stop rather than guess. `HARNESS_HITL_ASK=off` leaves the
-tool out; elicitation from any other MCP server the session mounts takes
-the same path. The design decisions behind this flow — and what a future
-agent runtime must provide to compose with it — are recorded in
-[ADR 0017](../docs/adr/0017-ask-user-tool-and-elicitation.md).
-
-**Fault containment.** The tee can never fail the run: bounded
-per-viewer queues (slow viewers are dropped), ping/pong keepalive so
-half-open viewers release their goose connection, panics recovered per
-connection, and a listener failure only costs live viewing — plus, since
-the controller's pod readiness probe targets `:4000`, a run whose
-listener never binds keeps its `ACPReady` condition False (reason
-`NotListening`) for its whole life. `/healthz` stays unauthenticated. `HARNESS_ACP_TEE=off` restores goose owning
-`:4000` directly.
-
-### Key design decisions
-
-- **Single `run` command** — no subcommands, no interactive mode. One prompt, one stage.
-- **go-git** — all git operations use `github.com/go-git/go-git/v5`. No shell-out to git CLI.
-- **Credential isolation** — Hub and git push credentials are used by the harness only, cleared before goose starts. The agent commits locally; the harness pushes.
-- **ACP WebSocket** — connects to goose via JSON-RPC over WebSocket (ACP protocol).
-- **Exit status from ACP** — clean `SendPrompt` return = exit 0. Any error or goose crash = exit 1.
-  A provider failure that goose reports as assistant prose ("Ran into this error: …") is a clean
-  return: it is logged as a WARN closing message and notified to viewers, but still exits 0.
+the entry point, offering it to attached viewers (`kask-*` ids, first answer
+wins). The tool call blocks the turn for the whole round trip.
 
 ---
 
