@@ -31,7 +31,7 @@ CI pipeline) resolves application metadata before creating the CR.
 ### Key design decisions
 
 - **Agent Sandbox** is a hard dependency for workload execution
-- **Git credentials** stay in the harness — the agent does not receive
+- **Git credentials** stay in the entry point — the agent does not receive
   push credentials
 - **Skills** are Agent Skills directories, delivered as ordinary OCI images
   mounted via ImageVolumes (K8s 1.33+), git clones, or inline content
