@@ -1,0 +1,5 @@
+kind: bugfix
+description: >
+  Fix changelog fragment description whitespace trimming in hack/changelog.sh.
+  xargs mis-parsed quotes/backslashes and folded multi-line descriptions;
+  switched to tr '\n' ' ' | awk for trimming and whitespace collapsing.

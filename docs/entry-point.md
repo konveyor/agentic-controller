@@ -4,6 +4,15 @@ An **entry point** is the container entrypoint binary in an Agent image. It acts
 
 The controller is agnostic to the entry point implementation. Any third-party entry point that satisfies this contract can be used.
 
+### Workflow vs. Standalone Runs
+
+The entry point is agnostic to how many prompts it will ever send — it sends exactly one per invocation. Two usage patterns follow from that:
+
+- **Workflow run** — Driven by an `AgentWorkflowRun`, one stage at a time (e.g. plan, execute, verify). Each stage is a separate entry point invocation with its own prompt; state carries across stages via git commits.
+- **Standalone run** — A single `AgentRun` with no workflow: one skill, one prompt, one operation (fetch application details → run the operation → commit/push). This is the same code path as a single workflow stage; nothing in the entry point special-cases it. §5 references credential revocation "on standalone run" — this is what that means.
+
+Neither mode requires a specific bundle of skills (see `harness/README.md` § Skill Discovery); the plan/execute/verify convention is a skill-authoring choice, not an entry point requirement.
+
 ---
 
 ## 1. Parameter Delivery (`/run/konveyor/params.json`)

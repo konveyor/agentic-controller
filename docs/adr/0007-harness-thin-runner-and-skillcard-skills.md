@@ -4,6 +4,8 @@
 **Date:** 2026-07-21
 **Authors:** Savitha Raghunathan
 
+**Update (2026-08-27):** The harness was slimmed to a minimal entry point — it no longer injects `.gitignore` entries for build artifacts (§3, "Thin single-stage runner" step 3) or authors the grounding-data commit (Alternatives, "Harness commits instead of agent"). See `docs/entry-point.md` for the current contract.
+
 ## Context
 
 The migration harness was a monolithic Go binary that orchestrated five

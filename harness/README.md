@@ -134,6 +134,8 @@ Execution limits and mode, plus workflow/agent parameter values, are delivered v
 
 The entry point globs `/opt/skills/*/SKILL.md` at startup. Skills are mounted into agent pods by the controller via SkillCard init containers. The entry point concatenates all discovered skills and always-loaded rules into the prompt alongside environment-provided context layers.
 
+The entry point requires **no specific skills** — it discovers and loads whatever is mounted. The plan/execute/verify stage-skill bundle is a convention for workflow runs, not a requirement; a single standalone operation skill works the same way (see `docs/entry-point.md`).
+
 ---
 
 ## Architecture
