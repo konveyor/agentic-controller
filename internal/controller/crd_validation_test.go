@@ -400,11 +400,65 @@ var _ = Describe("CRD Validation", func() {
 					Namespace: testNamespace,
 				},
 				Spec: konveyoriov1alpha1.AgentRunSpec{
-					AgentRef: "some-agent",
+					AgentRef: testFileMountAgent,
 				},
 			}
 			Expect(k8sClient.Create(ctx, ar)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, ar)).To(Succeed())
+		})
+
+		It("should accept an AgentRun with valid fileMounts", func() {
+			ar := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ar-filemounts-valid-test",
+					Namespace: testNamespace,
+				},
+				Spec: konveyoriov1alpha1.AgentRunSpec{
+					AgentRef: testFileMountAgent,
+					FileMounts: []konveyoriov1alpha1.FileMount{
+						{SecretName: testMountSecretName, MountPath: testMountSecretPath, SubPath: testMountKey},
+						{ConfigMapName: testMountCMName, MountPath: testMountCMPath},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ar)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, ar)).To(Succeed())
+		})
+
+		It("should reject a fileMount naming both a Secret and a ConfigMap", func() {
+			ar := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ar-filemounts-both-test",
+					Namespace: testNamespace,
+				},
+				Spec: konveyoriov1alpha1.AgentRunSpec{
+					AgentRef: testFileMountAgent,
+					FileMounts: []konveyoriov1alpha1.FileMount{
+						{SecretName: "s", ConfigMapName: "c", MountPath: testMountBadPath},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, ar)
+			Expect(err).To(HaveOccurred())
+			Expect(errors.IsInvalid(err)).To(BeTrue(), fmt.Sprintf("expected Invalid error, got: %v", err))
+		})
+
+		It("should reject a fileMount naming neither a Secret nor a ConfigMap", func() {
+			ar := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "ar-filemounts-neither-test",
+					Namespace: testNamespace,
+				},
+				Spec: konveyoriov1alpha1.AgentRunSpec{
+					AgentRef: testFileMountAgent,
+					FileMounts: []konveyoriov1alpha1.FileMount{
+						{MountPath: testMountBadPath},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, ar)
+			Expect(err).To(HaveOccurred())
+			Expect(errors.IsInvalid(err)).To(BeTrue(), fmt.Sprintf("expected Invalid error, got: %v", err))
 		})
 
 		It("should reject an AgentRun with empty agentRef", func() {

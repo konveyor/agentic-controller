@@ -473,6 +473,7 @@ func (r *AgentWorkflowRunReconciler) createAgentRunForStage(
 			Params:       stageParams,
 			Env:          env,
 			EnvFrom:      pbRun.Spec.EnvFrom,
+			FileMounts:   pbRun.Spec.FileMounts,
 			// Stamp the stage-resolved execution config (stage override,
 			// else Agent default) onto the stage's AgentRun so the
 			// AgentRun controller — which cannot see the workflow — resolves

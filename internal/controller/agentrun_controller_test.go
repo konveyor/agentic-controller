@@ -474,6 +474,133 @@ var _ = Describe("AgentRun Controller", func() {
 		})
 	})
 
+	Context("when the run declares fileMounts", func() {
+		const (
+			name       = "ar-ctrl-filemounts"
+			agentName  = "ar-ctrl-agent-filemounts"
+			gwName     = "ar-prov-filemounts"
+			secretName = "ar-secret-filemounts"
+		)
+
+		It("should mount the Secret and ConfigMap read-only on the agent container", func() {
+			cleanup := makeReadyGatewayKeyless(gwName, secretName)
+			defer cleanup()
+
+			agent := &konveyoriov1alpha1.Agent{
+				ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.AgentSpec{
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+			waitForAgentReady(agentName)
+
+			run := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.AgentRunSpec{
+					AgentRef: agentName,
+					Gateway:  gwName,
+					FileMounts: []konveyoriov1alpha1.FileMount{
+						{SecretName: testMountSecretName, MountPath: testMountSecretPath, SubPath: testMountKey},
+						{ConfigMapName: testMountCMName, MountPath: testMountCMPath},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, run)).To(Succeed())
+
+			runKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			var fetchedRun konveyoriov1alpha1.AgentRun
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, runKey, &fetchedRun)).To(Succeed())
+				g.Expect(fetchedRun.Status.SandboxName).NotTo(BeEmpty())
+			}, timeout, interval).Should(Succeed())
+
+			var sandbox sandboxv1beta1.Sandbox
+			sandboxKey := types.NamespacedName{Name: fetchedRun.Status.SandboxName, Namespace: testNamespace}
+			Expect(k8sClient.Get(ctx, sandboxKey, &sandbox)).To(Succeed())
+			podSpec := sandbox.Spec.PodTemplate.Spec
+			container := podSpec.Containers[0]
+
+			By("adding a read-only VolumeMount for each fileMount")
+			var secretMount, cmMount *corev1.VolumeMount
+			for i := range container.VolumeMounts {
+				vm := &container.VolumeMounts[i]
+				switch vm.MountPath {
+				case testMountSecretPath:
+					secretMount = vm
+				case testMountCMPath:
+					cmMount = vm
+				}
+			}
+			Expect(secretMount).NotTo(BeNil())
+			Expect(secretMount.ReadOnly).To(BeTrue())
+			Expect(secretMount.SubPath).To(Equal(testMountKey))
+			Expect(cmMount).NotTo(BeNil())
+			Expect(cmMount.ReadOnly).To(BeTrue())
+			Expect(cmMount.SubPath).To(BeEmpty())
+
+			By("backing each mount with the right Secret/ConfigMap volume")
+			vols := map[string]corev1.Volume{}
+			for _, v := range podSpec.Volumes {
+				vols[v.Name] = v
+			}
+			secretVol, ok := vols[secretMount.Name]
+			Expect(ok).To(BeTrue())
+			Expect(secretVol.Secret).NotTo(BeNil())
+			Expect(secretVol.Secret.SecretName).To(Equal(testMountSecretName))
+			cmVol, ok := vols[cmMount.Name]
+			Expect(ok).To(BeTrue())
+			Expect(cmVol.ConfigMap).NotTo(BeNil())
+			Expect(cmVol.ConfigMap.Name).To(Equal(testMountCMName))
+
+			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, agent)).To(Succeed())
+		})
+
+		It("should fail the run terminally when a mountPath collides with a reserved mount", func() {
+			cleanup := makeReadyGatewayKeyless(gwName+"-collide", secretName+"-collide")
+			defer cleanup()
+
+			agent := &konveyoriov1alpha1.Agent{
+				ObjectMeta: metav1.ObjectMeta{Name: agentName + "-collide", Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.AgentSpec{
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName + "-collide"}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+			waitForAgentReady(agentName + "-collide")
+
+			run := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: name + "-collide", Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.AgentRunSpec{
+					AgentRef: agentName + "-collide",
+					Gateway:  gwName + "-collide",
+					FileMounts: []konveyoriov1alpha1.FileMount{
+						{SecretName: "shadow", MountPath: "/run/konveyor/params.json"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, run)).To(Succeed())
+
+			runKey := types.NamespacedName{Name: name + "-collide", Namespace: testNamespace}
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.AgentRun
+				g.Expect(k8sClient.Get(ctx, runKey, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.Phase).To(Equal(konveyoriov1alpha1.AgentRunPhaseFailed))
+				g.Expect(fetched.Status.SandboxName).To(BeEmpty())
+				cond := meta.FindStatusCondition(fetched.Status.Conditions, konveyoriov1alpha1.AgentRunConditionSucceeded)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal("InvalidFileMounts"))
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, agent)).To(Succeed())
+		})
+	})
+
 	Context("when the Sandbox finishes with a failed pod", func() {
 		const (
 			name       = "ar-ctrl-termination"

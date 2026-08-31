@@ -81,6 +81,14 @@ type AgentWorkflowRunSpec struct {
 	// across all stages. Passed through to each AgentRun's Sandbox.
 	// +optional
 	EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
+
+	// FileMounts attaches Secrets or ConfigMaps as read-only files across
+	// all stages. Passed through to each stage's AgentRun unchanged and
+	// validated there against the controller-managed mounts.
+	// +optional
+	// +listType=map
+	// +listMapKey=mountPath
+	FileMounts []FileMount `json:"fileMounts,omitempty"`
 }
 
 // AgentWorkflowRunStatus defines the observed state of an AgentWorkflowRun.
