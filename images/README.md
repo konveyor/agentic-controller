@@ -1,5 +1,9 @@
 # Container Images
 
+For end-to-end authoring instructions, see
+[Creating agentic base images](../docs/agent-base-images.md) and
+[Creating SkillCard images](../docs/skill-card-images.md).
+
 ## agentic-controller-agent
 
 Minimal agent image owned by the controller for verification and

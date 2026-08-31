@@ -42,6 +42,14 @@ CI pipeline) resolves application metadata before creating the CR.
 
 See `docs/adr/` for the full set of architecture decision records.
 
+## Authoring images and skills
+
+- [Create an agentic base image](docs/agent-base-images.md) — extend
+  `agent-base`, build language images, publish them, and understand the
+  harness contract.
+- [Create a SkillCard image](docs/skill-card-images.md) — author, validate,
+  package, publish, and reference skills and rules.
+
 ## Getting started
 
 See [docs/getting-started.md](docs/getting-started.md) for a
