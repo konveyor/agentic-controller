@@ -1,9 +1,18 @@
-# ADR 0009: Parameter Delivery via params.json
+---
+adr: "0009"
+title: "Parameter Delivery via params.json"
+description: "Defines a structured params.json contract for delivering typed workflow and agent values to the harness."
+status: proposed
+date: "2026-08-05"
+last_updated: "2026-08-31"
+authors:
+  - "David Zager"
+last_reviewed: "2026-08-31"
+implementation_status: amended
+review_note: "params.json, typed coercion, substitution, and the workflow/agent sections are implemented. ADR 0018 supersedes its guide-scope detail."
+---
 
-**Status:** proposed
-**Date:** 2026-08-05
-**Last updated:** 2026-08-31
-**Authors:** David Zager
+# ADR 0009: Parameter Delivery via params.json
 
 **Update (2026-08-31):** The `params.json` carrier and typed workflow/agent
 sections are implemented. ADR 0018 adds uniform execution fields to

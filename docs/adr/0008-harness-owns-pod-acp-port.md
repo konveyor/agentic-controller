@@ -1,9 +1,19 @@
-# ADR 0008: Harness Owns the Pod ACP Port (Tee Topology)
+---
+adr: "0008"
+title: "Harness Owns the Pod ACP Port (Tee Topology)"
+description: "Defines the harness tee as the pod-facing ACP endpoint that fans out the run stream and relays human interaction."
+status: proposed
+status_note: "Revises the pod-layout and human-in-the-loop sections of ADR 0002; ADR 0002's decisions otherwise stand."
+date: "2026-08-04"
+last_updated: null
+authors:
+  - "Ian Bolton"
+last_reviewed: "2026-08-31"
+implementation_status: in-sync
+review_note: "The tee topology is implemented and enabled by default in the entry point. Its status remains proposed pending the project's formal acceptance process."
+---
 
-**Status:** proposed — revises the pod-layout and human-in-the-loop
-sections of ADR 0002; ADR 0002's decisions themselves stand
-**Date:** 2026-08-04
-**Authors:** Ian Bolton
+# ADR 0008: Harness Owns the Pod ACP Port (Tee Topology)
 
 ## Context
 

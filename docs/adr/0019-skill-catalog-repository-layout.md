@@ -1,24 +1,27 @@
-# ADR 0017: Skill Catalog Repository Layout
+---
+adr: "0019"
+title: "Skill Catalog Repository Layout"
+description: "Defines the separation between shipped catalog skills, maintainer workflow skills, and single-skill packaging examples."
+status: proposed
+status_note: "Revises the repository layout adopted by ADR 0015 while preserving its skill packaging contract."
+date: "2026-08-25"
+last_updated: "2026-08-31"
+authors:
+  - "David Zager"
+last_reviewed: "2026-08-31"
+implementation_status: in-sync
+review_note: "The catalog/ layout and maintainer skills/ split are implemented. The ADR remains proposed pending formal acceptance."
+---
 
-**Status:** proposed. Revises the repository layout that ADR 0015's
-implementation adopted — where shipped skills, the repository's own
-maintainer workflow skills, and single-skill packaging examples all lived
-under one top-level `skills/` directory and the bundle image selected the
-shipped subset with a hand-maintained `COPY` allowlist. The packaging
-*contract* from ADR 0015 (a skill is an AgentSkills.io directory; the loader
-detects a bundle by the absence of `SKILL.md` at the image root; skills
-mount at `/opt/skills/{name}/SKILL.md`) is unchanged.
-**Date:** 2026-08-25
-**Last updated:** 2026-08-31
-**Authors:** David Zager
+# ADR 0019: Skill Catalog Repository Layout
 
 **Update (2026-08-31):** The `catalog/` and maintainer `skills/` split is
 present in the repository, including the catalog build context and updated
 validation/e2e paths. The ADR remains proposed pending formal acceptance.
 
-> Numbering note: 0016 is the Gateway interim-interface ADR; 0018 is claimed
-> by the open execution-fields PR (`impl/115-116-crd-params-execution`).
-> 0017 is free.
+> Numbering note: 0016 is the Gateway interim-interface ADR; 0017 is the
+> ask-user ADR; 0018 is the execution-fields ADR. This catalog-layout ADR
+> uses the next available number, 0019.
 
 ## Context
 

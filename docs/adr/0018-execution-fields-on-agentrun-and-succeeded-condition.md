@@ -1,13 +1,19 @@
-# ADR 0018: Execution Fields on AgentRun, and a `Succeeded` Terminal Condition
+---
+adr: "0018"
+title: "Execution Fields on AgentRun, and a `Succeeded` Terminal Condition"
+description: "Defines execution-field placement, workflow-stage stamping, and the Succeeded terminal condition for AgentRuns."
+status: proposed
+status_note: "Amends ADRs 0011 and 0009 and supersedes their conflicting field-placement, exit-code, and guide-substitution details."
+date: "2026-08-19"
+last_updated: "2026-08-31"
+authors:
+  - "David Zager"
+last_reviewed: "2026-08-31"
+implementation_status: in-sync
+review_note: "Execution fields on AgentRun, workflow-stage stamping, Succeeded terminal condition, and guide scoping are implemented. The ADR remains proposed pending formal acceptance."
+---
 
-**Status:** proposed — amends ADR 0011 (execution controls) and ADR 0009
-(parameter delivery). Supersedes 0011's field-placement table for
-`maxTurns`/`maxCost` and its exit-code → phase mapping, and narrows
-0009's guide-substitution scope. ADR 0011's and 0009's other decisions
-stand.
-**Date:** 2026-08-19
-**Last updated:** 2026-08-31
-**Authors:** David Zager
+# ADR 0018: Execution Fields on AgentRun, and a `Succeeded` Terminal Condition
 
 **Update (2026-08-31):** The controller now implements the execution-field
 placement, workflow-stage stamping, `Succeeded` terminal condition, phase

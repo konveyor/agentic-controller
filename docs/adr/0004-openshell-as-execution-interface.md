@@ -1,12 +1,19 @@
-# ADR 0004: OpenShell as Execution Interface
+---
+adr: "0004"
+title: "OpenShell as Execution Interface"
+description: "Defines OpenShell as the deferred future execution interface for secure sandbox lifecycle and inference routing."
+status: accepted
+status_note: "Aspirational and deferred; ADR 0016 supersedes the no-Gateway-CRD and immediate OpenShell-client clauses."
+date: "2026-07-20"
+last_updated: null
+authors:
+  - "David Zager"
+last_reviewed: "2026-08-31"
+implementation_status: deferred
+review_note: "Remains the deferred OpenShell target. ADR 0016 records the accepted current Gateway CRD and direct Agent Sandbox implementation."
+---
 
-**Status:** Accepted — aspirational / deferred. Its *No Gateway CRD* and
-*LLMProvider removed / controller becomes an OpenShell client now* clauses
-are superseded by ADR 0016; the OpenShell end-state described here remains
-the deferred target, pending the OpenShell Go SDK reaching GA and team
-buy-in. See ADR 0016 for the interim Gateway CRD that ships today.
-**Date:** 2026-07-20
-**Authors:** David Zager
+# ADR 0004: OpenShell as Execution Interface
 
 The controller replaces its direct Agent Sandbox dependency with
 OpenShell as the execution interface. Instead of creating

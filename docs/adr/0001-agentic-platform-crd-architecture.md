@@ -1,9 +1,19 @@
-# ADR 0001: Agentic Platform CRD Architecture
+---
+adr: "0001"
+title: "Agentic Platform CRD Architecture"
+description: "Defines the platform's CRDs and the boundaries between the controller, Hub, Agent Sandbox, and harness."
+status: accepted
+date: "2026-06-01"
+last_updated: "2026-08-31"
+authors:
+  - "David Zager"
+  - "Dylan Murray"
+last_reviewed: "2026-08-31"
+implementation_status: amended
+review_note: "Core CRD, workflow, git-persistence, and Agent/AgentRun decisions remain useful. The CRD list, Gateway name, params delivery, skill delivery, Hub API, and commit-authorship details are amended in the ADR or superseded by ADRs 0006, 0007, 0009, 0015, and 0016."
+---
 
-**Status:** Accepted
-**Date:** 2026-06-01
-**Last updated:** 2026-08-31
-**Authors:** David Zager, Dylan Murray
+# ADR 0001: Agentic Platform CRD Architecture
 
 **Update (2026-08-31):** Reconciled with the current implementation. The
 seven resources are now SkillCard, SkillCollection, Agent, AgentRun,

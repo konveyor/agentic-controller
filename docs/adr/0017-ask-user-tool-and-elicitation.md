@@ -1,12 +1,23 @@
-# ADR 0017: In-turn human questions via the ask_user tool and ACP elicitation
+---
+adr: "0017"
+title: "In-turn human questions via the ask_user tool and ACP elicitation"
+description: "Defines the ask_user MCP tool and ACP elicitation path for interactive human questions during an AgentRun."
+status: proposed
+date: "2026-08-20"
+last_updated: "2026-08-31"
+authors: []
+last_reviewed: "2026-08-31"
+implementation_status: in-sync
+review_note: "ask_user MCP, ACP elicitation forwarding, fail-closed behavior, and resolution frames are implemented in the entry point. The ADR remains proposed pending formal acceptance."
+relates_to:
+  - "ADR 0002 (ACP transport and observability)"
+  - "ADR 0008 (harness owns the pod ACP port)"
+  - "issues #55/#56 (interactive input and approval flow)"
+  - "PR #96 (ACP tee: watch and steer)"
+  - "PR #161 (implementation of this ADR)"
+---
 
-- **Status:** proposed
-- **Date:** 2026-08-20
-- **Last updated:** 2026-08-31
-- **Relates to:** ADR 0002 (ACP transport and observability), ADR 0008
-  (harness owns the pod ACP port), issues #55/#56 (interactive input and
-  approval flow), PR #96 (ACP tee: watch and steer), PR #161
-  (implementation of this ADR)
+# ADR 0017: In-turn human questions via the ask_user tool and ACP elicitation
 
 **Update (2026-08-31):** The reference entry point implements the
 `ask_user` stdio MCP server, ACP elicitation forwarding, pending-question

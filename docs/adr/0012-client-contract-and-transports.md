@@ -1,18 +1,23 @@
-# ADR 0012: Verified client contract and layered transports for AgentRun UIs
+---
+adr: "0012"
+title: "Verified client contract and layered transports for AgentRun UIs"
+description: "Defines the client contract and layered transports that browser UIs use to drive and observe AgentRuns."
+status: proposed
+date: "2026-07-06"
+last_updated: null
+authors: []
+last_reviewed: "2026-08-31"
+implementation_status: in-sync
+review_note: "Remains a proposed client contract based on the external prototype; no contradictory client implementation is maintained in this repository."
+relates_to:
+  - "ADR 0002 (ACP transport)"
+  - "ADR 0006 (Hub addon pattern, supersedes 0003)"
+  - "konveyor/enhancements#295"
+  - "PR #4"
+provenance: "Written and verified in the hub-shim prototype (ibolton336/agentcontroller-client), which stands in for the Hub passthrough proxy so browser UIs can drive the real controller today. Contributed here because the contract it freezes is the platform's, not the prototype's."
+---
 
-- **Status:** proposed
-- **Date:** 2026-07-06
-- **Relates to:** ADR 0002 (ACP transport), ADR 0006 (Hub addon pattern,
-  supersedes 0003),
-  [konveyor/enhancements#295](https://github.com/konveyor/enhancements/pull/295),
-  PR #4
-- **Provenance:** written and verified in the hub-shim prototype
-  ([ibolton336/agentcontroller-client](https://github.com/ibolton336/agentcontroller-client)),
-  which stands in for the Hub passthrough proxy so browser UIs can drive the
-  real controller today. Contributed here because the contract it freezes is
-  the platform's, not the prototype's — it is cited from #22 and
-  konveyor/enhancements#295, and those citations should not point into a
-  playground.
+# ADR 0012: Verified client contract and layered transports for AgentRun UIs
 
 ## Context
 

@@ -1,30 +1,29 @@
 # ADR Reconciliation
 
-Reviewed against the repository implementation on **2026-08-31**. This is
-the index of the current review; the ADRs remain the authoritative record of
-their decisions and dated amendments.
+This table is generated from the YAML front matter in the ADRs. Each row has
+its own `last_reviewed` date, so partial reviews do not require a global date
+change. The ADR body and front matter remain the source of truth.
 
-| ADR | Review result |
-| --- | --- |
-| 0001 | Core CRD, workflow, git-persistence, and Agent/AgentRun decisions remain useful. The CRD list, Gateway name, params delivery, skill delivery, Hub API, and commit-authorship details are amended in the ADR or superseded by ADRs 0006, 0007, 0009, 0015, and 0016. |
-| 0002 | Controller remains outside ACP and clients use the pod endpoint. The endpoint ownership and human-in-the-loop topology are revised by ADR 0008; the current entry point fronts port 4000 and Goose uses loopback port 4001. |
-| 0003 | Superseded by ADR 0006; retained as historical rationale. |
-| 0004 | Remains the deferred OpenShell target. ADR 0016 records the accepted current Gateway CRD and direct Agent Sandbox implementation. |
-| 0006 | Remains proposed/external to this repository. The Hub addon pattern is still the intended integration boundary; the entry point now receives parameters through `params.json`, as recorded in the ADR amendment. |
-| 0007 | Accepted and implemented as the minimal entry point contract. The 2026-08-27 amendment records that it does not create `.gitignore` or grounding-data commits. |
-| 0008 | The tee topology is implemented and enabled by default in the entry point. Its status remains proposed pending the project’s formal acceptance process. |
-| 0009 | `params.json`, typed coercion, substitution, and the workflow/agent sections are implemented. ADR 0018 supersedes its guide-scope detail. |
-| 0010 | The boundary remains the intended rule, but the repository’s shipped skills still contain some execution-control and container-layout instructions. The ADR remains proposed and this gap is explicit. |
-| 0011 | Execution controls, cost monitoring, native turn limits, mode translation, and termination reporting are implemented. ADR 0018 supersedes its AgentRun field-placement and exit-2 mapping. |
-| 0012 | Remains a proposed client contract based on the external prototype; no contradictory client implementation is maintained in this repository. |
-| 0013 | Remains a proposed platform-resolved-parameter contract based on the external prototype; the current controller remains parameter-source agnostic. |
-| 0014 | Native skill discovery, always-loaded rules, and the loader metadata path are implemented; catalog relocation is recorded by ADR 0017 (catalog layout). |
-| 0015 | OCI, git, inline, bundle, loader, and validation behavior is implemented. Its former “prototype held back” wording is amended to describe the shipped implementation. |
-| 0016 | Accepted current state: Gateway CRD, direct Agent Sandbox creation, verification Jobs, and provider-specific credential injection. OpenShell remains deferred. |
-| 0017 (ask-user) | `ask_user` MCP, ACP elicitation forwarding, fail-closed behavior, and resolution frames are implemented in the entry point. The ADR’s status remains proposed pending formal acceptance. |
-| 0017 (catalog layout) | The `catalog/` layout and maintainer `skills/` split are implemented. The ADR remains proposed pending formal acceptance. |
-| 0018 | Execution fields on AgentRun, workflow-stage stamping, `Succeeded` terminal condition, and guide scoping are implemented. The ADR remains proposed pending formal acceptance. |
+<!-- BEGIN ADR RECONCILIATION -->
 
-Future reviews should update this table and, when the ADR is materially
-amended, its `Last updated` field together. A review date alone is not a
-substitute for an amendment when implementation has drifted.
+| ADR | Title | Status | Implementation | Last reviewed | Review result |
+| --- | --- | --- | --- | --- | --- |
+| [0001](./0001-agentic-platform-crd-architecture.md) | Agentic Platform CRD Architecture | accepted | amended | 2026-08-31 | Core CRD, workflow, git-persistence, and Agent/AgentRun decisions remain useful. The CRD list, Gateway name, params delivery, skill delivery, Hub API, and commit-authorship details are amended in the ADR or superseded by ADRs 0006, 0007, 0009, 0015, and 0016. |
+| [0002](./0002-acp-transport-and-observability.md) | ACP Transport and Agent Observability | accepted | amended | 2026-08-31 | Controller remains outside ACP and clients use the pod endpoint. The endpoint ownership and human-in-the-loop topology are revised by ADR 0008; the current entry point fronts port 4000 and Goose uses loopback port 4001. |
+| [0003](./0003-hub-curated-api-for-agent-resources.md) | Hub Curated API for Agent Resources | superseded | superseded | 2026-08-31 | Superseded by ADR 0006; retained as historical rationale. |
+| [0004](./0004-openshell-as-execution-interface.md) | OpenShell as Execution Interface | accepted | deferred | 2026-08-31 | Remains the deferred OpenShell target. ADR 0016 records the accepted current Gateway CRD and direct Agent Sandbox implementation. |
+| [0006](./0006-hub-addon-pattern-for-agent-resources.md) | Hub follows the addon pattern for agent resources | proposed | amended | 2026-08-31 | Remains proposed/external to this repository. The Hub addon pattern is still the intended integration boundary; the entry point now receives parameters through params.json, as recorded in the ADR amendment. |
+| [0007](./0007-harness-thin-runner-and-skillcard-skills.md) | Harness as Thin Single-Stage Runner with SkillCard-Based Skills | accepted | amended | 2026-08-31 | Accepted and implemented as the minimal entry point contract. The 2026-08-27 amendment records that it does not create .gitignore or grounding-data commits. |
+| [0008](./0008-harness-owns-pod-acp-port.md) | Harness Owns the Pod ACP Port (Tee Topology) | proposed | in-sync | 2026-08-31 | The tee topology is implemented and enabled by default in the entry point. Its status remains proposed pending the project's formal acceptance process. |
+| [0009](./0009-parameter-delivery-via-params-json.md) | Parameter Delivery via params.json | proposed | amended | 2026-08-31 | params.json, typed coercion, substitution, and the workflow/agent sections are implemented. ADR 0018 supersedes its guide-scope detail. |
+| [0010](./0010-skill-content-boundary.md) | Skill Content Boundary — Knowledge vs Execution Control | proposed | deferred | 2026-08-31 | The boundary remains the intended rule, but the repository's shipped skills still contain some execution-control and container-layout instructions. The ADR remains proposed and this gap is explicit. |
+| [0011](./0011-execution-controls-mode-and-session-type.md) | Execution Controls and Mode on CRDs | proposed | amended | 2026-08-31 | Execution controls, cost monitoring, native turn limits, mode translation, and termination reporting are implemented. ADR 0018 supersedes its AgentRun field-placement and exit-2 mapping. |
+| [0012](./0012-client-contract-and-transports.md) | Verified client contract and layered transports for AgentRun UIs | proposed | in-sync | 2026-08-31 | Remains a proposed client contract based on the external prototype; no contradictory client implementation is maintained in this repository. |
+| [0013](./0013-platform-resolved-params.md) | Platform-resolved agent params (param sources) | proposed | deferred | 2026-08-31 | Remains a proposed platform-resolved-parameter contract based on the external prototype; the current controller remains parameter-source agnostic. |
+| [0014](./0014-skill-loading-and-prompt-assembly.md) | Skill Loading and Prompt Assembly | proposed | amended | 2026-08-31 | Native skill discovery, always-loaded rules, and the loader metadata path are implemented; catalog relocation is recorded by ADR 0019. |
+| [0015](./0015-skill-packaging-and-delivery.md) | Skill Packaging and Delivery | proposed | amended | 2026-08-31 | OCI, git, inline, bundle, loader, and validation behavior is implemented. Its former prototype-held-back wording is amended to describe the shipped implementation. |
+| [0016](./0016-gateway-crd-as-interim-execution-interface.md) | Gateway CRD as Interim Execution Interface | accepted | in-sync | 2026-08-31 | Accepted current state: Gateway CRD, direct Agent Sandbox creation, verification Jobs, and provider-specific credential injection. OpenShell remains deferred. |
+| [0017](./0017-ask-user-tool-and-elicitation.md) | In-turn human questions via the ask_user tool and ACP elicitation | proposed | in-sync | 2026-08-31 | ask_user MCP, ACP elicitation forwarding, fail-closed behavior, and resolution frames are implemented in the entry point. The ADR remains proposed pending formal acceptance. |
+| [0018](./0018-execution-fields-on-agentrun-and-succeeded-condition.md) | Execution Fields on AgentRun, and a `Succeeded` Terminal Condition | proposed | in-sync | 2026-08-31 | Execution fields on AgentRun, workflow-stage stamping, Succeeded terminal condition, and guide scoping are implemented. The ADR remains proposed pending formal acceptance. |
+| [0019](./0019-skill-catalog-repository-layout.md) | Skill Catalog Repository Layout | proposed | in-sync | 2026-08-31 | The catalog/ layout and maintainer skills/ split are implemented. The ADR remains proposed pending formal acceptance. |
+<!-- END ADR RECONCILIATION -->

@@ -51,6 +51,14 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./..." paths="./api/..."
 
+.PHONY: generate-adr-index
+generate-adr-index: ## Generate the ADR index and reconciliation table from ADR front matter.
+	hack/generate-adr-index.sh
+
+.PHONY: verify-adr-index
+verify-adr-index: ## Verify that generated ADR indexes match ADR front matter.
+	hack/generate-adr-index.sh --check
+
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...

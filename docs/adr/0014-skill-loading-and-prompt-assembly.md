@@ -1,11 +1,19 @@
-# ADR 0014: Skill Loading and Prompt Assembly
+---
+adr: "0014"
+title: "Skill Loading and Prompt Assembly"
+description: "Defines native skill discovery, always-loaded rules, and how the loader supplies rule metadata for prompt assembly."
+status: proposed
+status_note: "Refines ADR 0007's prompt-assembly step and supersedes ADR 0001's runtime-discovery claim; ADR 0007's other decisions stand."
+date: "2026-08-11"
+last_updated: "2026-08-31"
+authors:
+  - "Fabian von Feilitzsch"
+last_reviewed: "2026-08-31"
+implementation_status: amended
+review_note: "Native skill discovery, always-loaded rules, and the loader metadata path are implemented; catalog relocation is recorded by ADR 0019."
+---
 
-**Status:** proposed — refines the prompt-assembly step of ADR 0007, and
-supersedes the runtime-discovery claim in ADR 0001 (its mount-path
-decision stands); ADR 0007's decisions themselves stand
-**Date:** 2026-08-11
-**Last updated:** 2026-08-31
-**Authors:** Fabian von Feilitzsch
+# ADR 0014: Skill Loading and Prompt Assembly
 
 **Update (2026-08-31):** Native runtime discovery, the linked
 `~/.agents/skills` root, loader-produced rule metadata, and rule prompt

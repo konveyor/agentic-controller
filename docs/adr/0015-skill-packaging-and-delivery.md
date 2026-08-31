@@ -1,13 +1,19 @@
-# ADR 0015: Skill Packaging and Delivery
+---
+adr: "0015"
+title: "Skill Packaging and Delivery"
+description: "Defines OCI, git, inline, and bundle skill sources and the loader contract that assembles validated skills."
+status: proposed
+status_note: "Supersedes two parts of ADR 0001 and revises where ADR 0014 sources its rules list; two SkillCollection questions remain open."
+date: "2026-08-13"
+last_updated: "2026-08-31"
+authors:
+  - "Fabian von Feilitzsch"
+last_reviewed: "2026-08-31"
+implementation_status: amended
+review_note: "OCI, git, inline, bundle, loader, and validation behavior is implemented. Its former prototype-held-back wording is amended to describe the shipped implementation."
+---
 
-**Status:** proposed. Supersedes two parts of ADR 0001, its *Skill and rule
-packaging via skillimage* section and its rejection of runtime git sync, and
-revises where ADR 0014 sources its rules list. ADR 0001's *Skill mounting:
-one directory* stands and is the contract everything here preserves. Two
-questions about SkillCollection are left open at the end.
-**Date:** 2026-08-13
-**Last updated:** 2026-08-31
-**Authors:** Fabian von Feilitzsch
+# ADR 0015: Skill Packaging and Delivery
 
 **Update (2026-08-31):** The implementation described here is now in the
 repository: the controller stages image, git, and inline sources, the

@@ -1,9 +1,18 @@
-# ADR 0010: Skill Content Boundary — Knowledge vs Execution Control
+---
+adr: "0010"
+title: "Skill Content Boundary — Knowledge vs Execution Control"
+description: "Defines the boundary between skill knowledge and deterministic execution controls owned by the harness."
+status: proposed
+date: "2026-08-05"
+last_updated: "2026-08-31"
+authors:
+  - "David Zager"
+last_reviewed: "2026-08-31"
+implementation_status: deferred
+review_note: "The boundary remains the intended rule, but the repository's shipped skills still contain some execution-control and container-layout instructions. The ADR remains proposed and this gap is explicit."
+---
 
-**Status:** proposed
-**Date:** 2026-08-05
-**Last updated:** 2026-08-31
-**Authors:** David Zager
+# ADR 0010: Skill Content Boundary — Knowledge vs Execution Control
 
 **Update (2026-08-31):** The boundary remains the intended authoring rule,
 but reconciliation found that the shipped `plan`, `execute`, and `verify`

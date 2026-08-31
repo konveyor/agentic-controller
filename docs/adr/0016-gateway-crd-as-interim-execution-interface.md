@@ -1,11 +1,19 @@
-# ADR 0016: Gateway CRD as Interim Execution Interface
+---
+adr: "0016"
+title: "Gateway CRD as Interim Execution Interface"
+description: "Defines the current Gateway CRD and direct Agent Sandbox path while OpenShell remains the deferred execution target."
+status: accepted
+status_note: "Supersedes two clauses of ADR 0004; ADR 0004's OpenShell end-state remains deferred."
+date: "2026-08-17"
+last_updated: null
+authors:
+  - "David Zager"
+last_reviewed: "2026-08-31"
+implementation_status: in-sync
+review_note: "Accepted current state: Gateway CRD, direct Agent Sandbox creation, verification Jobs, and provider-specific credential injection. OpenShell remains deferred."
+---
 
-**Status:** accepted — supersedes two clauses of ADR 0004 (its *No Gateway
-CRD* decision and its *controller becomes an OpenShell client now* /
-*LLMProvider is removed* framing). ADR 0004's OpenShell end-state stands as
-the deferred target.
-**Date:** 2026-08-17
-**Authors:** David Zager
+# ADR 0016: Gateway CRD as Interim Execution Interface
 
 > Numbering note: an earlier PR proposed 0016 (harness git-backend
 > migration) and 0017 (goose credential isolation). Both were nacked and

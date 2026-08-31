@@ -34,6 +34,9 @@ jobs:
       - name: Verify the loader image matches the manager's
         run: make verify-loader-image
 
+      - name: Verify ADR indexes
+        run: make verify-adr-index
+
       - name: Running Tests
         run: make test
 

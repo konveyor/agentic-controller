@@ -1,8 +1,19 @@
-# ADR 0003: Hub Curated API for Agent Resources
+---
+adr: "0003"
+title: "Hub Curated API for Agent Resources"
+description: "Defines curated Hub REST endpoints as the UI boundary for agent resources stored in the Kubernetes API."
+status: superseded
+status_note: "Superseded by ADR 0006."
+date: "2026-06-30"
+last_updated: null
+authors:
+  - "David Zager"
+last_reviewed: "2026-08-31"
+implementation_status: superseded
+review_note: "Superseded by ADR 0006; retained as historical rationale."
+---
 
-**Status:** Superseded by ADR 0006
-**Date:** 2026-06-30
-**Authors:** David Zager
+# ADR 0003: Hub Curated API for Agent Resources
 
 ## Context
 

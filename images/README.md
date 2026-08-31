@@ -68,7 +68,7 @@ shared `build-push-images.yaml` reusable workflow:
   so an unusable skill never ships. Everything under `catalog/skills/` ships;
   the worked examples in `catalog/examples/` and the repo's maintainer
   workflow skills in `skills/` are outside that context and never ship
-  (see ADR 0017).
+  (see ADR 0019).
 
 The tag is derived from the ref by the reusable workflow:
 
