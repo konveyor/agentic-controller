@@ -31,8 +31,13 @@ patterns:
 
 ### ADRs
 
-ADRs are immutable once accepted. To change a decision, create a new
-ADR that supersedes the old one — don't edit the original.
+ADRs are living documents. Preserve the original context and decision,
+but amend an accepted ADR in place when implementation or context changes.
+Each amendment must be a dated `Update (YYYY-MM-DD): ...` note, and the
+header's `Last updated` field must be kept current. Do not silently rewrite
+history. Create a new ADR that supersedes the old one only for a full
+reversal or incompatible replacement of the decision. See
+`docs/adr/README.md` for the convention, template, and reconciliation log.
 
 Use the `grill-with-docs` skill when stress-testing a design decision.
 It will challenge the plan against the existing domain model in

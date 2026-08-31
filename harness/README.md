@@ -126,13 +126,18 @@ Execution limits and mode, plus workflow/agent parameter values, are delivered v
 |-----------|---------|-------------------|
 | `0` | Succeeded — agent completed work | `Phase: Succeeded` |
 | `1` | Failed — execution error or crash | `Phase: Failed` |
-| `2` | Limit reached — budget exhausted, handoff committed | `Phase: Succeeded`, `type=LimitReached` |
+| `2` | Limit reached — budget exhausted, handoff committed | `Phase: Failed`, `Succeeded=False`, `reason=LimitReached` |
 
 ---
 
 ## Skill Discovery
 
-The entry point globs `/opt/skills/*/SKILL.md` at startup. Skills are mounted into agent pods by the controller via SkillCard init containers. The entry point concatenates all discovered skills and always-loaded rules into the prompt alongside environment-provided context layers.
+The controller stages sources under `/opt/skills-src` and the `skill-loader`
+init container assembles the validated skill tree at `/opt/skills`. Before
+starting the runtime, the entry point links that tree into
+`~/.agents/skills`, which lets the runtime load on-demand skills natively.
+The entry point injects only always-loaded rules and its execution context
+into the prompt (ADR 0014).
 
 The entry point requires **no specific skills** — it discovers and loads whatever is mounted. The plan/execute/verify stage-skill bundle is a convention for workflow runs, not a requirement; a single standalone operation skill works the same way (see `docs/entry-point.md`).
 

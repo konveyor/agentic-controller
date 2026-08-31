@@ -6,7 +6,14 @@
 0009's guide-substitution scope. ADR 0011's and 0009's other decisions
 stand.
 **Date:** 2026-08-19
+**Last updated:** 2026-08-31
 **Authors:** David Zager
+
+**Update (2026-08-31):** The controller now implements the execution-field
+placement, workflow-stage stamping, `Succeeded` terminal condition, phase
+mirror, and workflow-guide scope described here. The ADR remains proposed
+pending formal acceptance; its implementation status is tracked in the ADR
+reconciliation index.
 
 ## Context
 

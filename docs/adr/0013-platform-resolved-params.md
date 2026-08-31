@@ -2,12 +2,18 @@
 
 - **Status:** proposed (prototype verified in this repo)
 - **Date:** 2026-07-08
+- **Last updated:** 2026-08-31
 - **Relates to:** ADR 0012 (client contract), konveyor/agentic-controller#22/#24,
   the APB `plans`/parameter-metadata precedent
 - **Provenance:** written and verified in the hub-shim prototype
   ([ibolton336/agentcontroller-client](https://github.com/ibolton336/agentcontroller-client)).
   Contributed here for the same reason as ADR 0012: the vocabulary it
   defines is the platform's, and #22 cites it.
+
+**Update (2026-08-31):** The platform remains source-agnostic in this
+repository: the controller passes caller-supplied values through and does
+not resolve application sources. Where this ADR’s prototype discussion says
+“env vars today,” the current parameter carrier is `params.json` (ADR 0009).
 
 ## Context
 

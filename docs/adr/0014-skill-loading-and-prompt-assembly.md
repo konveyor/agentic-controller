@@ -4,7 +4,14 @@
 supersedes the runtime-discovery claim in ADR 0001 (its mount-path
 decision stands); ADR 0007's decisions themselves stand
 **Date:** 2026-08-11
+**Last updated:** 2026-08-31
 **Authors:** Fabian von Feilitzsch
+
+**Update (2026-08-31):** Native runtime discovery, the linked
+`~/.agents/skills` root, loader-produced rule metadata, and rule prompt
+assembly are implemented. The shipped catalog now lives under
+`catalog/skills`; references to the former `skills/plan` paths below are
+historical and are reconciled by the catalog-layout ADR.
 
 ## Context
 

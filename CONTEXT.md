@@ -134,35 +134,25 @@ without adopting its packaging. See ADR 0015.
 agent workloads: Sandbox, SandboxTemplate, SandboxClaim, and
 SandboxWarmPool. Single-container design. Handles pod lifecycle,
 stable identity, network isolation, and warm pool pre-allocation.
-The controller does not interact with Agent Sandbox directly —
-OpenShell manages Sandbox CRs on our behalf.
+In the current implementation, the controller creates and watches Sandbox
+CRs directly. OpenShell is the deferred execution backend described by ADR
+0004; ADR 0016 records the accepted interim path.
 
 **OpenShell** — NVIDIA's secure-by-design runtime for autonomous
-agents. Runs on top of Agent Sandbox. The controller's primary
-execution interface — sandboxes are created through the OpenShell
-gateway API (via the Go SDK), not by creating Sandbox CRs directly.
-Each gateway is deployed via Helm as a Kubernetes Service, configured
-with one provider and one model. The gateway's supervisor is
-sideloaded into sandbox pods and provides: kernel-level isolation,
-declarative YAML-based security policies, credential injection via
-privacy proxy, and inference routing through `inference.local`. The
-agent inside the sandbox calls `inference.local` and never sees real
-LLM credentials. Providers, inference routes, and policies are
-configured on the gateway by the Platform Admin — they are not
-Kubernetes CRDs.
-_Avoid_: treating OpenShell as optional — it is a hard dependency
-for sandbox creation, replacing the direct Agent Sandbox dependency.
+agents. It is the intended future execution backend and runs on top of
+Agent Sandbox. It is not the current controller execution interface:
+today, the controller creates Sandbox CRs directly and uses the Gateway
+CRD as the pre-OpenShell provider/model configuration shim (ADR 0016).
+The intended OpenShell end state adds the gateway supervisor, policy
+enforcement, privacy-proxy credential injection, and `inference.local`.
+_Avoid_: describing that deferred end state as the current implementation.
 
 **OpenShell Gateway** — An instance of the OpenShell control plane
-deployed as a Kubernetes Service. Each gateway serves exactly one
-provider/model combination via `inference.local`. Platform Admin
-deploys multiple gateways (one per provider/model combo) into the
-shared namespace via Helm. All gateways must live in the same
-namespace as the controller and Hub — OpenShell's gateway, sandbox
-pods, TLS Secrets, and database are all namespace-scoped. An Agent
-references one or more gateways; an AgentRun selects one. The
-controller connects to the gateway using the OpenShell Go SDK and
-the gateway's client TLS credentials.
+deployed as a Kubernetes Service in the deferred OpenShell design. Each
+OpenShell Gateway serves one provider/model combination via
+`inference.local`. The current implementation instead uses the namespaced
+Gateway CRD, which the controller verifies with a Job and whose
+provider-specific credentials are injected into the Sandbox environment.
 _Avoid_: gateway (lowercase) when referring to Kubernetes Gateway API
 resources — always capitalize when referring to an OpenShell Gateway.
 

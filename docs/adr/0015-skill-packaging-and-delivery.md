@@ -6,7 +6,15 @@ revises where ADR 0014 sources its rules list. ADR 0001's *Skill mounting:
 one directory* stands and is the contract everything here preserves. Two
 questions about SkillCollection are left open at the end.
 **Date:** 2026-08-13
+**Last updated:** 2026-08-31
 **Authors:** Fabian von Feilitzsch
+
+**Update (2026-08-31):** The implementation described here is now in the
+repository: the controller stages image, git, and inline sources, the
+`skill-loader` init container assembles and validates `/opt/skills`, and
+SkillCollections can enumerate image bundles. The implementation is no
+longer merely a held-back prototype; the remaining open questions and
+proposed status are unchanged.
 
 > Numbering note: 0009 through 0013 merged while this was being written
 > (#106, #108), 0014 is claimed by the open #138, and a second 0007 exists

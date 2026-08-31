@@ -2,8 +2,17 @@
 
 **Status:** Accepted
 **Date:** 2026-06-01
-**Updated:** 2026-06-29
+**Last updated:** 2026-08-31
 **Authors:** David Zager, Dylan Murray
+
+**Update (2026-08-31):** Reconciled with the current implementation. The
+seven resources are now SkillCard, SkillCollection, Agent, AgentRun,
+AgentWorkflow, AgentWorkflowRun, and Gateway; the former LLMProvider name is
+historical. Later decisions supersede the original skill packaging and
+loading details (ADR 0014/0015), Hub access pattern (ADR 0006), parameter
+carrier (ADR 0009), and commit-authorship details (ADR 0007). The controller
+still creates Agent Sandbox resources directly; OpenShell is deferred by ADR
+0016.
 
 ## Context
 

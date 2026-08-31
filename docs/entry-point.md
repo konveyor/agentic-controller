@@ -75,7 +75,7 @@ The controller delivers resolved parameters to `/run/konveyor/params.json` (ADR 
 |-----------|---------|------------------------------|
 | `0` | Succeeded — agent completed work | `Phase: Succeeded` |
 | `1` | Failed — execution error or fatal crash | `Phase: Failed` |
-| `2` | Limit reached — budget exhausted, handoff committed | `Phase: Succeeded`, `type=LimitReached` |
+| `2` | Limit reached — budget exhausted, handoff committed | `Phase: Failed`, `Succeeded=False`, `reason=LimitReached` |
 
 ### Termination Log (`/dev/termination-log`)
 

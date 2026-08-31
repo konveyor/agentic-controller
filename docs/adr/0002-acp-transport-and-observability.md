@@ -2,7 +2,15 @@
 
 **Status:** Accepted
 **Date:** 2026-06-30
+**Last updated:** 2026-08-31
 **Authors:** David Zager
+
+**Update (2026-08-31):** The controller remains outside ACP and the UI still
+connects to the pod-facing ACP endpoint, but ADR 0008 changed its owner: the
+entry point tee listens on port 4000 and proxies Goose on loopback port 4001.
+The tee now carries the run stream and relays approval, steering, and
+elicitation traffic. The entry point also does not author `.konveyor/`
+commits; the agent authors commits and the entry point pushes them.
 
 ## Context
 

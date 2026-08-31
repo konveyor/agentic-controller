@@ -2,7 +2,14 @@
 
 **Status:** proposed
 **Date:** 2026-08-05
+**Last updated:** 2026-08-31
 **Authors:** David Zager
+
+**Update (2026-08-31):** The `params.json` carrier and typed workflow/agent
+sections are implemented. ADR 0018 adds uniform execution fields to
+`AgentRun`, stamps workflow-stage values onto child AgentRuns, and narrows
+workflow-guide substitution to `workflow.*`; the original guide-scope text
+below is historical where it conflicts with ADR 0018.
 
 ## Context
 

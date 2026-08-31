@@ -2,10 +2,16 @@
 
 - **Status:** proposed
 - **Date:** 2026-08-20
+- **Last updated:** 2026-08-31
 - **Relates to:** ADR 0002 (ACP transport and observability), ADR 0008
   (harness owns the pod ACP port), issues #55/#56 (interactive input and
   approval flow), PR #96 (ACP tee: watch and steer), PR #161
   (implementation of this ADR)
+
+**Update (2026-08-31):** The reference entry point implements the
+`ask_user` stdio MCP server, ACP elicitation forwarding, pending-question
+replay, resolution frames, and fail-closed timeout behavior described here.
+The ADR remains proposed pending formal acceptance.
 
 ## Context
 

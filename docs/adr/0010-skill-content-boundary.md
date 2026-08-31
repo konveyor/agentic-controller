@@ -2,7 +2,15 @@
 
 **Status:** proposed
 **Date:** 2026-08-05
+**Last updated:** 2026-08-31
 **Authors:** David Zager
+
+**Update (2026-08-31):** The boundary remains the intended authoring rule,
+but reconciliation found that the shipped `plan`, `execute`, and `verify`
+skills still contain some execution-control, commit, and `/opt/skills`
+filesystem instructions. This ADR remains proposed until those skills are
+fully migrated; ADR 0014’s native loading and ADR 0015’s loader are already
+implemented.
 
 ## Context
 

@@ -9,7 +9,12 @@ shipped subset with a hand-maintained `COPY` allowlist. The packaging
 detects a bundle by the absence of `SKILL.md` at the image root; skills
 mount at `/opt/skills/{name}/SKILL.md`) is unchanged.
 **Date:** 2026-08-25
+**Last updated:** 2026-08-31
 **Authors:** David Zager
+
+**Update (2026-08-31):** The `catalog/` and maintainer `skills/` split is
+present in the repository, including the catalog build context and updated
+validation/e2e paths. The ADR remains proposed pending formal acceptance.
 
 > Numbering note: 0016 is the Gateway interim-interface ADR; 0018 is claimed
 > by the open execution-fields PR (`impl/115-116-crd-params-execution`).

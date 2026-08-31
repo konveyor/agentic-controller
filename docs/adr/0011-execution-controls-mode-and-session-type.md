@@ -2,7 +2,15 @@
 
 **Status:** proposed
 **Date:** 2026-08-05
+**Last updated:** 2026-08-31
 **Authors:** David Zager
+
+**Update (2026-08-31):** The controller and entry point now implement the
+execution section of `params.json`, native turn limits, ACP cost monitoring,
+mode translation, handoff, exit codes, and opaque termination data. ADR 0018
+supersedes this ADR’s AgentRun field-placement table, workflow-stage
+stamping model, and exit-2 status mapping; those original statements remain
+as decision history.
 
 ## Context
 

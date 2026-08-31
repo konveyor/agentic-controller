@@ -9,6 +9,15 @@ runtime, the same way the addon adapter does for addon tasks today.
 
 **Status:** proposed — supersedes ADR 0003
 **Date:** 2026-07-23
+**Last updated:** 2026-08-31
+
+**Update (2026-08-31):** The entry point no longer has a standalone
+`KONVEYOR_PARAM_*` parameter-delivery path. Resolved workflow and Agent
+parameters are delivered through `/run/konveyor/params.json` under the
+`workflow` and `agent` sections (ADR 0009); environment variables remain the
+carrier for runtime credentials and execution metadata. Hub integration is
+outside this repository, so the Hub-specific portions of this ADR remain
+proposed.
 
 ## Context
 
