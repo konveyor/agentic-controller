@@ -90,6 +90,13 @@ type GatewayStatus struct {
 	// +optional
 	ConnectionVerified bool `json:"connectionVerified,omitempty"`
 
+	// VerifiedCredentialHash is a digest of the credential Secret's data as
+	// of the last settled verification. Rotating the credential does not
+	// bump the Gateway generation, so this is what tells the controller the
+	// verified result no longer describes the credential in the Secret.
+	// +optional
+	VerifiedCredentialHash string `json:"verifiedCredentialHash,omitempty"`
+
 	// Conditions represent the latest available observations of the
 	// Gateway's state.
 	// +optional

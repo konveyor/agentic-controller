@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -69,14 +68,7 @@ func makeReadyGatewayWithCred(gwName, secretName string, stringData map[string]s
 	ExpectWithOffset(2, k8sClient.Create(ctx, gateway)).To(Succeed())
 
 	// Wait for verification Job, simulate success.
-	jobKey := types.NamespacedName{Name: fmt.Sprintf("%s%s-gen1", verificationJobPrefix, gwName), Namespace: testNamespace}
-	EventuallyWithOffset(1, func(g Gomega) {
-		var job batchv1.Job
-		g.Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
-	}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
-
-	var job batchv1.Job
-	ExpectWithOffset(1, k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
+	job := awaitVerificationJob(gwName)
 	now := metav1.Now()
 	job.Status.StartTime = &now
 	job.Status.CompletionTime = &now

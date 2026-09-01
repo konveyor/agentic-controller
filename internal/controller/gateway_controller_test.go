@@ -17,7 +17,7 @@ limitations under the License.
 package controller
 
 import (
-	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -28,10 +28,33 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 )
+
+// awaitVerificationJob waits for the Gateway's verification Job and returns it.
+// The Job name carries a hash of the credential (see verificationJobName), so
+// tests find it by the konveyor.io/gateway label rather than reconstructing the
+// name from the Gateway's generation alone. The label value is the bounded form,
+// not the raw name - see gatewayLabelValue.
+func awaitVerificationJob(gatewayName string) batchv1.Job {
+	gw := &konveyoriov1alpha1.Gateway{}
+	gw.Name = gatewayName
+
+	var job batchv1.Job
+	EventuallyWithOffset(1, func(g Gomega) {
+		var jobs batchv1.JobList
+		g.Expect(k8sClient.List(ctx, &jobs,
+			client.InNamespace(testNamespace),
+			client.MatchingLabels{labelGateway: gatewayLabelValue(gw)},
+		)).To(Succeed())
+		g.Expect(jobs.Items).To(HaveLen(1))
+		job = jobs.Items[0]
+	}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+	return job
+}
 
 var _ = Describe("Gateway Controller", func() {
 	const (
@@ -72,14 +95,10 @@ var _ = Describe("Gateway Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
 
-		jobName := fmt.Sprintf("%s%s-gen1", verificationJobPrefix, name)
-		jobKey := types.NamespacedName{Name: jobName, Namespace: testNamespace}
-
 		By("waiting for the verification Job to be created")
-		var job batchv1.Job
-		Eventually(func(g Gomega) {
-			g.Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
-		}, timeout, interval).Should(Succeed())
+		job := awaitVerificationJob(name)
+		jobName := job.Name
+		jobKey := client.ObjectKeyFromObject(&job)
 
 		By("simulating the probe pod terminating with a diagnostic")
 		// Job-created pods carry both labels; the controller pins the read to
@@ -275,19 +294,11 @@ var _ = Describe("Gateway Controller", func() {
 			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
 
 			By("verifying the controller creates a verification Job")
-			jobKey := types.NamespacedName{
-				Name:      fmt.Sprintf("%s%s-gen1", verificationJobPrefix, name),
-				Namespace: testNamespace,
-			}
-			Eventually(func(g Gomega) {
-				var job batchv1.Job
-				g.Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
-				g.Expect(job.Labels["konveyor.io/gateway"]).To(Equal(name))
-				g.Expect(job.Spec.Template.Spec.Containers).NotTo(BeEmpty())
-				g.Expect(job.Spec.Template.Spec.Containers[0].Command).To(ContainElement(
-					ContainSubstring(verificationHTTPCodePattern),
-				))
-			}, timeout, interval).Should(Succeed())
+			createdJob := awaitVerificationJob(name)
+			Expect(createdJob.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+			Expect(createdJob.Spec.Template.Spec.Containers[0].Command).To(ContainElement(
+				ContainSubstring(verificationHTTPCodePattern),
+			))
 
 			By("verifying the gateway is in Verifying state")
 			gwKey := types.NamespacedName{Name: name, Namespace: testNamespace}
@@ -302,8 +313,7 @@ var _ = Describe("Gateway Controller", func() {
 			}, timeout, interval).Should(Succeed())
 
 			By("simulating Job completion (success)")
-			var job batchv1.Job
-			Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
+			job := createdJob
 			now := metav1.Now()
 			job.Status.StartTime = &now
 			job.Status.CompletionTime = &now
@@ -328,8 +338,8 @@ var _ = Describe("Gateway Controller", func() {
 
 			By("verifying the Job is cleaned up")
 			Eventually(func(g Gomega) {
-				var job batchv1.Job
-				err := k8sClient.Get(ctx, jobKey, &job)
+				var fetchedJob batchv1.Job
+				err := k8sClient.Get(ctx, client.ObjectKeyFromObject(&createdJob), &fetchedJob)
 				g.Expect(client.IgnoreNotFound(err)).To(Succeed())
 			}, timeout, interval).Should(Succeed())
 
@@ -376,18 +386,9 @@ var _ = Describe("Gateway Controller", func() {
 			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
 
 			By("waiting for the verification Job to be created")
-			jobKey := types.NamespacedName{
-				Name:      fmt.Sprintf("%s%s-gen1", verificationJobPrefix, name),
-				Namespace: testNamespace,
-			}
-			Eventually(func(g Gomega) {
-				var job batchv1.Job
-				g.Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
-			}, timeout, interval).Should(Succeed())
+			job := awaitVerificationJob(name)
 
 			By("simulating Job failure")
-			var job batchv1.Job
-			Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
 			now := metav1.Now()
 			job.Status.StartTime = &now
 			job.Status.Conditions = append(job.Status.Conditions,
@@ -439,6 +440,148 @@ var _ = Describe("Gateway Controller", func() {
 		It("surfaces the HTTP code on success", func() {
 			verifyWithPodDiagnostic("llm-ctrl-ok", "llm-secret-ok", testEndpoint,
 				"ok code=200", true, "ConnectionVerified", "HTTP 200")
+		})
+	})
+
+	// The controller watches credential Secrets so a credential that changes
+	// out from under a verified Gateway does not leave it reading Ready until
+	// something else happens to the Gateway. See issue #103.
+	Context("when the credential Secret changes after verification", func() {
+		// verifyGateway creates the Secret and Gateway, drives the
+		// verification Job to success, and returns them Ready.
+		verifyGateway := func(name, secretName, keyValue string) (
+			*konveyoriov1alpha1.Gateway, *corev1.Secret, batchv1.Job,
+		) {
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespace},
+				StringData: map[string]string{testSecretKey: keyValue},
+			}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			gateway := &konveyoriov1alpha1.Gateway{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.GatewaySpec{
+					Provider: testProviderType,
+					Endpoint: testEndpoint,
+					CredentialRef: konveyoriov1alpha1.GatewayCredentialRef{
+						SecretName: secretName,
+						Key:        testSecretKey,
+					},
+					Model: konveyoriov1alpha1.GatewayModel{
+						Name: testLLMModelName, ContextWindow: 100000,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
+
+			job := awaitVerificationJob(name)
+			now := metav1.Now()
+			job.Status.StartTime = &now
+			job.Status.CompletionTime = &now
+			job.Status.Conditions = append(job.Status.Conditions,
+				batchv1.JobCondition{Type: jobConditionSuccessCriteriaMet, Status: corev1.ConditionTrue},
+				batchv1.JobCondition{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			)
+			Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
+
+			gwKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.ConnectionVerified).To(BeTrue())
+				g.Expect(fetched.Status.VerifiedCredentialHash).NotTo(BeEmpty())
+			}, timeout, interval).Should(Succeed())
+
+			return gateway, secret, job
+		}
+
+		It("marks the Gateway NotReady when the Secret is deleted", func() {
+			const (
+				name       = "llm-ctrl-secret-deleted"
+				secretName = "llm-secret-deleted"
+			)
+			gateway, secret, _ := verifyGateway(name, secretName, credOriginal)
+
+			By("deleting the credential Secret")
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+
+			By("verifying the Secret watch brings the Gateway back to NotReady")
+			gwKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.ConnectionVerified).To(BeFalse())
+
+				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
+				g.Expect(readyCond).NotTo(BeNil())
+				g.Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(readyCond.Reason).To(Equal("CredentialSecretNotFound"))
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
+		})
+
+		It("verifies a Gateway whose name is too long to be a label value", func() {
+			// A Gateway name is a DNS subdomain, so 64 characters is valid. The
+			// verification Job's labelGateway value is not - it caps at 63, and
+			// the raw name would have the API server reject the Job on create.
+			name := strings.Repeat("g", 64)
+			const secretName = "llm-secret-long-name"
+
+			gateway, secret, job := verifyGateway(name, secretName, credOriginal)
+
+			Expect(len(name)).To(BeNumerically(">", 63))
+			Expect(validation.IsValidLabelValue(job.Labels[labelGateway])).To(BeEmpty())
+			Expect(validation.IsDNS1123Label(job.Name)).To(BeEmpty())
+
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+		})
+
+		It("re-verifies when the credential is rotated", func() {
+			const (
+				name       = "llm-ctrl-secret-rotated"
+				secretName = "llm-secret-rotated"
+			)
+			gateway, secret, firstJob := verifyGateway(name, secretName, credOriginal)
+
+			By("rotating the credential in place")
+			// The generation is unchanged, so only the credential hash can
+			// tell the controller the settled result no longer applies.
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(secret), secret)).To(Succeed())
+			secret.StringData = map[string]string{testSecretKey: credRotated}
+			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+
+			By("verifying a fresh verification Job is created under a new name")
+			Eventually(func(g Gomega) {
+				var jobs batchv1.JobList
+				gw := &konveyoriov1alpha1.Gateway{}
+				gw.Name = name
+				g.Expect(k8sClient.List(ctx, &jobs,
+					client.InNamespace(testNamespace),
+					client.MatchingLabels{labelGateway: gatewayLabelValue(gw)},
+				)).To(Succeed())
+				names := make([]string, len(jobs.Items))
+				for i, j := range jobs.Items {
+					names[i] = j.Name
+				}
+				g.Expect(names).To(ContainElement(Not(Equal(firstJob.Name))))
+			}, timeout, interval).Should(Succeed())
+
+			By("verifying the Gateway is back in Verifying")
+			gwKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.ConnectionVerified).To(BeFalse())
+
+				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
+				g.Expect(readyCond).NotTo(BeNil())
+				g.Expect(readyCond.Reason).To(Equal("Verifying"))
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
 		})
 	})
 })

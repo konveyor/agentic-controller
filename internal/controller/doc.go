@@ -41,6 +41,9 @@ const (
 	// labelAgent identifies resources belonging to an Agent.
 	labelAgent = "konveyor.io/agent"
 
+	// labelGateway identifies resources belonging to a Gateway.
+	labelGateway = "konveyor.io/gateway"
+
 	// labelAgentWorkflowRun identifies resources belonging to an AgentWorkflowRun.
 	labelAgentWorkflowRun = "konveyor.io/agentworkflowrun"
 

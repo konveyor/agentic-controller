@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -78,17 +77,7 @@ var _ = Describe("Agent Controller", func() {
 			Expect(k8sClient.Create(ctx, provider)).To(Succeed())
 
 			// Wait for verification Job, then simulate success.
-			jobKey := types.NamespacedName{
-				Name:      fmt.Sprintf("%s%s-gen1", verificationJobPrefix, gatewayName),
-				Namespace: testNamespace,
-			}
-			Eventually(func(g Gomega) {
-				var job batchv1.Job
-				g.Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
-			}, timeout, interval).Should(Succeed())
-
-			var job batchv1.Job
-			Expect(k8sClient.Get(ctx, jobKey, &job)).To(Succeed())
+			job := awaitVerificationJob(gatewayName)
 			now := metav1.Now()
 			job.Status.StartTime = &now
 			job.Status.CompletionTime = &now

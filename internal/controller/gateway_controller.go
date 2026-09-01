@@ -18,7 +18,12 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
+	"hash"
+	"slices"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -31,12 +36,19 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 )
 
 const (
+	// gatewayCredentialSecretIndexField indexes Gateways by the Secret their
+	// credentialRef names, so a Secret event can be mapped back to the
+	// Gateways that depend on it.
+	gatewayCredentialSecretIndexField = ".spec.credentialRef.secretName"
+
 	// verificationJobPrefix is the prefix for verification Job names.
 	verificationJobPrefix = "gw-verify-"
 
@@ -75,6 +87,10 @@ const (
 	// verifyContainerName is the name of the verification Job's container,
 	// whose termination message carries the probe diagnostic.
 	verifyContainerName = "verify"
+
+	// componentGatewayVerification is the app.kubernetes.io/component value on
+	// verification Jobs, and part of the selector that finds them again.
+	componentGatewayVerification = "gateway-verification"
 
 	// Ready-condition reasons for connectivity verification outcomes.
 	reasonConnectionVerified   = "ConnectionVerified"
@@ -180,26 +196,37 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return r.patchStatus(ctx, &gateway, original)
 	}
 
-	// Step 2: If already verified (or failed) for the current generation,
-	// skip re-verification. A spec change (new generation) will re-trigger.
+	credHash := credentialHash(gateway.Spec.CredentialRef, &secret)
+
+	// Step 2: If already verified (or failed) for the current generation and
+	// the credential it was verified against, skip re-verification. A spec
+	// change (new generation) or a credential rotation (new hash) re-triggers.
 	readyCond := meta.FindStatusCondition(gateway.Status.Conditions, ConditionTypeReady)
 	if readyCond != nil &&
 		readyCond.ObservedGeneration == gateway.Generation &&
+		gateway.Status.VerifiedCredentialHash == credHash &&
 		isTerminalReadyReason(readyCond.Reason) {
 		return ctrl.Result{}, nil
 	}
 
-	// Clean up verification Jobs from prior generations. If a Gateway
-	// spec changes while verification is queued/running, the old Job
-	// is orphaned because completion events reconcile the new generation.
+	// Clean up verification Jobs from prior generations and prior credentials.
+	// If a Gateway spec changes or its credential rotates while verification is
+	// queued/running, the old Job is orphaned because completion events
+	// reconcile under the new name.
 	var oldJobs batchv1.JobList
 	if err := r.List(ctx, &oldJobs,
 		client.InNamespace(gateway.Namespace),
-		client.MatchingLabels{"konveyor.io/gateway": gateway.Name},
+		// Scoped to this controller's verification Jobs: the loop below deletes
+		// what it finds, so the Gateway label alone is too broad a net.
+		client.MatchingLabels{
+			labelManagedBy: managedByLabel,
+			labelComponent: componentGatewayVerification,
+			labelGateway:   gatewayLabelValue(&gateway),
+		},
 	); err != nil {
 		return ctrl.Result{}, err
 	}
-	currentJobName := fmt.Sprintf("%s%s-gen%d", verificationJobPrefix, gateway.Name, gateway.Generation)
+	currentJobName := verificationJobName(&gateway, credHash)
 	for i := range oldJobs.Items {
 		if oldJobs.Items[i].Name != currentJobName {
 			if err := r.Delete(ctx, &oldJobs.Items[i],
@@ -252,6 +279,9 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			status = metav1.ConditionTrue
 		}
 		gateway.Status.ConnectionVerified = succeeded
+		// Stamp the credential this outcome describes. Step 2 reads it back to
+		// decide whether the settled result still applies.
+		gateway.Status.VerifiedCredentialHash = credHash
 		meta.SetStatusCondition(&gateway.Status.Conditions, metav1.Condition{
 			Type:               ConditionTypeReady,
 			Status:             status,
@@ -401,9 +431,9 @@ func (r *GatewayReconciler) createVerificationJob(
 			Name:      jobName,
 			Namespace: gateway.Namespace,
 			Labels: map[string]string{
-				labelManagedBy:        managedByLabel,
-				labelComponent:        "gateway-verification",
-				"konveyor.io/gateway": gateway.Name,
+				labelManagedBy: managedByLabel,
+				labelComponent: componentGatewayVerification,
+				labelGateway:   gatewayLabelValue(gateway),
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -491,10 +521,86 @@ func isJobSucceeded(job *batchv1.Job) bool {
 	return false
 }
 
+// verificationJobName is derived from the Gateway's generation and the hash of
+// the credential it points at, so both a spec change and a credential rotation
+// start a fresh Job instead of reading the previous generation's answer back
+// off a Job that has not finished being deleted yet.
+//
+// A Job name over 63 characters cannot be a label value, and the Job controller
+// stamps the name into batch.kubernetes.io/job-name on every pod it creates, so
+// a long Gateway name would otherwise produce a Job whose pods are rejected.
+// sanitizeVolumeName bounds it, disambiguating the truncated names with a hash
+// of the full one - the same treatment enumerationJobName gets.
+func verificationJobName(gateway *konveyoriov1alpha1.Gateway, credHash string) string {
+	return sanitizeVolumeName(fmt.Sprintf("%s%s-gen%d-%s",
+		verificationJobPrefix, gateway.Name, gateway.Generation,
+		shortCredentialHash(credHash)))
+}
+
+// gatewayLabelValue is the labelGateway value stamped on a Gateway's
+// verification Job. A label value caps at 63 characters, but a Gateway name is a
+// DNS subdomain and can run to 253 - passing the raw name through would have the
+// API server reject the Job on create, and reject the selector that looks it up.
+func gatewayLabelValue(gateway *konveyoriov1alpha1.Gateway) string {
+	return sanitizeVolumeName(gateway.Name)
+}
+
+// credentialHash digests the credential a credentialRef selects, so the
+// controller can tell a rotated credential from an unchanged one. Rotation does
+// not bump the Gateway generation, so without this a re-reconcile would find
+// the settled Ready condition and skip re-verification.
+//
+// Only the selected material is hashed: for a keyed credentialRef that is the
+// one key's value, so unrelated keys in a shared Secret do not churn
+// verification; for a keyless one (multi-variable, e.g. AWS SigV4) the whole
+// Secret is the credential, so every key and value counts.
+//
+// The full digest is what lands in status and what the skip decision compares.
+// Only the Job name needs a short form (see verificationJobName), and there is
+// no reason to let that naming limit weaken the comparison.
+func credentialHash(ref konveyoriov1alpha1.GatewayCredentialRef, secret *corev1.Secret) string {
+	h := sha256.New()
+	if ref.Key != "" {
+		hashCredentialField(h, []byte(ref.Key))
+		hashCredentialField(h, secret.Data[ref.Key])
+	} else {
+		keys := make([]string, 0, len(secret.Data))
+		for k := range secret.Data {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			hashCredentialField(h, []byte(k))
+			hashCredentialField(h, secret.Data[k])
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// shortCredentialHash is the part of a credential digest that goes into the
+// verification Job name, which has 63 characters to spend. Collisions here only
+// mean two Jobs could share a name; the skip decision compares the full digest.
+func shortCredentialHash(credHash string) string {
+	if len(credHash) <= 8 {
+		return credHash
+	}
+	return credHash[:8]
+}
+
+// hashCredentialField length-prefixes b before hashing it, so that {"ab": "c"} and
+// {"a": "bc"} cannot produce the same digest.
+func hashCredentialField(h hash.Hash, b []byte) {
+	var n [8]byte
+	binary.BigEndian.PutUint64(n[:], uint64(len(b)))
+	_, _ = h.Write(n[:])
+	_, _ = h.Write(b)
+}
+
 // isTerminalReadyReason reports whether a Ready-condition reason represents a
 // settled verification outcome. The reconciler skips re-verifying a Gateway
-// whose current generation already reached one of these; a spec change (new
-// generation) re-triggers verification.
+// whose current generation already reached one of these against the credential
+// currently in the Secret; a spec change (new generation) or a credential
+// rotation (new hash) re-triggers verification.
 func isTerminalReadyReason(reason string) bool {
 	switch reason {
 	case reasonConnectionVerified, reasonConnectionFailed, reasonAuthenticationFailed, reasonEndpointUnreachable:
@@ -616,9 +722,58 @@ func curlErrorPhrase(rc string) string {
 func (r *GatewayReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Uncached reader for verification pods; see the apiReader field.
 	r.apiReader = mgr.GetAPIReader()
+
+	// Reverse lookup from a credential Secret to the Gateways using it.
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
+		&konveyoriov1alpha1.Gateway{}, gatewayCredentialSecretIndexField,
+		func(obj client.Object) []string {
+			gateway := obj.(*konveyoriov1alpha1.Gateway)
+			if gateway.Spec.CredentialRef.SecretName == "" {
+				return nil
+			}
+			return []string{gateway.Spec.CredentialRef.SecretName}
+		},
+	); err != nil {
+		return fmt.Errorf("indexing %s: %w", gatewayCredentialSecretIndexField, err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&konveyoriov1alpha1.Gateway{}).
 		Owns(&batchv1.Job{}).
+		// Without this a deleted or rotated credential leaves the Gateway
+		// reading Ready until something else happens to it. The Secret is
+		// already in the manager cache - Reconcile Gets it through the cached
+		// client - so the watch adds no new informer.
+		Watches(&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.findGatewaysForSecret)).
 		Named("gateway").
 		Complete(r)
+}
+
+// findGatewaysForSecret maps a Secret event to the Gateways whose credentialRef
+// names it.
+func (r *GatewayReconciler) findGatewaysForSecret(
+	ctx context.Context,
+	obj client.Object,
+) []reconcile.Request {
+	var gateways konveyoriov1alpha1.GatewayList
+	if err := r.List(ctx, &gateways,
+		client.InNamespace(obj.GetNamespace()),
+		client.MatchingFields{gatewayCredentialSecretIndexField: obj.GetName()},
+	); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list Gateways for Secret",
+			"secret", obj.GetName(), "namespace", obj.GetNamespace())
+		return nil
+	}
+
+	requests := make([]reconcile.Request, len(gateways.Items))
+	for i, gateway := range gateways.Items {
+		requests[i] = reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: gateway.Namespace,
+				Name:      gateway.Name,
+			},
+		}
+	}
+	return requests
 }
