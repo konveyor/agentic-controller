@@ -1,5 +1,5 @@
-# agent-base: Foundation image with goose CLI, git, Python, graphify,
-# and the migration harness binary. All language images extend this.
+# agent-base: Foundation image with goose CLI, git, and the migration
+# harness binary. All language images extend this.
 #
 # Build context must be the repository root:
 #   podman build -t agent-base -f images/agent-base/Containerfile .
@@ -53,18 +53,7 @@ RUN dnf install -y \
     ca-certificates \
     bzip2 \
     tar \
-    python3 \
-    python3-pip \
-    python3-devel \
-    gcc \
-    gcc-c++ \
-    libffi-devel \
-    pkg-config \
-    && python3 -m pip install --no-cache-dir graphifyy==0.7.17 \
-    && dnf remove -y gcc gcc-c++ python3-devel libffi-devel pkg-config \
     && dnf clean all
-
-ENV PYTHONUNBUFFERED=1
 
 # Copy goose binary from builder
 COPY --from=builder /usr/local/bin/goose /usr/local/bin/goose

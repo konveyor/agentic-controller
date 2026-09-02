@@ -1,0 +1,4 @@
+kind: bugfix
+description: >
+  Removed the unused Graphify dependency and stale Graphify references from
+  the agent base image and repository documentation.

@@ -162,7 +162,7 @@ controller-agent-push: controller-agent-build ## Build and push the controller's
 	$(CONTAINER_TOOL) push $(CONTROLLER_AGENT_IMG)
 
 .PHONY: agent-base-build
-agent-base-build: ## Build the base agent image (goose + git + Python + graphify + harness binary).
+agent-base-build: ## Build the base agent image (goose + git + harness binary).
 	$(CONTAINER_TOOL) build -t $(AGENT_BASE_IMG) -f images/agent-base/Containerfile .
 
 .PHONY: agent-java-build

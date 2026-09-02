@@ -26,7 +26,7 @@ Production agent image hierarchy. Skills are mounted at runtime via
 SkillCards, not baked into images.
 
 ```text
-agent-base             UBI 10 + goose CLI + git + Python 3 + graphify + harness binary
+agent-base             UBI 10 + goose CLI + git + harness binary
 ├── agent-java         + JDK 21, Maven
 ├── agent-go           + Go toolchain
 ├── agent-csharp       + .NET SDK

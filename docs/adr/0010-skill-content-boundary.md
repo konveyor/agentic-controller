@@ -4,7 +4,7 @@ title: "Skill Content Boundary — Knowledge vs Execution Control"
 description: "Defines the boundary between skill knowledge and deterministic execution controls owned by the harness."
 status: proposed
 date: "2026-08-05"
-last_updated: "2026-08-31"
+last_updated: "2026-09-02"
 authors:
   - "David Zager"
 last_reviewed: "2026-08-31"
@@ -21,6 +21,10 @@ filesystem instructions. This ADR remains proposed until those skills are
 fully migrated; ADR 0014’s native loading and ADR 0015’s loader are already
 implemented.
 
+**Update (2026-09-02):** The Graphify references in this ADR describe the
+former planning design, not a supported current workflow. Graphify was not
+present in the shipped plan skill and has been removed from the base image.
+
 ## Context
 
 ADR 0007 established two kinds of skills: **stage skills** (define
@@ -34,8 +38,9 @@ that belongs in the harness or the agent runtime:
 - The `verify` skill reads `KONVEYOR_PARAM_MAX_FIX_ITERATIONS` from
   the environment and tells the LLM to count its own fix-rebuild
   iterations. LLMs are unreliable at counting.
-- The `plan` skill tells the LLM to run `graphify update` — a
-  deterministic CLI invocation that requires no LLM judgment.
+- The former `plan` skill told the LLM to run a deterministic analysis CLI — a
+  task that requires no LLM judgment. The current plan skill performs its
+  analysis by reading the repository and optional Hub results.
 - All three stage skills (`plan`, `execute`, `verify`) tell the LLM
   to run `git add -A && git commit` — a harness concern per ADR 0007
   (the harness owns push; commit is a local operation the agent
@@ -79,8 +84,8 @@ execution control.**
 - Knowledge of harness or controller internals. A skill should not
   know how the harness manages git push, how the controller injects
   parameters, or how the ACP connection works.
-- Running deterministic CLI gates (`graphify update` as a required
-  pre-step, `mvn compile` as a pass/fail gate between phases). Note:
+- Running deterministic CLI gates as required pre-steps (`mvn compile` as a
+  pass/fail gate between phases). Note:
   telling the agent to run a tool as part of its judgment is fine —
   "query the dependency graph to find upstream dependencies before
   migrating a module" is domain knowledge. The distinction is between

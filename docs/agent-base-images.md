@@ -13,7 +13,7 @@ and [ADR 0007](adr/0007-harness-thin-runner-and-skillcard-skills.md).
 toolchain needed by that language:
 
 ```text
-agent-base             UBI + goose + git + Python + graphify + harness
+agent-base             UBI + goose + git + harness
 ├── agent-java         JDK 21 + Maven
 ├── agent-go           Go toolchain
 ├── agent-csharp       .NET SDK
@@ -37,9 +37,8 @@ An agentic base image must provide:
 | User | UID `1001`, running as a non-root user; the image must leave the workspace and harness home writable by that user or group 0 |
 | Entrypoint | `ENTRYPOINT ["migration-harness"]` and `CMD ["run"]` |
 
-The repository's `agent-base` also installs Python 3 and `graphifyy`, which
-the shipped planning skills use. A specialized base image may add other
-tools, but it must preserve the harness contract and non-root execution.
+A specialized base image may add other tools, but it must preserve the harness
+contract and non-root execution.
 
 Do not bake skills into a language image. The controller assembles selected
 SkillCards under `/opt/skills/<name>/SKILL.md` for each run.
