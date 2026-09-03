@@ -13,6 +13,7 @@
 # Environment:
 #   CONTAINER_TOOL    docker or podman (default: auto-detect)
 #   E2E_AGENT_IMAGE   image to build (default agent-base:e2e)
+#   GOOSE_IMAGE       prebuilt goose image, skips the ~35 minute compile
 #   KIND_CLUSTER      cluster to load into (default agentic-controller-e2e)
 
 set -euo pipefail
@@ -42,8 +43,15 @@ if [ "${CONTAINER_TOOL}" = "podman" ]; then
 fi
 
 echo "=== Building ${E2E_AGENT_IMAGE} with ${CONTAINER_TOOL} ==="
-# On the command line, so it beats the Makefile's exported default.
-make agent-base-build AGENT_BASE_IMG="${E2E_AGENT_IMAGE}" CONTAINER_TOOL="${CONTAINER_TOOL}"
+# On the command line, so it beats the Makefile's exported default. GOOSE_IMAGE
+# is passed the same way rather than left to the environment: it reaches the
+# Makefile today only because that variable is `?=`, and the day someone gives
+# it a real default the cache stops being used with nothing failing to say so.
+# Empty is fine, the Makefile drops the build arg entirely.
+make agent-base-build \
+    AGENT_BASE_IMG="${E2E_AGENT_IMAGE}" \
+    CONTAINER_TOOL="${CONTAINER_TOOL}" \
+    GOOSE_IMAGE="${GOOSE_IMAGE:-}"
 
 echo "=== Loading into Kind cluster '${KIND_CLUSTER}' ==="
 if [ "${CONTAINER_TOOL}" = "podman" ]; then

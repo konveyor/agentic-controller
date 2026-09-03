@@ -50,7 +50,10 @@ jobs:
       contents: read
     name: A rule reaches the model
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # A warm goose cache puts this job around ten minutes. The budget is for
+    # the cold path, where the compile runs and everything else still has to
+    # happen after it -- which is what kept hitting the old 45 minute limit.
+    timeout-minutes: 60
     steps:
       - name: Clone the code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -89,9 +92,19 @@ jobs:
       - name: Install Konveyor
         run: make konveyor-install
 
+      # Compiling goose was ~35 of this job's ~45 minutes, which is what kept
+      # pushing it into the timeout. The binary only changes when the goose
+      # stages do, so restore it from the Actions cache and hand it to the
+      # build instead of compiling it again on every run.
+      - name: Restore the prebuilt goose image
+        id: goose
+        uses: ./.github/actions/goose-image
+
       # Detects the container tool the same way the setup scripts do, so the
       # image is loaded into the Kind provider that actually holds the cluster.
       - name: Build and load the agent image
+        env:
+          GOOSE_IMAGE: ${{ steps.goose.outputs.image }}
         run: make agent-base-load
 
       - name: A rule reaches the model

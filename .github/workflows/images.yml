@@ -12,6 +12,12 @@ on:
       - 'api/**'
       - 'go.mod'
       - 'go.sum'
+      # agent-base-artifact now builds through .github/actions/goose-image, so an
+      # edit to that action changes what this workflow produces. Without these
+      # the arm64 leg -- which has no other consumer anywhere in CI -- would
+      # not run at all on a PR that only touches the action.
+      - '.github/actions/**'
+      - '.github/workflows/images.yml'
   pull_request:
     paths:
       - 'images/**'
@@ -22,6 +28,8 @@ on:
       - 'api/**'
       - 'go.mod'
       - 'go.sum'
+      - '.github/actions/**'
+      - '.github/workflows/images.yml'
   workflow_dispatch: {}
 
 concurrency:
@@ -84,6 +92,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # Same ~35 minute goose compile the e2e job pays for, on two runners
+      # here. image-build-push.yml deliberately does not use this: the
+      # published images build goose from source.
+      - name: Restore the prebuilt goose image
+        id: goose
+        uses: ./.github/actions/goose-image
+
       - name: Build and upload agent-base artifact
         uses: konveyor/ci/build-image@e45ec039d03d41be52ae0c9abef260ee3ae8172a # main
         with:
@@ -93,6 +108,7 @@ jobs:
           image_tag: pr${{ github.event.pull_request.number }}-${{ matrix.arch }}
           dockerfile_path: images/agent-base/Containerfile
           build_context: "."
+          build_args: GOOSE_IMAGE=${{ steps.goose.outputs.image }}
           cache-key-file: harness/go.sum
 
   agent-lang-images-artifact:

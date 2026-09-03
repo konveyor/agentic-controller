@@ -92,6 +92,24 @@ make agent-java-build CONTAINER_TOOL=podman
 make agent-images-build CONTAINER_TOOL=podman
 ```
 
+Compiling goose is roughly 35 of the 38 minutes an `agent-base-build` takes.
+When rebuilding repeatedly, build the binary once and hand it back in, which
+skips the compile:
+
+```bash
+make goose-dist-build CONTAINER_TOOL=podman
+make agent-base-build CONTAINER_TOOL=podman GOOSE_IMAGE='$(GOOSE_DIST_IMG)'
+```
+
+`GOOSE_DIST_IMG` defaults to `localhost/goose-dist:<the Containerfile's
+GOOSE_VERSION>`, so passing it by name rather than by value means a bump to
+`ARG GOOSE_VERSION` gives you a tag you have not built yet instead of silently
+reusing the old binary. Re-run `goose-dist-build` after any such bump.
+
+Leave `GOOSE_IMAGE` unset and goose is compiled from source, which is what CI's
+release build does. `make agent-images-multiarch-build` ignores it deliberately:
+a single-architecture goose image would poison the manifest.
+
 The image names default to `quay.io/konveyor/agent-*`. Override them for a
 development registry without changing the repository:
 

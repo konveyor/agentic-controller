@@ -49,6 +49,10 @@ jobs:
       registry_username: ${{ vars.QUAY_USERNAME }}
       registry_password: ${{ secrets.QUAY_PASSWORD }}
 
+  # Deliberately does not pass GOOSE_IMAGE: the published images build goose
+  # from source, so the ~35 minute compile belongs here and stays here. The
+  # cache in .github/actions/goose-image is for PR and e2e builds, whose
+  # output is a workflow artifact or a Kind-loaded image.
   agent-base:
     permissions:
       contents: read

@@ -1,0 +1,134 @@
+name: Prebuilt goose image
+description: >
+  Restore the goose binary image from the Actions cache, compiling it from
+  source only on a miss. The output is a local image reference to hand to
+  agent-base's GOOSE_IMAGE build arg, which skips the compile.
+
+outputs:
+  image:
+    description: Local image reference holding /usr/local/bin/goose.
+    value: ${{ steps.key.outputs.image }}
+
+runs:
+  using: composite
+  steps:
+    # Everything that decides what the binary is lives between the GOOSE_IMAGE
+    # arg and the stage that consumes it: the builder base, the build deps, the
+    # source repo, the version and the cargo invocation. Key on a hash of just
+    # that region, so editing the harness half of the Containerfile does not
+    # throw away a 35 minute compile.
+    #
+    # GOOSE_VERSION is inside that region, so a bump already changes the hash.
+    # It goes in the key as well because a bare hash tells you nothing on the
+    # Actions cache page or in a build log, and the version is the thing anyone
+    # looking at either actually wants to know.
+    - name: Derive the cache key
+      id: key
+      shell: bash
+      env:
+        CONTAINERFILE: images/agent-base/Containerfile
+      run: |
+        region=$(sed -n '/^ARG GOOSE_IMAGE=/,/^FROM .* AS goose$/p' "${CONTAINERFILE}")
+
+        # sed's range prints to EOF when the end address never matches, so a
+        # renamed, lowercased or reflowed "AS goose" line would silently widen
+        # the region to the whole file -- putting the harness stages back in
+        # the key and bringing the compile back on every push, with nothing to
+        # point at. Check the region actually ends where it is supposed to.
+        case "$(printf '%s\n' "${region}" | tail -1)" in
+          "FROM "*" AS goose") ;;
+          *)
+            echo "Could not read the goose stages out of ${CONTAINERFILE}."
+            echo "Expected a region from 'ARG GOOSE_IMAGE=' to 'FROM ... AS goose'."
+            exit 1
+            ;;
+        esac
+
+        # This ends up in an image tag and, via images.yml, in build-image's
+        # unquoted build_args loop. A trailing comment on the ARG line is
+        # enough to produce "invalid reference format" 30 minutes in.
+        version=$(printf '%s\n' "${region}" | sed -n 's/^ARG GOOSE_VERSION=//p' | head -1)
+        case "${version}" in
+          '' | [-.]* | *[!A-Za-z0-9._-]*)
+            echo "Expected 'ARG GOOSE_VERSION=<tag>' in the goose stages of ${CONTAINERFILE}."
+            echo "Got: '${version}'"
+            exit 1
+            ;;
+        esac
+
+        digest=$(printf '%s\n' "${region}" | sha256sum | cut -c1-16)
+        echo "cache-key=goose-dist-${RUNNER_OS}-${RUNNER_ARCH}-${version}-${digest}" >> "$GITHUB_OUTPUT"
+        echo "image=localhost/goose-dist:${version}-${digest}" >> "$GITHUB_OUTPUT"
+
+    # restore + save rather than actions/cache, which only saves from a post
+    # step gated on post-if: success(). A cold run that compiles for 35 minutes
+    # and then fails its e2e assertion, gets cancelled, or hits the job timeout
+    # would save nothing and leave the next run to compile again -- which is
+    # the exact loop this cache exists to break. Bank the tar once it exists.
+    - name: Restore the goose image
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: /tmp/goose-dist.tar
+        key: ${{ steps.key.outputs.cache-key }}
+
+    # konveyor/ci/build-image upgrades crun before every build it runs, for
+    # containers/crun#1485: a podman that emits OCI spec v1.2.1 against a crun
+    # too old to parse it, which fails every RUN step. This action's compile
+    # happens before that step, so it has to answer the question itself. The
+    # e2e job builds agent-base on ubuntu-latest with no upgrade at all and
+    # passes, so amd64 is fine; ubuntu-24.04-arm has no such evidence either
+    # way. Install only when the runner's own crun is older than the version
+    # konveyor/ci pins, so this does nothing on a runner that has caught up
+    # and can be deleted outright once both have.
+    - name: Ensure crun can run the build
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        CRUN_MIN: "1.28"
+      run: |
+        have=$(crun --version 2>/dev/null | head -1 | awk '{print $3}')
+        if [ -n "${have}" ] && [ "$(printf '%s\n%s\n' "${CRUN_MIN}" "${have}" \
+            | sort -V | head -1)" = "${CRUN_MIN}" ]; then
+          echo "crun ${have} is new enough, leaving it alone"
+          exit 0
+        fi
+        echo "crun is ${have:-absent}, installing ${CRUN_MIN}"
+        arch=$(uname -m)
+        case "${arch}" in
+          x86_64)  arch=amd64 ;;
+          aarch64) arch=arm64 ;;
+        esac
+        curl -sfLo /tmp/crun --retry 5 --retry-delay 10 --retry-all-errors \
+          "https://github.com/containers/crun/releases/download/${CRUN_MIN}/crun-${CRUN_MIN}-linux-${arch}"
+        chmod +x /tmp/crun
+        /tmp/crun --version | head -1 | grep -q "crun version ${CRUN_MIN}"
+        sudo mv /tmp/crun /usr/bin/crun
+
+    - name: Compile goose
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        GOOSE_DIST_IMG: ${{ steps.key.outputs.image }}
+      run: |
+        make goose-dist-build CONTAINER_TOOL=podman GOOSE_DIST_IMG="${GOOSE_DIST_IMG}"
+        podman save --format=docker-archive -o /tmp/goose-dist.tar "${GOOSE_DIST_IMG}"
+
+    - name: Save the goose image
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: /tmp/goose-dist.tar
+        key: ${{ steps.key.outputs.cache-key }}
+
+    - name: Load the goose image
+      if: steps.cache.outputs.cache-hit == 'true'
+      shell: bash
+      env:
+        GOOSE_DIST_IMG: ${{ steps.key.outputs.image }}
+      run: |
+        podman load -i /tmp/goose-dist.tar
+        # load restores whatever RepoTags the archive carries. If that is not
+        # the tag the build is about to name, the failure otherwise surfaces
+        # half an hour later as an unresolvable FROM inside agent-base.
+        podman image exists "${GOOSE_DIST_IMG}"

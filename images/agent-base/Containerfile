@@ -3,9 +3,26 @@
 #
 # Build context must be the repository root:
 #   podman build -t agent-base -f images/agent-base/Containerfile .
+#
+# Compiling goose takes ~35 minutes, which is nearly all of any build of
+# this image. The compile is therefore reachable on its own, as the
+# goose-dist target, and the stage that consumes it is an overridable ARG,
+# so CI can build the binary once and hand it back in:
+#
+#   podman build --target goose-dist -t goose:v1.45.0 -f images/agent-base/Containerfile .
+#   podman build --build-arg GOOSE_IMAGE=goose:v1.45.0 -f images/agent-base/Containerfile .
+#
+# With GOOSE_IMAGE set, the goose-builder and goose-dist stages are
+# unreferenced and the builder skips them. Left unset it defaults to
+# goose-dist, so a plain build still compiles goose from source and no
+# caller outside CI has to know any of this. Everything the binary depends
+# on lives between this ARG and the goose stage below, and that region is
+# what .github/actions/goose-image hashes for its cache key -- keep it that
+# way, or a stale binary survives a real change.
+ARG GOOSE_IMAGE=goose-dist
 
-# --- Build stage ---
-FROM golang:1.26 AS builder
+# --- Goose build stage ---
+FROM golang:1.26 AS goose-builder
 
 # Goose CLI build deps
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
@@ -32,6 +49,16 @@ RUN git clone https://github.com/aaif-goose/goose.git . \
     && cargo build --release -p goose-cli --bin goose \
     && mv target/release/goose /usr/local/bin/goose
 
+# Just the binary, so what CI caches and reloads is ~100MB rather than the
+# whole Rust toolchain the compile needed.
+FROM scratch AS goose-dist
+COPY --from=goose-builder /usr/local/bin/goose /usr/local/bin/goose
+
+FROM ${GOOSE_IMAGE} AS goose
+
+# --- Build stage ---
+FROM golang:1.26 AS builder
+
 # The harness replaces github.com/konveyor/agentic-controller/api with ../api,
 # so that module has to be in the image at the path the replace names, laid out
 # the same way it is in the repository. Manifests first, so the download layer
@@ -55,8 +82,8 @@ RUN dnf install -y \
     tar \
     && dnf clean all
 
-# Copy goose binary from builder
-COPY --from=builder /usr/local/bin/goose /usr/local/bin/goose
+# Copy goose binary from the goose stage
+COPY --from=goose /usr/local/bin/goose /usr/local/bin/goose
 
 ENV PATH="/opt/migration-harness/bin:${PATH}"
 ENV HARNESS_WORK_DIR=/workspace/repo
