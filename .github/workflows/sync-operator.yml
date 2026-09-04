@@ -178,7 +178,7 @@ jobs:
 
           git checkout -b "${HEAD}"
           git add -A -- helm/templates/crds helm/templates/rbac roles/tackle/templates/agentic bundle
-          git commit -m ":robot: Sync agentic-controller manifests
+          git commit -s -m ":seedling: Sync agentic-controller manifests
 
           Rendered from konveyor/agentic-controller@${SRC_SHA} by
           hack/sync-operator.sh + make bundle. Do not hand-edit the synced
@@ -193,7 +193,7 @@ jobs:
           else
             gh pr create --repo konveyor/operator \
               --base "${BASE}" --head "${HEAD}" \
-              --title ":robot: Sync agentic-controller manifests" \
+              --title ":seedling: Sync agentic-controller manifests" \
               --body "Automated sync of CRDs, RBAC, default content, and the
           regenerated OLM bundle from
           [konveyor/agentic-controller](https://github.com/konveyor/agentic-controller).
