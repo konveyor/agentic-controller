@@ -117,6 +117,33 @@ var _ = Describe("AgentWorkflowRun Controller", func() {
 		})
 	})
 
+	Context("when a managed stage AgentRun outlives its AgentWorkflowRun", func() {
+		const name = "apr-ctrl-orphaned-stage"
+
+		It("should sweep the orphaned stage run", func() {
+			stageRun := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name + "-stage",
+					Namespace: testNamespace,
+					Labels: map[string]string{
+						labelManagedBy:        managedByLabel,
+						labelAgentWorkflowRun: name,
+					},
+				},
+				Spec: konveyoriov1alpha1.AgentRunSpec{AgentRef: testNonexistentAgent},
+			}
+			Expect(k8sClient.Create(ctx, stageRun)).To(Succeed())
+
+			key := client.ObjectKeyFromObject(stageRun)
+			Eventually(func(g Gomega) {
+				var fresh konveyoriov1alpha1.AgentRun
+				err := k8sClient.Get(ctx, key, &fresh)
+				g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+					"expected stage AgentRun to be swept after its workflow run disappeared")
+			}, timeout, interval).Should(Succeed())
+		})
+	})
+
 	Context("when the workflow is valid and stages execute sequentially", func() {
 		const (
 			workflowName = "apr-ctrl-seq-workflow"
@@ -195,6 +222,7 @@ var _ = Describe("AgentWorkflowRun Controller", func() {
 			Expect(stageARun.Spec.Params[0].Name).To(Equal(testParamName))
 			Expect(stageARun.Spec.Params[0].Value).To(Equal(testRepoURL))
 			Expect(stageARun.Spec.Gateway).To(Equal(gwName))
+			Expect(isOwnedBy(&stageARun, pbRun)).To(BeTrue(), "stage AgentRun must be owned by its AgentWorkflowRun")
 
 			By("verifying stage-a AgentRun has correct labels")
 			Expect(stageARun.Labels).To(HaveKeyWithValue(labelAgentWorkflowRun, pbRunName))

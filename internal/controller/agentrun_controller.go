@@ -187,9 +187,9 @@ type AgentRunReconciler struct {
 // +kubebuilder:rbac:groups=konveyor.io,resources=agentruns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=konveyor.io,resources=agentruns/finalizers,verbs=update
 // +kubebuilder:rbac:groups=agents.x-k8s.io,resources=sandboxes,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;delete
 
 // Reconcile handles AgentRun reconciliation.
 //
@@ -204,7 +204,24 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	var run konveyoriov1alpha1.AgentRun
 	if err := r.Get(ctx, req.NamespacedName, &run); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if !errors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+
+		// Owner references are the primary cascade. The label-driven sweep is
+		// the recovery path for a child whose owner reference was removed or
+		// never persisted. Confirm against the uncached API before deleting:
+		// child and parent informer events are not ordered across resource
+		// types, so a cache miss alone is not a safe deletion signal.
+		if r.apiReader != nil {
+			var current konveyoriov1alpha1.AgentRun
+			if err := r.apiReader.Get(ctx, req.NamespacedName, &current); err == nil {
+				return ctrl.Result{Requeue: true}, nil
+			} else if !errors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, r.cleanupOrphanedRunResources(ctx, req.NamespacedName)
 	}
 
 	logger.V(1).Info("Reconciling AgentRun", "name", run.Name)
@@ -611,8 +628,9 @@ func (r *AgentRunReconciler) createSandbox(
 					// make the pod discoverable by AgentRun / Agent name.
 					ObjectMeta: sandboxv1beta1.PodMetadata{
 						Labels: map[string]string{
-							labelAgentRun: run.Name,
-							labelAgent:    agent.Name,
+							labelManagedBy: managedByLabel,
+							labelAgentRun:  run.Name,
+							labelAgent:     agent.Name,
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -1724,6 +1742,26 @@ func (r *AgentRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&konveyoriov1alpha1.AgentRun{}).
 		Owns(&sandboxv1beta1.Sandbox{}).
 		Owns(&corev1.Secret{}).
+		Owns(&corev1.ConfigMap{}).
+		// Owner references remain authoritative for ordinary reconciliation.
+		// These additional label maps surface the exceptional ownerless child
+		// after a manager restart; workqueue de-duplication handles the small
+		// event overlap if ownership is repaired concurrently.
+		Watches(
+			&sandboxv1beta1.Sandbox{},
+			handler.EnqueueRequestsFromMapFunc(runForLabeledResource),
+			builder.WithPredicates(predicate.NewPredicateFuncs(isOwnerlessManagedRunResource)),
+		).
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(runForLabeledResource),
+			builder.WithPredicates(predicate.NewPredicateFuncs(isOwnerlessManagedRunResource)),
+		).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(runForLabeledResource),
+			builder.WithPredicates(predicate.NewPredicateFuncs(isOwnerlessManagedRunResource)),
+		).
 		Watches(
 			&konveyoriov1alpha1.Agent{},
 			handler.EnqueueRequestsFromMapFunc(r.findRunsForAgent),
@@ -1733,7 +1771,7 @@ func (r *AgentRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// is restricted to labeled pods (see SandboxPodCacheOptions).
 		Watches(
 			&corev1.Pod{},
-			handler.EnqueueRequestsFromMapFunc(runForSandboxPod),
+			handler.EnqueueRequestsFromMapFunc(runForLabeledResource),
 			builder.WithPredicates(predicate.NewPredicateFuncs(isSandboxPod)),
 		).
 		Named("agentrun").
@@ -1746,8 +1784,10 @@ func isSandboxPod(obj client.Object) bool {
 	return ok
 }
 
-// runForSandboxPod maps a sandbox pod to the AgentRun it belongs to.
-func runForSandboxPod(_ context.Context, obj client.Object) []reconcile.Request {
+// runForLabeledResource maps a controller-managed child or sandbox pod to the
+// AgentRun named by its identifying label. Unlike an owner-only map, this also
+// works when an owner reference is missing and the child needs to be swept.
+func runForLabeledResource(_ context.Context, obj client.Object) []reconcile.Request {
 	name, ok := obj.GetLabels()[labelAgentRun]
 	if !ok {
 		return nil

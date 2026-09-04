@@ -10,6 +10,7 @@ rules:
   - configmaps
   verbs:
   - create
+  - delete
   - get
   - list
   - update
@@ -26,6 +27,7 @@ rules:
   resources:
   - pods
   verbs:
+  - delete
   - get
   - list
   - watch
@@ -35,6 +37,7 @@ rules:
   - secrets
   verbs:
   - create
+  - delete
   - get
   - list
   - watch

@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 )
@@ -191,6 +192,196 @@ var _ = Describe("AgentRun Controller", func() {
 			}, 2*time.Second, interval).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
+		})
+	})
+
+	Context("when managed children outlive their AgentRun", func() {
+		const name = "ar-ctrl-orphaned-children"
+
+		It("should sweep the Sandbox, Pod, ConfigMap, and Secret", func() {
+			managedLabels := map[string]string{
+				labelManagedBy: managedByLabel,
+				labelAgentRun:  name,
+			}
+
+			children := []client.Object{
+				&sandboxv1beta1.Sandbox{
+					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace, Labels: managedLabels},
+					Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+						Spec: corev1.PodSpec{
+							RestartPolicy: corev1.RestartPolicyNever,
+							Containers:    []corev1.Container{{Name: agentContainerName, Image: testAgentImage}},
+						},
+					}}},
+				},
+				&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace, Labels: managedLabels},
+					Spec: corev1.PodSpec{
+						RestartPolicy: corev1.RestartPolicyNever,
+						Containers:    []corev1.Container{{Name: agentContainerName, Image: testAgentImage}},
+					},
+				},
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+					Name: name + "-params", Namespace: testNamespace, Labels: managedLabels,
+				}},
+				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+					Name: name + "-acp-key", Namespace: testNamespace, Labels: managedLabels,
+				}},
+			}
+
+			for _, child := range children {
+				Expect(k8sClient.Create(ctx, child)).To(Succeed())
+			}
+
+			for _, child := range children {
+				key := client.ObjectKeyFromObject(child)
+				Eventually(func(g Gomega) {
+					fresh := child.DeepCopyObject().(client.Object)
+					err := k8sClient.Get(ctx, key, fresh)
+					g.Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+						"expected orphaned %T %s to be swept", child, key)
+				}, timeout, interval).Should(Succeed())
+			}
+		})
+
+		It("should sweep a Pod controlled by the missing Sandbox", func() {
+			controller := true
+			runName := name + "-sandbox-owned-pod"
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      runName,
+					Namespace: testNamespace,
+					Labels: map[string]string{
+						labelManagedBy: managedByLabel,
+						labelAgentRun:  runName,
+					},
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: sandboxv1beta1.GroupVersion.String(),
+						Kind:       sandboxKind,
+						Name:       runName,
+						UID:        types.UID("missing-sandbox-uid"),
+						Controller: &controller,
+					}},
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers:    []corev1.Container{{Name: agentContainerName, Image: testAgentImage}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+
+			Eventually(func() bool {
+				var fresh corev1.Pod
+				err := k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), &fresh)
+				return apierrors.IsNotFound(err)
+			}, timeout, interval).Should(BeTrue())
+		})
+
+		It("should preserve a Pod whose Sandbox is controlled by something else", func() {
+			controller := true
+			runName := name + "-foreign-sandbox"
+			managedLabels := map[string]string{
+				labelManagedBy: managedByLabel,
+				labelAgentRun:  runName,
+			}
+			sandbox := &sandboxv1beta1.Sandbox{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      runName,
+					Namespace: testNamespace,
+					Labels:    managedLabels,
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "apps/v1",
+						Kind:       "Deployment",
+						Name:       "foreign-controller",
+						UID:        types.UID("foreign-controller-uid"),
+						Controller: &controller,
+					}},
+				},
+				Spec: sandboxv1beta1.SandboxSpec{SandboxBlueprint: sandboxv1beta1.SandboxBlueprint{PodTemplate: sandboxv1beta1.PodTemplate{
+					Spec: corev1.PodSpec{
+						RestartPolicy: corev1.RestartPolicyNever,
+						Containers:    []corev1.Container{{Name: agentContainerName, Image: testAgentImage}},
+					},
+				}}},
+			}
+			Expect(k8sClient.Create(ctx, sandbox)).To(Succeed())
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      runName,
+					Namespace: testNamespace,
+					Labels:    managedLabels,
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: sandboxv1beta1.GroupVersion.String(),
+						Kind:       sandboxKind,
+						Name:       sandbox.Name,
+						UID:        sandbox.UID,
+						Controller: &controller,
+					}},
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers:    []corev1.Container{{Name: agentContainerName, Image: testAgentImage}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+
+			Consistently(func(g Gomega) {
+				var freshSandbox sandboxv1beta1.Sandbox
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(sandbox), &freshSandbox)).To(Succeed())
+				var freshPod corev1.Pod
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), &freshPod)).To(Succeed())
+			}, 2*time.Second, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, pod)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, sandbox)).To(Succeed())
+		})
+
+		It("should not delete a labeled resource controlled by something else", func() {
+			controller := true
+			foreignRunName := name + "-foreign-run"
+			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+				Name:      name + "-foreign",
+				Namespace: testNamespace,
+				Labels: map[string]string{
+					labelManagedBy: managedByLabel,
+					labelAgentRun:  foreignRunName,
+				},
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: "apps/v1",
+					Kind:       "Deployment",
+					Name:       "foreign-controller",
+					UID:        types.UID("foreign-controller-uid"),
+					Controller: &controller,
+				}},
+			}}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			// An ownerless sibling triggers the missing-parent sweep. This makes
+			// the assertion below exercise the deletion guard rather than merely
+			// relying on the ownerless watch predicate to ignore the Secret.
+			trigger := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+				Name:      name + "-foreign-trigger",
+				Namespace: testNamespace,
+				Labels: map[string]string{
+					labelManagedBy: managedByLabel,
+					labelAgentRun:  foreignRunName,
+				},
+			}}
+			Expect(k8sClient.Create(ctx, trigger)).To(Succeed())
+			Eventually(func() bool {
+				var fresh corev1.ConfigMap
+				err := k8sClient.Get(ctx, client.ObjectKeyFromObject(trigger), &fresh)
+				return apierrors.IsNotFound(err)
+			}, timeout, interval).Should(BeTrue())
+
+			key := client.ObjectKeyFromObject(secret)
+			Consistently(func(g Gomega) {
+				var fresh corev1.Secret
+				g.Expect(k8sClient.Get(ctx, key, &fresh)).To(Succeed())
+			}, 2*time.Second, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
 		})
 	})
 
@@ -401,8 +592,23 @@ var _ = Describe("AgentRun Controller", func() {
 			var sandbox sandboxv1beta1.Sandbox
 			sandboxKey := types.NamespacedName{Name: fetchedRun.Status.SandboxName, Namespace: testNamespace}
 			Expect(k8sClient.Get(ctx, sandboxKey, &sandbox)).To(Succeed())
+			Expect(isOwnedBy(&sandbox, &fetchedRun)).To(BeTrue(), "Sandbox must be owned by its AgentRun")
+			Expect(sandbox.Labels).To(HaveKeyWithValue(labelManagedBy, managedByLabel))
 			Expect(sandbox.Spec.PodTemplate.ObjectMeta.Labels).To(HaveKeyWithValue("konveyor.io/agentrun", name))
 			Expect(sandbox.Spec.PodTemplate.ObjectMeta.Labels).To(HaveKeyWithValue("konveyor.io/agent", agentName))
+			Expect(sandbox.Spec.PodTemplate.ObjectMeta.Labels).To(HaveKeyWithValue(labelManagedBy, managedByLabel))
+
+			By("verifying per-run Secret and ConfigMap ownership")
+			var acpSecret corev1.Secret
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: fetchedRun.Status.SecretKeyRef.Name, Namespace: testNamespace,
+			}, &acpSecret)).To(Succeed())
+			Expect(isOwnedBy(&acpSecret, &fetchedRun)).To(BeTrue(), "ACP Secret must be owned by its AgentRun")
+			var paramsConfigMap corev1.ConfigMap
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: name + "-params", Namespace: testNamespace,
+			}, &paramsConfigMap)).To(Succeed())
+			Expect(isOwnedBy(&paramsConfigMap, &fetchedRun)).To(BeTrue(), "params ConfigMap must be owned by its AgentRun")
 
 			By("verifying restartPolicy is Never so failed stages are observable (#51)")
 			Expect(sandbox.Spec.PodTemplate.Spec.RestartPolicy).To(Equal(corev1.RestartPolicyNever))

@@ -33,9 +33,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
@@ -60,6 +62,11 @@ type AgentWorkflowRunReconciler struct {
 	// disables the default. A run's own spec.ttlSecondsAfterFinished always
 	// overrides this. Wired from the --agentrun-ttl flag in main.
 	DefaultTTLAfterFinished *time.Duration
+
+	// apiReader confirms a cache miss before the orphan sweep deletes child
+	// AgentRuns. Parent and child informer events are not ordered across types.
+	// Set by SetupWithManager.
+	apiReader client.Reader
 }
 
 // +kubebuilder:rbac:groups=konveyor.io,resources=agentworkflowruns,verbs=get;list;watch;create;update;patch;delete
@@ -82,7 +89,18 @@ func (r *AgentWorkflowRunReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	var pbRun konveyoriov1alpha1.AgentWorkflowRun
 	if err := r.Get(ctx, req.NamespacedName, &pbRun); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if !errors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		if r.apiReader != nil {
+			var current konveyoriov1alpha1.AgentWorkflowRun
+			if err := r.apiReader.Get(ctx, req.NamespacedName, &current); err == nil {
+				return ctrl.Result{Requeue: true}, nil
+			} else if !errors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, r.cleanupOrphanedWorkflowRunResources(ctx, req.NamespacedName)
 	}
 
 	logger.V(1).Info("Reconciling AgentWorkflowRun", "name", pbRun.Name)
@@ -608,6 +626,8 @@ func (r *AgentWorkflowRunReconciler) reconcileTTL(
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AgentWorkflowRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.apiReader = mgr.GetAPIReader()
+
 	// Index AgentWorkflowRuns by workflowRef for efficient reverse lookup
 	// when an AgentWorkflow changes.
 	if err := mgr.GetFieldIndexer().IndexField(
@@ -625,6 +645,13 @@ func (r *AgentWorkflowRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&konveyoriov1alpha1.AgentWorkflowRun{}).
 		Owns(&konveyoriov1alpha1.AgentRun{}).
+		// The owner watch remains authoritative. This label map is only the
+		// recovery source for an ownerless stage AgentRun.
+		Watches(
+			&konveyoriov1alpha1.AgentRun{},
+			handler.EnqueueRequestsFromMapFunc(workflowRunForLabeledResource),
+			builder.WithPredicates(predicate.NewPredicateFuncs(isOwnerlessManagedWorkflowRunResource)),
+		).
 		Watches(
 			&konveyoriov1alpha1.AgentWorkflow{},
 			handler.EnqueueRequestsFromMapFunc(r.findRunsForWorkflow),

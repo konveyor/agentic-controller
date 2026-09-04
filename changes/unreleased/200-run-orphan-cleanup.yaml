@@ -1,0 +1,6 @@
+kind: enhancement
+
+description: >
+  The controller now sweeps controller-managed Sandboxes, Pods, ConfigMaps,
+  Secrets, and workflow stage AgentRuns that remain after their owning run is
+  gone, while leaving resources controlled by another owner untouched.
