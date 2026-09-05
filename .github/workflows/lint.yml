@@ -75,3 +75,31 @@ jobs:
       - name: Run go vet
         working-directory: harness
         run: go vet ./...
+
+  actions-pinned:
+    permissions:
+      contents: read
+    name: Actions pinned to SHA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+
+      # Offline check (no GitHub API, no token): every third-party Action and
+      # reusable workflow must be pinned to a full commit SHA. Run
+      # `make update-actions` locally to refresh pins.
+      #
+      # GOTOOLCHAIN=auto lets `go install` fetch the newer Go toolchain pinact
+      # requires; setup-go pins GOTOOLCHAIN=local to the project's go.mod
+      # version (older than pinact needs), which would otherwise fail the build.
+      - name: Verify Actions are SHA-pinned
+        run: make verify-actions
+        env:
+          GOTOOLCHAIN: auto
