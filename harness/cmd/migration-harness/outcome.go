@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"unicode/utf8"
 
 	"github.com/konveyor/migration-harness/internal/acp"
 	"github.com/konveyor/migration-harness/internal/logging"
@@ -170,6 +171,20 @@ type terminationBlob struct {
 	Usage        *usage `json:"usage,omitempty"`
 }
 
+// executeErrorTerminationBlob builds the termination-log blob for an error
+// returned directly by rootCmd.Execute() — a failure outside runStage's own
+// deferred writeTerminationLog (e.g. a cobra flag-parsing error, so RunE
+// never ran). StopReason is the only free-text field the documented schema
+// offers, so the go error text goes there rather than being written as a
+// raw, potentially invalid-JSON string (issue #189).
+func executeErrorTerminationBlob(err error, exitCode int) terminationBlob {
+	return terminationBlob{
+		ExitCode:   exitCode,
+		Outcome:    outcomeFailed.String(),
+		StopReason: err.Error(),
+	}
+}
+
 // maxTerminationLogBytes is the kubelet's hard termination-message ceiling
 // (ADR 0011). Exceeding this causes the kubelet to truncate mid-JSON, breaking
 // unmarshaling in the controller.
@@ -206,7 +221,7 @@ func writeTerminationLog(path string, term terminationBlob) {
 	if len(data) > maxTerminationLogBytes {
 		logging.Warn("termination log: %d bytes exceeds %d-byte limit; trimming to fit", len(data), maxTerminationLogBytes)
 		if len(term.StopReason) > 200 {
-			term.StopReason = term.StopReason[:200] + "…"
+			term.StopReason = truncateRuneSafe(term.StopReason, 200) + "…"
 		}
 		data, err = json.Marshal(term)
 		if err != nil || len(data) > maxTerminationLogBytes {
@@ -224,4 +239,18 @@ func writeTerminationLog(path string, term terminationBlob) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		logging.Warn("termination log: write %s: %v", path, err)
 	}
+}
+
+// truncateRuneSafe bounds s to maxBytes bytes without splitting a multi-byte
+// UTF-8 rune, so a trimmed StopReason (which may hold arbitrary go error
+// text, e.g. from executeErrorTerminationBlob) stays valid UTF-8.
+func truncateRuneSafe(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
