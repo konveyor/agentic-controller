@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,55 @@ import (
 	"github.com/konveyor/migration-harness/internal/config"
 	"github.com/konveyor/migration-harness/internal/hub"
 )
+
+// requiredConfigEnvVars are the env vars config.LoadFromEnv requires (see
+// internal/config/config.go); clearing all of them makes it fail
+// deterministically regardless of the ambient environment.
+var requiredConfigEnvVars = []string{
+	"KONVEYOR_LLM_MODEL",
+	"KONVEYOR_MODEL_PRIMARY_MODEL",
+	"HUB_BASE_URL",
+	"APP_ID",
+	"KONVEYOR_ACP_SECRET_KEY",
+	"TARGET_BRANCH",
+}
+
+func TestRunStagePreservesErrorInTerminationLog(t *testing.T) {
+	// A real failing run: missing configuration is the first thing
+	// runStage checks, so this exercises the same early-return path as a
+	// hub-resolution or clone failure (issue #189 follow-up) — none of
+	// those set term.StopReason before returning, so without the fix the
+	// termination log would only ever contain {"exitCode":1,"outcome":"failed"}.
+	for _, k := range requiredConfigEnvVars {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+	logPath := filepath.Join(t.TempDir(), "termination-log")
+	t.Setenv("HARNESS_TERMINATION_LOG_PATH", logPath)
+
+	code, err := runStage(nil, nil)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if err == nil {
+		t.Fatal("expected an error from missing configuration, got nil")
+	}
+
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("read termination log: %v", readErr)
+	}
+	var got terminationBlob
+	if unmarshalErr := json.Unmarshal(data, &got); unmarshalErr != nil {
+		t.Fatalf("termination log is not valid JSON: %v (data: %s)", unmarshalErr, data)
+	}
+	if got.ExitCode != 1 || got.Outcome != outcomeFailed.String() {
+		t.Errorf("termination blob = %+v, want ExitCode=1, Outcome=%q", got, outcomeFailed.String())
+	}
+	if got.StopReason != err.Error() {
+		t.Errorf("StopReason = %q, want the returned error preserved: %q", got.StopReason, err.Error())
+	}
+}
 
 func TestDiscoverSkills_NoSkills(t *testing.T) {
 	dir := t.TempDir()
