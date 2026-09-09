@@ -367,6 +367,26 @@ changelog-assemble: yq ## Assemble changelog fragments into CHANGELOG.md. Usage:
 changelog-draft: yq ## Assemble changelog fragments as "Unreleased" without deleting fragments.
 	YQ="$(YQ)" hack/changelog.sh assemble --draft
 
+##@ GitHub Actions
+
+# We pin every third-party GitHub Action and reusable workflow to a full
+# commit SHA (a tag is mutable; a SHA is not). pinact keeps those pins
+# current deterministically — no LLM, no hand-editing 40-char hashes.
+# Configuration (including which konveyor first-party refs to leave on main)
+# lives in .pinact.yaml. Set GITHUB_TOKEN to avoid API rate limiting.
+
+.PHONY: pin-actions
+pin-actions: pinact ## Pin any unpinned Actions/workflows to a commit SHA at their current version.
+	$(PINACT) run
+
+.PHONY: update-actions
+update-actions: pinact ## Update all pinned Actions/workflows to the latest versions and re-pin.
+	$(PINACT) run -update
+
+.PHONY: verify-actions
+verify-actions: pinact ## Fail if any Action/workflow is not pinned to a commit SHA (offline; no token needed).
+	$(PINACT) run -fix=false -no-api
+
 ##@ Dependencies
 
 ## Location to install dependencies to
@@ -382,11 +402,13 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 YQ ?= $(LOCALBIN)/yq
+PINACT ?= $(LOCALBIN)/pinact
 
 ## Tool Versions
 YQ_VERSION ?= v4.45.4
 KUSTOMIZE_VERSION ?= v5.8.1
 CONTROLLER_TOOLS_VERSION ?= v0.21.0
+PINACT_VERSION ?= v4.1.1
 
 #ENVTEST_VERSION is the controller-runtime version to use for setup-envtest, derived from go.mod
 ENVTEST_VERSION ?= $(shell v='$(call gomodver,sigs.k8s.io/controller-runtime)'; \
@@ -426,6 +448,11 @@ $(ENVTEST): $(LOCALBIN)
 yq: $(YQ) ## Download yq locally if necessary.
 $(YQ): $(LOCALBIN)
 	$(call go-install-tool,$(YQ),github.com/mikefarah/yq/v4,$(YQ_VERSION))
+
+.PHONY: pinact
+pinact: $(PINACT) ## Download pinact locally if necessary.
+$(PINACT): $(LOCALBIN)
+	$(call go-install-tool,$(PINACT),github.com/suzuki-shunsuke/pinact/v4/cmd/pinact,$(PINACT_VERSION))
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.

@@ -1,0 +1,17 @@
+# Configuration for pinact (https://github.com/suzuki-shunsuke/pinact).
+# Drives `make pin-actions`, `make update-actions`, and `make verify-actions`.
+version: 3
+
+files:
+  - pattern: .github/workflows/*.yml
+  - pattern: .github/workflows/*.yaml
+
+# Konveyor first-party Actions and reusable workflows are intentionally
+# tracked at `main` (the org convention — hence the `# main` comments on the
+# SHA-pinned konveyor refs, and konveyor/release-tools/cmd/verify-pr@main
+# which is a bare branch ref that cannot be tag-pinned). Their SHAs are
+# bumped by hand when release-tools/ci change, so pinact should leave them
+# entirely alone rather than pin, update, or flag them.
+ignore_actions:
+  - name: konveyor/.*
+    ref: .*

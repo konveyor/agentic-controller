@@ -26,7 +26,7 @@ jobs:
       # actions/checkout refuses to check out fork PR code in a
       # pull_request_target workflow, so check out the base repo and fetch
       # the PR head as a ref that is only diffed, never checked out or run.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           persist-credentials: false
