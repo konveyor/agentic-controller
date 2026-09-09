@@ -26,7 +26,6 @@ import (
 	"github.com/konveyor/migration-harness/internal/params"
 	"github.com/konveyor/migration-harness/internal/prompt"
 	"github.com/konveyor/migration-harness/internal/tee"
-	"github.com/konveyor/migration-harness/internal/termination"
 	"github.com/konveyor/migration-harness/internal/watcher"
 )
 
@@ -41,10 +40,18 @@ var rootCmd = &cobra.Command{
 // contract (ADR 0011: 0 succeeded, 1 failed, 2 limit reached).
 var exitCode int
 
+// ranRunStage records whether runCmd's RunE actually ran. runStage's own
+// deferred writeTerminationLog already records the stage outcome (with usage
+// stats and the real ACP stop reason) whenever it does — main's generic
+// post-Execute error handling must not write a second, sparser blob on top
+// of it (issue #189).
+var ranRunStage bool
+
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run a single migration stage (plan, execute, or verify)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ranRunStage = true
 		code, err := runStage(cmd, args)
 		exitCode = code
 		return err
@@ -79,21 +86,26 @@ func init() {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		// Surface the failure message on the pod termination log so the reason
-		// reaches the AgentRun's Ready condition, not solely the logs (#143).
-		_ = termination.Write(err.Error())
 		if exitCode == 0 {
 			// Safety net: an error surfaced from outside runStage (e.g. a
 			// cobra flag-parsing error, so RunE never ran) leaves exitCode
 			// at its zero value — that must still mean failure.
 			exitCode = 1
 		}
+		if !ranRunStage {
+			// Surface the failure message on the pod termination log so the
+			// reason reaches the AgentRun's Ready condition, not solely the
+			// logs (#143). Only needed when runStage's own deferred
+			// writeTerminationLog never ran — e.g. a cobra flag-parsing
+			// error.
+			writeTerminationLog(terminationLogPath(), executeErrorTerminationBlob(err, exitCode))
+		}
 		os.Exit(exitCode)
 	}
 	os.Exit(exitCode)
 }
 
-func runStage(cmd *cobra.Command, args []string) (int, error) {
+func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -101,7 +113,17 @@ func runStage(cmd *cobra.Command, args []string) (int, error) {
 	// setup failures keep this safe default; a real prompt outcome
 	// overwrites it below (ADR 0011: the blob is written "on exit").
 	term := terminationBlob{ExitCode: 1, Outcome: outcomeFailed.String()}
-	defer func() { writeTerminationLog(terminationLogPath(), term) }()
+	defer func() {
+		// A setup failure (config, hub resolution, clone, ...) returns
+		// before term ever gets a StopReason — back it with the actual
+		// returned error so the diagnostic isn't lost, without clobbering a
+		// more specific reason (e.g. the ACP stop reason from a completed
+		// turn) that a later stage already recorded.
+		if err != nil && term.StopReason == "" {
+			term.StopReason = err.Error()
+		}
+		writeTerminationLog(terminationLogPath(), term)
+	}()
 
 	// 1. Load config from env
 	cfg, err := config.LoadFromEnv()
@@ -506,6 +528,10 @@ func runStage(cmd *cobra.Command, args []string) (int, error) {
 		term.ExitCode = 1
 		term.Outcome = outcomeFailed.String()
 		term.LimitReached = ""
+		// The push failure, not whatever ACP stop reason term already
+		// carries from the completed turn above, is the actual reason this
+		// stage failed — surface it instead of the stale value.
+		term.StopReason = fmt.Sprintf("final push: %v", pushErr)
 		return 1, fmt.Errorf("final push: %w", pushErr)
 	}
 	emitPlan("completed", "completed", "completed")

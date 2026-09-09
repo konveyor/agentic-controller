@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/konveyor/migration-harness/internal/acp"
 )
@@ -277,6 +278,34 @@ func TestWriteTerminationLogBoundsOversizedBlob(t *testing.T) {
 	}
 }
 
+func TestWriteTerminationLogTrimsStopReasonOnRuneBoundary(t *testing.T) {
+	// "世" is 3 bytes; a run of them straddles the 200-byte trim point so a
+	// naive byte-slice truncation would leave a partial (invalid) rune,
+	// which json.Marshal would silently replace with U+FFFD.
+	path := filepath.Join(t.TempDir(), "termination-log")
+	term := terminationBlob{
+		ExitCode:   1,
+		Outcome:    "failed",
+		StopReason: strings.Repeat("世", 100) + strings.Repeat("x", maxTerminationLogBytes),
+	}
+	writeTerminationLog(path, term)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !utf8.Valid(data) {
+		t.Fatalf("trimmed termination log is not valid UTF-8: %q", data)
+	}
+	var got terminationBlob
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal trimmed blob: %v", err)
+	}
+	if strings.Contains(got.StopReason, "�") {
+		t.Errorf("StopReason contains the UTF-8 replacement character: %q", got.StopReason)
+	}
+}
+
 func TestTerminationLogPathOverride(t *testing.T) {
 	t.Setenv("HARNESS_TERMINATION_LOG_PATH", "/tmp/custom-termination-log")
 	if got := terminationLogPath(); got != "/tmp/custom-termination-log" {
@@ -288,5 +317,40 @@ func TestTerminationLogPathDefault(t *testing.T) {
 	os.Unsetenv("HARNESS_TERMINATION_LOG_PATH")
 	if got := terminationLogPath(); got != defaultTerminationLogPath {
 		t.Errorf("terminationLogPath() = %q, want %q", got, defaultTerminationLogPath)
+	}
+}
+
+func TestExecuteErrorTerminationBlobIsValidJSON(t *testing.T) {
+	// A raw error string (e.g. a quoted path or a `%` from a format verb)
+	// must not corrupt the termination log's JSON shape (issue #189).
+	err := errors.New(`source repository "https://svn.example/repo" uses SCM kind "subversion"`)
+	blob := executeErrorTerminationBlob(err, 1)
+
+	data, marshalErr := json.Marshal(blob)
+	if marshalErr != nil {
+		t.Fatalf("marshal: %v", marshalErr)
+	}
+	var got terminationBlob
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("termination log is not valid JSON: %v (data: %s)", err, data)
+	}
+	if got.ExitCode != 1 {
+		t.Errorf("ExitCode = %d, want 1", got.ExitCode)
+	}
+	if got.Outcome != outcomeFailed.String() {
+		t.Errorf("Outcome = %q, want %q", got.Outcome, outcomeFailed.String())
+	}
+	if got.StopReason != err.Error() {
+		t.Errorf("StopReason = %q, want %q", got.StopReason, err.Error())
+	}
+}
+
+func TestExecuteErrorTerminationBlobUsesGivenExitCode(t *testing.T) {
+	// exitCode may already be non-zero (e.g. runCmd's RunE set it via a
+	// runStage exit-code contract violation before returning an error) —
+	// the blob must preserve it rather than always assuming 1.
+	blob := executeErrorTerminationBlob(errors.New("boom"), 2)
+	if blob.ExitCode != 2 {
+		t.Errorf("ExitCode = %d, want 2", blob.ExitCode)
 	}
 }

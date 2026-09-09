@@ -1,0 +1,5 @@
+kind: bugfix
+description: >
+  Serialize rootCmd.Execute() errors as the documented termination-log JSON
+  object instead of a raw error string, so AgentRunStatus.terminationData
+  stays valid JSON. Removed the now-unused internal/termination package.
