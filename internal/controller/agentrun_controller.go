@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -74,7 +75,13 @@ const (
 	// workspaceVolumeName is the name of the EmptyDir volume for the agent workspace.
 	workspaceVolumeName = "workspace"
 
+	// workspaceDir is where the agent workspace EmptyDir is mounted.
+	workspaceDir = "/workspace"
+
 	tmpVolumeName = "tmp"
+
+	// tmpDir is where the writable /tmp EmptyDir is mounted.
+	tmpDir = "/tmp"
 
 	// skillsVolumeName backs the assembled skills root. The loader writes it,
 	// the agent reads it.
@@ -137,6 +144,21 @@ const (
 	// agentRunRefIndexField is the field index for looking up AgentRuns by agentRef.
 	agentRunRefIndexField = ".spec.agentRef"
 )
+
+// reservedMountPaths are the controller-managed mount points inside the
+// Sandbox container. A user file mount (AgentRun.spec.fileMounts) may not
+// land on, under, or above any of these — doing so would shadow the skills
+// root, params.json, or the workspace and break the harness contract. This
+// also protects the service-account token mount injected by Kubernetes.
+// Controller-managed paths share constants with their mount sites.
+var reservedMountPaths = []string{
+	skillsDir,                // /opt/skills
+	skillsSrcDir,             // /opt/skills-src
+	path.Dir(ParamsFilePath), // /run/konveyor
+	workspaceDir,             // /workspace
+	tmpDir,                   // /tmp
+	"/var/run/secrets/kubernetes.io/serviceaccount", // injected by Kubernetes
+}
 
 // errGatewayNotFound marks a createSandbox failure caused by the run's selected
 // Gateway CR not existing (as opposed to existing-but-not-Ready, or any other
@@ -283,6 +305,36 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if err := r.validateGateway(&run, &agent); err != nil {
 			run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
 			setRunSucceeded(&run, metav1.ConditionFalse, "InvalidGateway", err.Error())
+			return r.patchRunStatus(ctx, &run, original)
+		}
+
+		// Reject file mounts that collide with controller-managed mounts
+		// (or name no/both sources) before baking them into the Sandbox.
+		if err := validateFileMounts(run.Spec.FileMounts); err != nil {
+			run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
+			setRunSucceeded(&run, metav1.ConditionFalse, "InvalidFileMounts", err.Error())
+			return r.patchRunStatus(ctx, &run, original)
+		}
+
+		message, err := r.validateFileMountSources(ctx, &run)
+		if err != nil {
+			// User sources may arrive after the run, or lag in the informer
+			// cache. Keep the immutable run recoverable and retry with backoff,
+			// just as we do for a missing Gateway. User source watches do not
+			// enqueue this run, so returning the error drives the retry.
+			reason := "FileMountSourceUnavailable"
+			if errors.IsNotFound(err) {
+				reason = "FileMountSourceNotFound"
+			}
+			setRunSucceeded(&run, metav1.ConditionUnknown, reason, err.Error())
+			if _, patchErr := r.patchRunStatus(ctx, &run, original); patchErr != nil {
+				return ctrl.Result{}, patchErr
+			}
+			return ctrl.Result{}, err
+		}
+		if message != "" {
+			run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
+			setRunSucceeded(&run, metav1.ConditionFalse, "InvalidFileMounts", message)
 			return r.patchRunStatus(ctx, &run, original)
 		}
 
@@ -477,6 +529,186 @@ func (r *AgentRunReconciler) validateGateway(
 	return fmt.Errorf("gateway %q is not in Agent %q gateways", run.Spec.Gateway, agent.Name)
 }
 
+// validateFileMounts rejects file mounts that would break the pod: a
+// source that is neither (or both) Secret and ConfigMap, a non-absolute
+// path, invalid items paths, or mount paths that overlap each other or
+// a reserved mount (reservedMountPaths). These are permanent config errors, so the caller
+// fails the run terminally with InvalidFileMounts rather than requeuing.
+// The apiserver already enforces the xor rule (CEL) and mountPath
+// uniqueness (listMapKey); this re-checks defensively and owns the
+// collision rule, which CEL cannot express against Go-side constants.
+func validateFileMounts(mounts []konveyoriov1alpha1.FileMount) error {
+	seen := make([]string, 0, len(mounts))
+	for _, m := range mounts {
+		if (m.SecretName == "") == (m.ConfigMapName == "") {
+			return fmt.Errorf("file mount at %q must set exactly one of secretName or configMapName", m.MountPath)
+		}
+		if !path.IsAbs(m.MountPath) {
+			return fmt.Errorf("file mount path %q must be absolute", m.MountPath)
+		}
+		clean := path.Clean(m.MountPath)
+		for _, previous := range seen {
+			if pathsCollide(clean, previous) {
+				return fmt.Errorf("file mount path %q collides with file mount %q", m.MountPath, previous)
+			}
+		}
+		seen = append(seen, clean)
+		for _, item := range m.Items {
+			if item.Path == "" {
+				return fmt.Errorf("file mount at %q: items path must not be empty", m.MountPath)
+			}
+			if err := validateFileMountRelativePath(item.Path); err != nil {
+				return fmt.Errorf("file mount at %q: items path %q %w", m.MountPath, item.Path, err)
+			}
+		}
+		for _, reserved := range reservedMountPaths {
+			if pathsCollide(clean, reserved) {
+				return fmt.Errorf("file mount path %q collides with reserved mount %q", m.MountPath, reserved)
+			}
+		}
+	}
+	return nil
+}
+
+// validateFileMountSources returns a terminal validation message for missing
+// projected paths, and an error for source lookups that must be retried,
+// including NotFound: the source may be applied after the run.
+// This preflight checks keys only; source values remain opaque. It cannot
+// prevent a source from changing between validation and the kubelet mounting it.
+func (r *AgentRunReconciler) validateFileMountSources(ctx context.Context, run *konveyoriov1alpha1.AgentRun) (string, error) {
+	for _, m := range run.Spec.FileMounts {
+		var source client.Object
+		kind, name := "ConfigMap", m.ConfigMapName
+		if m.SecretName != "" {
+			kind, name = "Secret", m.SecretName
+			source = &corev1.Secret{}
+		} else {
+			source = &corev1.ConfigMap{}
+		}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: run.Namespace, Name: name}, source); err != nil {
+			return "", fmt.Errorf("file mount at %q from %s %q in namespace %q: %w",
+				m.MountPath, kind, name, run.Namespace, err)
+		}
+		keys := make(map[string]struct{})
+		switch obj := source.(type) {
+		case *corev1.Secret:
+			for key := range obj.Data {
+				keys[key] = struct{}{}
+			}
+		case *corev1.ConfigMap:
+			for key := range obj.Data {
+				keys[key] = struct{}{}
+			}
+			for key := range obj.BinaryData {
+				keys[key] = struct{}{}
+			}
+		}
+		if err := validateFileMountProjection(m, keys); err != nil {
+			return fmt.Sprintf("file mount at %q from %s %q: %v", m.MountPath, kind, name, err), nil
+		}
+	}
+	return "", nil
+}
+
+// validateFileMountProjection checks the paths the kubelet will project.
+// Items can rename keys into nested paths; subPath addresses that projected
+// tree, not necessarily a key in the source object.
+func validateFileMountProjection(m konveyoriov1alpha1.FileMount, keys map[string]struct{}) error {
+	projected := keys
+	if len(m.Items) > 0 {
+		projected = make(map[string]struct{}, len(m.Items))
+		for _, item := range m.Items {
+			if _, exists := keys[item.Key]; !exists {
+				return fmt.Errorf("items key %q not found", item.Key)
+			}
+			projected[path.Clean(item.Path)] = struct{}{}
+		}
+	}
+	if m.SubPath == "" {
+		return nil
+	}
+	if err := validateFileMountRelativePath(m.SubPath); err != nil {
+		return fmt.Errorf("subPath %q %w", m.SubPath, err)
+	}
+	subPath := path.Clean(m.SubPath)
+	if subPath == "." {
+		return nil
+	}
+	for projectedPath := range projected {
+		if isAncestorOrEqual(subPath, projectedPath) {
+			return nil
+		}
+	}
+	return fmt.Errorf("subPath %q not found in projected files", m.SubPath)
+}
+
+// validateFileMountRelativePath rejects absolute paths and traversal before
+// cleaning, so normalization cannot hide an invalid segment.
+func validateFileMountRelativePath(p string) error {
+	if path.IsAbs(p) {
+		return fmt.Errorf("must be relative")
+	}
+	if slices.Contains(strings.Split(p, "/"), "..") {
+		return fmt.Errorf("must not contain '..'")
+	}
+	return nil
+}
+
+// pathsCollide reports whether two absolute, cleaned paths conflict as
+// mount points: identical, one nested under the other, or one being an
+// ancestor of the other. Any of these would shadow a controller-managed
+// mount.
+func pathsCollide(a, b string) bool {
+	return isAncestorOrEqual(a, b) || isAncestorOrEqual(b, a)
+}
+
+// isAncestorOrEqual reports whether cleaned absolute path ancestor equals
+// or contains p. Root ("/") is an ancestor of every path; handling it
+// explicitly avoids the "//" prefix that ancestor+"/" would otherwise
+// produce.
+func isAncestorOrEqual(ancestor, p string) bool {
+	if ancestor == p || ancestor == "/" {
+		return true
+	}
+	return strings.HasPrefix(p, ancestor+"/")
+}
+
+// fileMountVolumes turns the run's file mounts into read-only Secret and
+// ConfigMap volumes plus the matching agent-container VolumeMounts. Volume
+// names are index-derived and so stable for a given spec (the spec is
+// immutable). Mount paths and sources are validated before the run reaches
+// sandbox creation.
+func fileMountVolumes(run *konveyoriov1alpha1.AgentRun) ([]corev1.Volume, []corev1.VolumeMount) {
+	if len(run.Spec.FileMounts) == 0 {
+		return nil, nil
+	}
+	volumes := make([]corev1.Volume, 0, len(run.Spec.FileMounts))
+	mounts := make([]corev1.VolumeMount, 0, len(run.Spec.FileMounts))
+	for i, m := range run.Spec.FileMounts {
+		volName := fmt.Sprintf("filemount-%d", i)
+		var src corev1.VolumeSource
+		if m.SecretName != "" {
+			src = corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+				SecretName: m.SecretName,
+				Items:      m.Items,
+			}}
+		} else {
+			src = corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: m.ConfigMapName},
+				Items:                m.Items,
+			}}
+		}
+		volumes = append(volumes, corev1.Volume{Name: volName, VolumeSource: src})
+		mounts = append(mounts, corev1.VolumeMount{
+			Name:      volName,
+			MountPath: path.Clean(m.MountPath),
+			SubPath:   m.SubPath,
+			ReadOnly:  true,
+		})
+	}
+	return volumes, mounts
+}
+
 // createSandbox creates the Sandbox CR, the ACP secret key Secret,
 // and returns the Sandbox name.
 func (r *AgentRunReconciler) createSandbox(
@@ -590,7 +822,7 @@ func (r *AgentRunReconciler) createSandbox(
 	})
 	volumeMounts = append(volumeMounts, corev1.VolumeMount{
 		Name:      workspaceVolumeName,
-		MountPath: "/workspace",
+		MountPath: workspaceDir,
 	})
 
 	// Writable /tmp for tools that create temp files at runtime.
@@ -604,8 +836,16 @@ func (r *AgentRunReconciler) createSandbox(
 	})
 	volumeMounts = append(volumeMounts, corev1.VolumeMount{
 		Name:      tmpVolumeName,
-		MountPath: "/tmp",
+		MountPath: tmpDir,
 	})
+
+	// User-attached Secret/ConfigMap file mounts (read-only). Their paths
+	// were checked against reservedMountPaths in validateFileMounts before
+	// the run reached sandbox creation, so they cannot shadow the mounts
+	// added above.
+	fmVolumes, fmMounts := fileMountVolumes(run)
+	volumes = append(volumes, fmVolumes...)
+	volumeMounts = append(volumeMounts, fmMounts...)
 
 	// Create the Sandbox CR.
 	serviceEnabled := true

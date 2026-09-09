@@ -82,6 +82,14 @@ type AgentWorkflowRunSpec struct {
 	// +optional
 	EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
 
+	// FileMounts attaches Secrets or ConfigMaps as read-only files across
+	// all stages. Passed through to each stage's AgentRun unchanged and
+	// validated there against the controller-managed mounts.
+	// +optional
+	// +listType=map
+	// +listMapKey=mountPath
+	FileMounts []FileMount `json:"fileMounts,omitempty"`
+
 	// TTLSecondsAfterFinished limits the lifetime of an AgentWorkflowRun that
 	// has reached a terminal phase (Succeeded or Failed), mirroring Job's
 	// ttlSecondsAfterFinished. When set, the controller deletes the run this

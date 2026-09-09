@@ -88,6 +88,59 @@ type ParamValue struct {
 	Value string `json:"value"`
 }
 
+// FileMount attaches a Secret or ConfigMap into the Sandbox container as
+// files on disk, mounted read-only. It is the file-shaped sibling of
+// spec.envFrom: use it for config or credentials a skill or tool reads
+// from a path (e.g. a config file, a service-account JSON) rather than
+// from an environment variable. The controller passes the source through
+// as a Kubernetes primitive. Before creating the Sandbox it checks source
+// existence and projected keys, without interpreting their values.
+//
+// Exactly one of SecretName or ConfigMapName must be set. MountPath is
+// rejected at run creation if it lands on, under, or above a
+// controller-managed mount (/opt/skills, /opt/skills-src, /run/konveyor,
+// /workspace, /tmp), the Kubernetes service-account token mount, or another
+// user mount. Invalid paths and missing items keys or subPaths fail the run
+// with InvalidFileMounts. Missing sources are retried with Succeeded=Unknown
+// and reason FileMountSourceNotFound, allowing apply-order races to recover.
+// +kubebuilder:validation:XValidation:rule="has(self.secretName) != has(self.configMapName)",message="exactly one of secretName or configMapName must be set"
+type FileMount struct {
+	// SecretName names a Secret in the same namespace to mount. Mutually
+	// exclusive with ConfigMapName.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	SecretName string `json:"secretName,omitempty"`
+
+	// ConfigMapName names a ConfigMap in the same namespace to mount.
+	// Mutually exclusive with SecretName.
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	ConfigMapName string `json:"configMapName,omitempty"`
+
+	// MountPath is the absolute path in the Sandbox container where the
+	// content is mounted. When SubPath is empty the whole object is
+	// mounted as a directory here (one file per key); when SubPath is set
+	// MountPath is the file path a single key lands at. Must not collide
+	// with a reserved mount or overlap another mount after path cleaning.
+	// The cleaned path is used in the Sandbox.
+	// +kubebuilder:validation:MinLength=1
+	MountPath string `json:"mountPath"`
+
+	// SubPath mounts a single key from the source object as a file at
+	// MountPath instead of mounting the whole object as a directory. Its
+	// value is a path in the projected volume: a key name by default, or
+	// an Items path when keys are selected or renamed. Projected directories
+	// may also be mounted.
+	// +optional
+	SubPath string `json:"subPath,omitempty"`
+
+	// Items selects and optionally renames individual keys from the
+	// source object. When empty, every key is projected
+	// under MountPath using the key as the filename.
+	// +optional
+	Items []corev1.KeyToPath `json:"items,omitempty"`
+}
+
 // AgentRunSpec defines the desired state of an AgentRun.
 // The spec is immutable once created — delete and recreate to change values.
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable"
@@ -147,6 +200,16 @@ type AgentRunSpec struct {
 	// the Sandbox container. Passed through to the Sandbox unchanged.
 	// +optional
 	EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
+
+	// FileMounts attaches Secrets or ConfigMaps into the Sandbox
+	// container as read-only files, for config or credentials a skill or
+	// tool reads from disk rather than from the environment. Each
+	// mountPath is validated against the controller-managed mounts and the
+	// run fails terminally (InvalidFileMounts) if any collides.
+	// +optional
+	// +listType=map
+	// +listMapKey=mountPath
+	FileMounts []FileMount `json:"fileMounts,omitempty"`
 
 	// GitConfig overrides the Agent's git commit identity for this run.
 	// When set it replaces the Agent's GitConfig wholesale (name and email
