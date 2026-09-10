@@ -47,7 +47,7 @@ func makeReadyGatewayKeyless(gwName, secretName string) func() {
 	return makeReadyGatewayWithCred(gwName, secretName, map[string]string{
 		"AWS_ACCESS_KEY_ID":     "test-access-key",
 		"AWS_SECRET_ACCESS_KEY": "test-secret-key",
-		"AWS_REGION":            "us-east-1",
+		"AWS_REGION":            testAWSRegion,
 	}, "")
 }
 

@@ -94,15 +94,52 @@ func TestGatewayVerificationCurlCommand(t *testing.T) {
 // underscores), so gcp-vertex-ai/aws-bedrock match the same keys in both.
 func TestNormalizeProvider(t *testing.T) {
 	cases := map[string]string{
-		providerAnthropic: providerAnthropic,
-		"Anthropic":       providerAnthropic,
-		"gcp-vertex-ai":   providerGCPVertex,
-		"aws-bedrock":     providerAWSBedrock,
-		"AWS-Bedrock":     providerAWSBedrock,
+		providerAnthropic:   providerAnthropic,
+		"Anthropic":         providerAnthropic,
+		"gcp-vertex-ai":     providerGCPVertex,
+		testProviderBedrock: providerAWSBedrock,
+		"AWS-Bedrock":       providerAWSBedrock,
 	}
 	for in, want := range cases {
 		if got := normalizeProvider(in); got != want {
 			t.Errorf("normalizeProvider(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestHasModelsProbe guards which providers the controller will probe at all.
+// aws-bedrock and gcp-vertex-ai reach their service through a cloud SDK, so
+// there is no /v1/models to GET and no bearer token to send; probing them can
+// only fail. Every other provider, including one the controller does not
+// recognize, still gets the OpenAI-compatible probe.
+func TestHasModelsProbe(t *testing.T) {
+	cases := map[string]bool{
+		providerOpenAI:      true,
+		providerAnthropic:   true,
+		providerXAI:         true,
+		"some-new-provider": true,
+		providerAWSBedrock:  false,
+		providerGCPVertex:   false,
+		// The skip must survive the spelling users actually write.
+		testProviderBedrock: false,
+		"AWS-Bedrock":       false,
+		"gcp-vertex-ai":     false,
+	}
+	for provider, want := range cases {
+		if got := hasModelsProbe(provider); got != want {
+			t.Errorf("hasModelsProbe(%q) = %v, want %v", provider, got, want)
+		}
+	}
+}
+
+// TestSkippedProvidersAreKnown guards that every provider excluded from the
+// probe is still a provider the controller and harness recognize. A typo here
+// would silently skip verification for a provider that should have been
+// probed.
+func TestSkippedProvidersAreKnown(t *testing.T) {
+	for provider := range providersWithoutModelsProbe {
+		if !knownProviders[provider] {
+			t.Errorf("provider %q is skipped for verification but is not in knownProviders", provider)
 		}
 	}
 }

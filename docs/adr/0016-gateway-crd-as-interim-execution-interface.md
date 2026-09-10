@@ -86,7 +86,10 @@ It is a Konveyor custom resource, not an OpenShell Gateway Service.
   privacy router is meant to close, accepted as a dev-preview limitation.
 - **The Gateway controller verifies connectivity** by running a Job that
   probes `<endpoint>/v1/models` with the resolved credential, surfacing the
-  result as `status.connectionVerified`.
+  result as `status.connectionVerified`. Providers reached through a cloud
+  SDK rather than an HTTP endpoint (`aws-bedrock`, `gcp-vertex-ai`) have no
+  such surface to probe, so they are marked `Ready` without one, with
+  `reason=VerificationSkipped` and `connectionVerified` left false.
 - **An AgentRun selects exactly one Gateway.** Multi-model-per-run stays
   dropped — this half of ADR 0004 (and the retirement of
   `KONVEYOR_MODEL_<ROLE>_*`) is honoured, not superseded.

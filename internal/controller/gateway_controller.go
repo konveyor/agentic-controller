@@ -66,8 +66,8 @@ const (
 	anthropicAPIVersion = "2023-06-01"
 
 	// endpointModelsProbe is the models endpoint the connectivity probe
-	// requests. All currently-supported providers expose an
-	// OpenAI-compatible /v1/models under $LLM_ENDPOINT.
+	// requests. Only providers with an OpenAI-compatible surface are probed
+	// at all; the rest skip verification (see providersWithoutModelsProbe).
 	endpointModelsProbe = "$LLM_ENDPOINT/v1/models"
 
 	// Provider identifiers in normalized form (see normalizeProvider), kept
@@ -97,6 +97,13 @@ const (
 	reasonConnectionFailed     = "ConnectionFailed"
 	reasonAuthenticationFailed = "AuthenticationFailed"
 	reasonEndpointUnreachable  = "EndpointUnreachable"
+
+	// reasonVerificationSkipped marks a Gateway the controller deliberately
+	// did not probe because its provider exposes no OpenAI-compatible surface
+	// (see providersWithoutModelsProbe). Ready is True so the Gateway is
+	// usable; ConnectionVerified stays false so status does not claim a check
+	// that never ran.
+	reasonVerificationSkipped = "VerificationSkipped"
 )
 
 // GatewayReconciler reconciles a Gateway object.
@@ -209,33 +216,37 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
+	// Step 2b: A provider with no OpenAI-compatible surface is not probed at
+	// all - the Job could only ever fail. Drop any Job left behind by a
+	// previous provider value and settle the Gateway as skipped.
+	if !hasModelsProbe(gateway.Spec.Provider) {
+		if err := r.deleteVerificationJobs(ctx, &gateway, ""); err != nil {
+			return ctrl.Result{}, err
+		}
+		// Ready, so the Gateway is usable and Agents referencing it can go
+		// Ready - but not verified, because nothing was checked.
+		gateway.Status.ConnectionVerified = false
+		gateway.Status.VerifiedCredentialHash = credHash
+		meta.SetStatusCondition(&gateway.Status.Conditions, metav1.Condition{
+			Type:               ConditionTypeReady,
+			Status:             metav1.ConditionTrue,
+			ObservedGeneration: gateway.Generation,
+			Reason:             reasonVerificationSkipped,
+			Message: fmt.Sprintf(
+				"Provider %q has no OpenAI-compatible /v1/models to probe; "+
+					"endpoint and credentials are unverified",
+				gateway.Spec.Provider),
+		})
+		return r.patchStatus(ctx, &gateway, original)
+	}
+
 	// Clean up verification Jobs from prior generations and prior credentials.
 	// If a Gateway spec changes or its credential rotates while verification is
 	// queued/running, the old Job is orphaned because completion events
 	// reconcile under the new name.
-	var oldJobs batchv1.JobList
-	if err := r.List(ctx, &oldJobs,
-		client.InNamespace(gateway.Namespace),
-		// Scoped to this controller's verification Jobs: the loop below deletes
-		// what it finds, so the Gateway label alone is too broad a net.
-		client.MatchingLabels{
-			labelManagedBy: managedByLabel,
-			labelComponent: componentGatewayVerification,
-			labelGateway:   gatewayLabelValue(&gateway),
-		},
-	); err != nil {
-		return ctrl.Result{}, err
-	}
 	currentJobName := verificationJobName(&gateway, credHash)
-	for i := range oldJobs.Items {
-		if oldJobs.Items[i].Name != currentJobName {
-			if err := r.Delete(ctx, &oldJobs.Items[i],
-				client.PropagationPolicy(metav1.DeletePropagationBackground),
-			); client.IgnoreNotFound(err) != nil {
-				logger.V(1).Info("Failed to delete stale verification Job",
-					"job", oldJobs.Items[i].Name)
-			}
-		}
+	if err := r.deleteVerificationJobs(ctx, &gateway, currentJobName); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Step 3: Check for an existing verification Job.
@@ -321,6 +332,35 @@ var knownProviders = map[string]bool{
 	providerAWSBedrock: true,
 }
 
+// providersWithoutModelsProbe are the providers whose native API the
+// verification probe cannot speak. Both reach their service through a cloud
+// SDK rather than an HTTP endpoint guarded by a bearer token: there is no
+// /v1/models to GET, and the credential is a SigV4 triple or an ADC service
+// account rather than a single key, so credentialRef is keyless and the probe
+// pod is handed no credential at all (includeAuth is false). Probing them can
+// only ever produce a non-2xx - Bedrock answers 404 - which under the ^2 check
+// parks the Gateway at ConnectionFailed permanently and holds every
+// referencing Agent at DependenciesNotReady.
+//
+// These Gateways are marked Ready without a probe, carrying
+// reasonVerificationSkipped and ConnectionVerified false, so status says
+// plainly that nothing was checked. A provider-aware probe (SigV4
+// ListFoundationModels, a Vertex token check) is the real fix and is not this.
+//
+// Kept in lockstep with the harness providerEnv switch
+// (harness/internal/goose/lifecycle.go), where these same two providers are
+// the ones that take neither an API key nor an endpoint.
+var providersWithoutModelsProbe = map[string]bool{
+	providerAWSBedrock: true,
+	providerGCPVertex:  true,
+}
+
+// hasModelsProbe reports whether the provider exposes an OpenAI-compatible
+// /v1/models the verification Job can meaningfully GET.
+func hasModelsProbe(provider string) bool {
+	return !providersWithoutModelsProbe[normalizeProvider(provider)]
+}
+
 // normalizeProvider lowercases and converts hyphens to underscores so provider
 // matching stays in lockstep with the harness (providerEnv in
 // harness/internal/goose/lifecycle.go), which keys off the same normalization.
@@ -383,6 +423,40 @@ func gatewayVerificationAuthHeader(provider string) string {
 	default:
 		return ` -H "Authorization: Bearer $LLM_API_KEY"`
 	}
+}
+
+// deleteVerificationJobs deletes this Gateway's verification Jobs except the
+// one named keep. Pass an empty keep to delete all of them.
+func (r *GatewayReconciler) deleteVerificationJobs(
+	ctx context.Context,
+	gateway *konveyoriov1alpha1.Gateway,
+	keep string,
+) error {
+	var jobs batchv1.JobList
+	if err := r.List(ctx, &jobs,
+		client.InNamespace(gateway.Namespace),
+		// Scoped to this controller's verification Jobs: the loop below deletes
+		// what it finds, so the Gateway label alone is too broad a net.
+		client.MatchingLabels{
+			labelManagedBy: managedByLabel,
+			labelComponent: componentGatewayVerification,
+			labelGateway:   gatewayLabelValue(gateway),
+		},
+	); err != nil {
+		return err
+	}
+	for i := range jobs.Items {
+		if jobs.Items[i].Name == keep {
+			continue
+		}
+		if err := r.Delete(ctx, &jobs.Items[i],
+			client.PropagationPolicy(metav1.DeletePropagationBackground),
+		); client.IgnoreNotFound(err) != nil {
+			log.FromContext(ctx).V(1).Info("Failed to delete stale verification Job",
+				"job", jobs.Items[i].Name)
+		}
+	}
+	return nil
 }
 
 // createVerificationJob creates a Job that verifies connectivity to the
@@ -603,7 +677,8 @@ func hashCredentialField(h hash.Hash, b []byte) {
 // rotation (new hash) re-triggers verification.
 func isTerminalReadyReason(reason string) bool {
 	switch reason {
-	case reasonConnectionVerified, reasonConnectionFailed, reasonAuthenticationFailed, reasonEndpointUnreachable:
+	case reasonConnectionVerified, reasonConnectionFailed, reasonAuthenticationFailed,
+		reasonEndpointUnreachable, reasonVerificationSkipped:
 		return true
 	}
 	return false
