@@ -584,4 +584,82 @@ var _ = Describe("Gateway Controller", func() {
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
 		})
 	})
+
+	// A native aws-bedrock / gcp-vertex-ai Gateway has no OpenAI-compatible
+	// /v1/models, so the probe can only ever fail and park it at
+	// ConnectionFailed forever, holding every referencing Agent at
+	// DependenciesNotReady. It is settled without a probe instead.
+	Context("when the provider has no OpenAI-compatible surface", func() {
+		const (
+			name       = "llm-ctrl-bedrock"
+			secretName = "llm-secret-bedrock"
+		)
+
+		It("should set Ready=True with VerificationSkipped and create no Job", func() {
+			// SigV4 spans three variables, so the credentialRef is keyless
+			// and the whole Secret is the credential.
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      secretName,
+					Namespace: testNamespace,
+				},
+				StringData: map[string]string{
+					"AWS_ACCESS_KEY_ID":     "AKIAEXAMPLE",
+					"AWS_SECRET_ACCESS_KEY": "secret",
+					"AWS_REGION":            testAWSRegion,
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			gateway := &konveyoriov1alpha1.Gateway{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: testNamespace,
+				},
+				Spec: konveyoriov1alpha1.GatewaySpec{
+					// Hyphenated, as users write it: the skip decision must
+					// go through normalizeProvider.
+					Provider: testProviderBedrock,
+					Endpoint: "https://bedrock-runtime.us-east-1.amazonaws.com",
+					CredentialRef: konveyoriov1alpha1.GatewayCredentialRef{
+						SecretName: secretName,
+					},
+					Model: konveyoriov1alpha1.GatewayModel{
+						Name: testLLMModelName, ContextWindow: 100000,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
+
+			By("verifying the Gateway settles as Ready without being probed")
+			gwKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+
+				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
+				g.Expect(readyCond).NotTo(BeNil())
+				g.Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(readyCond.Reason).To(Equal(reasonVerificationSkipped))
+				g.Expect(readyCond.Message).To(ContainSubstring("aws-bedrock"))
+				// Ready, but honest: nothing was actually checked.
+				g.Expect(fetched.Status.ConnectionVerified).To(BeFalse())
+			}, timeout, interval).Should(Succeed())
+
+			By("verifying no verification Job is ever created")
+			gwLabel := &konveyoriov1alpha1.Gateway{}
+			gwLabel.Name = name
+			Consistently(func(g Gomega) {
+				var jobs batchv1.JobList
+				g.Expect(k8sClient.List(ctx, &jobs,
+					client.InNamespace(testNamespace),
+					client.MatchingLabels{labelGateway: gatewayLabelValue(gwLabel)},
+				)).To(Succeed())
+				g.Expect(jobs.Items).To(BeEmpty())
+			}, 2*time.Second, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+		})
+	})
 })

@@ -81,7 +81,7 @@ func TestCredentialHash(t *testing.T) {
 		},
 		{
 			name: "keyless covers every key in the Secret",
-			refA: keyless, secretA: map[string]string{awsKeyID: "a", awsRegion: "us-east-1"},
+			refA: keyless, secretA: map[string]string{awsKeyID: "a", awsRegion: testAWSRegion},
 			refB: keyless, secretB: map[string]string{awsKeyID: "a", awsRegion: "us-west-2"},
 			wantEq: false,
 		},
