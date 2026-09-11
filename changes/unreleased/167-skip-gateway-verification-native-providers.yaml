@@ -1,0 +1,6 @@
+kind: bugfix
+description: >
+  Skip the /v1/models verification probe for aws-bedrock and gcp-vertex-ai
+  Gateways, which have no such endpoint, and mark them Ready with
+  reason=VerificationSkipped instead of parking them at ConnectionFailed and
+  hanging every referencing Agent and AgentRun.
