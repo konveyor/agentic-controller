@@ -1,0 +1,24 @@
+# RBAC that lets Konveyor Hub serve the agentic API (/hub/agentic/*).
+#
+# Hub reads and writes Agents, AgentRuns, Gateways, SkillCards and the rest of
+# the konveyor.io resources from its OWN namespace (Settings.Hub.Namespace) and
+# nowhere else. Its ServiceAccount therefore needs a namespaced Role there, and
+# the agentic CRs, Gateways and credential Secrets must be created in that same
+# namespace or the UI gets a 500 ("... is forbidden ... in the namespace
+# konveyor-tackle") for every agentic page.
+#
+# Apply into the Hub namespace:
+#
+#   kubectl apply -k config/hub-rbac/ -n konveyor-tackle
+#
+# hack/install-konveyor.sh does this after Hub comes up. Longer term this grant
+# belongs to konveyor/operator alongside the Hub Deployment it authorizes; until
+# the operator ships it, this directory is the single definition.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Default Hub namespace. To target another namespace, render and substitute --
+# see hack/install-konveyor.sh.
+namespace: konveyor-tackle
+resources:
+  - role.yaml
+  - role_binding.yaml

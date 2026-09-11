@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tackle-hub-agentic
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tackle-hub-agentic
+subjects:
+  - kind: ServiceAccount
+    name: tackle-hub
+    # Must match the namespace this Role is applied into (RBAC requires it for
+    # ServiceAccount subjects). hack/install-konveyor.sh substitutes KONVEYOR_NS.
+    namespace: konveyor-tackle

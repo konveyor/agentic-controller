@@ -1,0 +1,38 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tackle-hub-agentic
+rules:
+  # The agentic API surface Hub serves to the UI.
+  - apiGroups:
+      - konveyor.io
+    resources:
+      - agents
+      - agentruns
+      - agentworkflows
+      - agentworkflowruns
+      - gateways
+      - skillcards
+      - skillcollections
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  # Hub reads the ACP secret to mint connection nonces and creates the
+  # per-run token Secrets it hands to AgentRuns via secretRef.
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete

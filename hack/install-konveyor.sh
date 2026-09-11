@@ -9,6 +9,7 @@
 # Environment:
 #   OPERATOR_REF    tackle2-operator commit to install (pinned below)
 #   KONVEYOR_NS     namespace to install into (default konveyor-tackle)
+#   AUTH_REQUIRED   "true" to install with Hub authentication on (default false)
 #   TIMEOUT         how long to wait for Hub (default 600s)
 
 set -euo pipefail
@@ -17,6 +18,7 @@ set -euo pipefail
 # break this repo's CI. Bump it deliberately.
 OPERATOR_REF="${OPERATOR_REF:-d57baa682a96be8ae329914e6e44e5271bba44a4}"
 KONVEYOR_NS="${KONVEYOR_NS:-konveyor-tackle}"
+AUTH_REQUIRED="${AUTH_REQUIRED:-false}"
 TIMEOUT="${TIMEOUT:-600s}"
 
 if kubectl -n "${KONVEYOR_NS}" get deployment tackle-hub >/dev/null 2>&1; then
@@ -36,15 +38,16 @@ else
         --namespace "${KONVEYOR_NS}" \
         --wait --timeout "${TIMEOUT}"
 
-    # The operator reconciles this into Hub and its database. Auth off, because
-    # the harness resolves an application and nothing here is testing tokens.
+    # The operator reconciles this into Hub and its database. Auth defaults to
+    # off because the e2e only resolves an application and tests no tokens;
+    # AUTH_REQUIRED=true turns on Hub's built-in OIDC (seeded login admin/admin).
     kubectl -n "${KONVEYOR_NS}" apply -f - <<EOF
 apiVersion: tackle.konveyor.io/v1alpha1
 kind: Tackle
 metadata:
   name: tackle
 spec:
-  feature_auth_required: "false"
+  feature_auth_required: "${AUTH_REQUIRED}"
 EOF
 fi
 
@@ -56,5 +59,16 @@ for _ in $(seq 1 120); do
     sleep 5
 done
 kubectl -n "${KONVEYOR_NS}" rollout status deployment/tackle-hub --timeout="${TIMEOUT}"
+
+# Hub serves the agentic API (/hub/agentic/*) by reading konveyor.io resources
+# from its own namespace, and the operator does not yet grant its ServiceAccount
+# access to them. Without this Role every agentic page in the UI 500s with
+# "... is forbidden ... in the namespace ${KONVEYOR_NS}". The manifests default
+# to konveyor-tackle; substitute the target namespace (RBAC requires it on the
+# ServiceAccount subject, so a plain -n is not enough).
+echo "=== Granting Hub access to agentic resources in ${KONVEYOR_NS} ==="
+kubectl kustomize "$(dirname "$0")/../config/hub-rbac" \
+    | sed "s/konveyor-tackle/${KONVEYOR_NS}/g" \
+    | kubectl apply -f -
 
 echo "Hub is at http://tackle-hub.${KONVEYOR_NS}.svc:8080"
