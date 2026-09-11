@@ -95,14 +95,19 @@ kubectl wait deployment/agent-sandbox-controller \
 Hub is where the agentic resources live and what the UI talks to. Install
 it before creating any Gateway or Agent so there is a namespace to put
 them in. `hack/install-konveyor.sh` installs the tackle2-operator via its
-Helm chart with auth disabled, waits for Hub, and grants Hub's
-ServiceAccount access to the `konveyor.io` resources in its namespace
-(`config/hub-rbac/`):
+Helm chart, waits for Hub, and grants Hub's ServiceAccount access to the
+`konveyor.io` resources in its namespace (`config/hub-rbac/` — the
+operator does not do this yet, see
+[konveyor/operator#615](https://github.com/konveyor/operator/issues/615)):
 
 ```bash
 export KONVEYOR_NS=konveyor-tackle   # the script's default; change both together
-make konveyor-install
+make konveyor-install                # add AUTH_REQUIRED=true to start with auth on
 ```
+
+Authentication is off by default so the rest of this guide needs no
+credentials; [Authentication](#authentication) below covers turning it
+on and what changes when you do.
 
 Every command below uses `-n "$KONVEYOR_NS"`. If you prefer, set it as
 your context default instead and drop the flag:
@@ -121,6 +126,25 @@ kubectl kustomize config/hub-rbac/ \
 ```
 
 ## 3. Deploy the controller and default resources
+
+> **Operator path (no build, no kustomize).** The tackle2-operator ships
+> the agentic controller. One switch on the Tackle CR deploys the
+> controller into the Hub namespace, installs the same `config/defaults/`
+> content there, and turns on the agentic pages in the UI:
+>
+> ```bash
+> kubectl patch tackle tackle -n "$KONVEYOR_NS" --type merge \
+>   -p '{"spec":{"agentic_enabled":true}}'
+> kubectl get tackle tackle -n "$KONVEYOR_NS" \
+>   -o jsonpath='{.status.conditions[?(@.type=="AgenticControllerReady")]}'
+> ```
+>
+> Agent Sandbox (step 1) must already be installed or the operator posts
+> `AgenticControllerReady=False` and deploys nothing. If you take this path,
+> skip `make deploy` and `kubectl apply -k config/defaults/` below — two
+> controllers reconciling the same CRs is not a supported setup — and
+> continue at [Open the UI](#open-the-ui). The developer path below is for
+> running your own build of the controller.
 
 The default image `quay.io/konveyor/agentic-controller:latest` is public
 and rebuilt on every merge to `main`, so you can deploy straight away
@@ -187,6 +211,44 @@ from source:
 make build-installer IMG=$IMG
 kubectl apply -f dist/install.yaml
 ```
+
+### Open the UI
+
+Before creating anything else, confirm Hub can see what you just
+installed. This is the check that catches a wrong namespace or missing
+RBAC immediately instead of at the end of the guide. Through the Hub
+service:
+
+```bash
+kubectl -n "$KONVEYOR_NS" port-forward svc/tackle-hub 8080:8080 &
+curl -s http://localhost:8080/agentic/agents | jq -r '.[].name'
+```
+
+You should see the default Agents (`migration-plan-agent`,
+`migration-execute-agent`, `migration-verify-agent`). A `500` with
+`is forbidden` in the body means the
+RBAC or the namespace is wrong — see
+[Troubleshooting](#troubleshooting). Add `-u admin:admin` once
+authentication is on.
+
+The operator exposes the UI as a Route named `tackle` on OpenShift
+(`openshift_cluster: true` on the Tackle CR) or an Ingress named `tackle`
+otherwise; on a Kind cluster without an ingress controller, port-forward
+it:
+
+```bash
+kubectl -n "$KONVEYOR_NS" get route,ingress tackle 2>/dev/null
+kubectl -n "$KONVEYOR_NS" port-forward svc/tackle-ui 8081:8080   # then http://localhost:8081
+```
+
+The agentic pages (Agent runs, Agents, Workflows, Skills) appear only when
+the UI runs with `AGENTIC_ENABLED=true`. The operator sets that together
+with `agentic_enabled`, so on the operator path they are already there.
+On the developer path the operator-managed UI keeps them hidden; run a
+second UI Deployment of your own with `AGENTIC_ENABLED=true` and
+`TACKLE_HUB_URL=http://tackle-hub.$KONVEYOR_NS.svc:8080` (plus the
+authentication variables in [Authentication](#authentication) if auth is
+on), or rely on the API check above.
 
 ## 4. Create a Gateway
 
@@ -332,12 +394,30 @@ environment the entry point needs. The controller validates the
 configuration, creates an Agent Sandbox, and tracks the run to
 completion.
 
-> **Hub application.** The `agent-java` image resolves the repository to
-> migrate and its git credentials from the Hub installed in step 2, keyed
-> by `APP_ID`. Register the application you want to migrate in Hub and
-> note its `APP_ID`. The sample AgentRun's `spec.env` points at the
-> in-cluster Hub service with `APP_ID: "1"`; edit `HUB_BASE_URL`,
-> `APP_ID`, and `TARGET_BRANCH` to match your Hub and application.
+The `agent-java` image resolves the repository to migrate and its git
+credentials from the Hub installed in step 2, keyed by `APP_ID`, so the
+application has to exist in Hub first. Register it through the UI
+(Application inventory → Create new) or the API, using the Hub
+port-forward from [Open the UI](#open-the-ui):
+
+```bash
+curl -s -X POST http://localhost:8080/applications \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"coolstore","repository":{"kind":"git","url":"https://github.com/konveyor-ecosystem/coolstore.git","branch":"main"}}'
+
+# Find its id — this is the APP_ID the run needs
+curl -s http://localhost:8080/applications | jq -r '.[] | "\(.id) \(.name)"'
+```
+
+Private repositories also need a git credential (an Identity in Hub)
+attached to the application. The sample AgentRun's `spec.env` points at
+the in-cluster Hub service with `APP_ID: "1"`; edit `HUB_BASE_URL`,
+`APP_ID`, and `TARGET_BRANCH` to match your Hub and application.
+
+> With authentication on, create runs through the UI or Hub's
+> `POST /agentic/agentruns` rather than `kubectl apply`: Hub mints a
+> per-run token the harness uses to reach Hub, and a run created straight
+> in Kubernetes has none. See [Authentication](#authentication).
 
 Apply the example AgentRun:
 
@@ -369,6 +449,50 @@ For multi-stage work (e.g. plan, execute, verify), use
 AgentWorkflow and AgentWorkflowRun. See
 `hack/harness-test/workflow-resources.yaml` for a complete example
 that migrates a Java EE application to Quarkus using three stages.
+
+## Authentication
+
+Everything above runs with Hub authentication off. Turning it on is one
+field on the Tackle CR; the operator restarts Hub and the UI with
+`AUTH_REQUIRED=true`:
+
+```bash
+kubectl patch tackle tackle -n "$KONVEYOR_NS" --type merge \
+  -p '{"spec":{"feature_auth_required":true}}'
+kubectl -n "$KONVEYOR_NS" rollout status deploy/tackle-hub deploy/tackle-ui
+```
+
+(`AUTH_REQUIRED=true make konveyor-install` does the same on a fresh
+install.) What that means in practice:
+
+- **Hub is its own OpenID Connect provider.** There is no Keycloak to
+  install. The UI redirects to Hub's login page, and the issuer is derived
+  from the request host, so any UI that proxies `/oidc` to Hub works
+  without registering redirect URIs.
+- **The seeded login is `admin` / `admin`**, from
+  `internal/auth/seed/users.yaml` in tackle2-hub. Change it before the
+  cluster is reachable by anyone else; users and roles are managed under
+  Hub's `/auth` REST API and the UI's administration pages.
+- **Every Hub request now needs credentials.** Anonymous calls return
+  `401`. Basic auth works for scripts, and the UI uses bearer tokens:
+
+  ```bash
+  curl -s -u admin:admin http://localhost:8080/agentic/agents | jq -r '.[].name'
+  ```
+
+- **Agentic endpoints are scoped.** Each route group requires an
+  `agentic.*` scope (`agentic.agents`, `agentic.agentruns`, …), granted by
+  role in `internal/auth/seed/roles.yaml`. A user whose role lacks them
+  gets `403` on the agentic pages while the rest of the UI works.
+- **Runs must be created through Hub.** When Hub creates an AgentRun it
+  also creates a per-run token Secret, attaches it via `envFrom`, and
+  sets `HUB_BASE_URL`, which is how the harness resolves the application
+  and pushes results. A run created with `kubectl apply` has no token and
+  fails as soon as it talks to Hub.
+- **A UI Deployment you run yourself** (developer path) needs
+  `AUTH_REQUIRED=true`, `OIDC_CLIENT_ID=web-ui`, and
+  `OIDC_ISSUER=http://tackle-hub.$KONVEYOR_NS.svc:8080/oidc`. The UI
+  server exits at startup without `OIDC_ISSUER`.
 
 ## Sample and default manifests
 
@@ -427,6 +551,10 @@ don't remove resources you meant to keep:
 kubectl delete agentruns --all -n "$KONVEYOR_NS"
 kubectl delete agents --all -n "$KONVEYOR_NS"
 kubectl delete gateways.konveyor.io --all -n "$KONVEYOR_NS"
+
+# Gateway verification Jobs (and their pods) are owned by the Gateway and
+# go with it; sweep any left behind by a Gateway deleted another way
+kubectl delete jobs -n "$KONVEYOR_NS" -l app.kubernetes.io/component=gateway-verification
 ```
 
 > **Warning:** `make undeploy` and `make uninstall` delete the CRDs,
@@ -443,14 +571,20 @@ make undeploy
 make uninstall
 ```
 
-## Future: operator integration
+## Operator integration
 
-The deployment method described here (kustomize / `dist/install.yaml`)
-is a stopgap. The planned path is OLM-managed operator packaging,
-which will provide catalog integration, upgrade lifecycle, and
-dependency resolution for Agent Sandbox. The sample CRs in
-`config/samples/` are structured to be compatible with OLM bundle
-conventions (one resource per file, no templated placeholders).
+The tackle2-operator (OLM-packaged as konveyor/operator) ships the agentic
+controller behind `spec.agentic_enabled` on the Tackle CR — see the
+operator path in step 3. On every merge to `main`, the
+`sync-operator` workflow renders this repo's CRDs, controller RBAC, and
+`config/defaults/` into a PR against the operator, so what the operator
+installs is what this repo defines. Two things the operator does not do
+yet: grant Hub's ServiceAccount the `konveyor.io` RBAC
+([konveyor/operator#615](https://github.com/konveyor/operator/issues/615),
+covered by `config/hub-rbac/` here), and resolve the Agent Sandbox
+dependency — install it yourself (step 1). The kustomize / `dist/install.yaml`
+path in step 3 remains the way to run a controller build the operator does
+not ship.
 
 ## Troubleshooting
 
@@ -486,6 +620,27 @@ The controller could not reach the endpoint. Check:
 - The endpoint URL is correct
 - The credential Secret exists and has the right keys
 - Network policies allow egress from the controller namespace
+
+For `aws-bedrock` and `gcp-vertex-ai` this is expected on controller
+images older than [#222](https://github.com/konveyor/agentic-controller/pull/222):
+the probe asks the endpoint for `/v1/models`, which only OpenAI-compatible
+APIs serve, so the verification Job fails with a 404 and the Gateway parks
+at `Ready=False/ConnectionFailed`, taking every Agent that references it
+down with it. From #222 on, those providers are marked
+`Ready=True` with `reason=VerificationSkipped` and `Verified: false`. On an
+older image, mark the Gateway Ready by hand:
+
+```bash
+kubectl patch gateway.konveyor.io <name> -n "$KONVEYOR_NS" --subresource=status --type=merge \
+  -p '{"status":{"connectionVerified":true,"conditions":[{"type":"Ready","status":"True","reason":"ConnectionVerified","message":"Manually verified; /v1/models probe is invalid for this provider","lastTransitionTime":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"}]}}'
+```
+
+**Hub returns `401` after enabling authentication**
+
+Every caller now needs credentials — see [Authentication](#authentication).
+The usual culprits are scripts calling Hub without `-u user:password` or a
+bearer token, and AgentRuns created with `kubectl apply`, whose harness
+has no Hub token. Recreate those runs through the UI or Hub's API.
 
 **Agent shows `Ready: False`**
 
