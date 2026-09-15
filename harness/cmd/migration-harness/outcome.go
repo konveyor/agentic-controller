@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/konveyor/migration-harness/internal/acp"
@@ -77,7 +78,15 @@ const handoffPromptText = "You have reached your execution limit and must stop w
 // GOOSE_MAX_TURNS value actually configured for this run (0 if maxTurns
 // was unset) — see the TurnsUsed comparison below for why it's needed.
 // Isolated from I/O so it's unit-testable without a live goose connection.
-func classifyOutcome(result *acp.PromptResult, err error, nativeMaxTurns int) (outcome, limitKind) {
+//
+// providerError says the closing message was one of goose's provider-failure
+// texts (result.ClosingProviderError()). goose renders a rejected model call
+// as assistant prose and ends the turn normally, so without this a run whose
+// only call was refused — a dead credential, an invalid model id — reported
+// success (#231). With no turn used nothing was done, so that is a failure;
+// a provider error after real work keeps whatever outcome the turn earned
+// (the notice still names it) and is #129's broader contract.
+func classifyOutcome(result *acp.PromptResult, err error, nativeMaxTurns int, providerError bool) (outcome, limitKind) {
 	if err != nil {
 		// goose does not gracefully report a stopReason when its native
 		// GOOSE_MAX_TURNS limit is hit — it drops the websocket connection
@@ -101,6 +110,11 @@ func classifyOutcome(result *acp.PromptResult, err error, nativeMaxTurns int) (o
 		// Viewer-initiated cancel, not a limit — unchanged from the
 		// harness's existing behavior of treating a cancelled run as a
 		// failed stage.
+		return outcomeFailed, limitNone
+	case providerError && result.TurnsUsed == 0:
+		// The model never worked: its first and only reply was the
+		// provider refusing the call. Nothing happened, so this is not a
+		// success (#231).
 		return outcomeFailed, limitNone
 	case result.StopReason == stopReasonMaxTurns:
 		return outcomeLimitReached, limitMaxTurns
@@ -159,6 +173,36 @@ func combineUsage(primary, handoff *acp.PromptResult) usage {
 	}
 	return u
 }
+
+// providerErrorSummary reduces goose's provider-error prose to the one
+// line worth showing a person: the first non-empty line of the failure
+// itself (acp.ProviderErrorText), not of narration the agent streamed
+// before it, cut to providerErrorSummaryLen runes. text must already be
+// redacted.
+func providerErrorSummary(text string) string {
+	if failure := acp.ProviderErrorText(text); failure != "" {
+		text = failure
+	}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if r := []rune(line); len(r) > providerErrorSummaryLen {
+			line = strings.TrimSpace(string(r[:providerErrorSummaryLen-1])) + "…"
+		}
+		return line
+	}
+	return ""
+}
+
+// providerErrorSummaryLen bounds the summary without cutting away the
+// reason: goose renders an AWS SDK error with Debug formatting, and #231's
+// Bedrock line ran ~500 runes with "The security token included in the
+// request is invalid." past rune 160. At this length the termination log
+// still sits well under the kubelet's 4096 bytes; writeTerminationLog's
+// overflow trim remains the backstop.
+const providerErrorSummaryLen = 1000
 
 // terminationBlob is the compact JSON written to /dev/termination-log
 // (ADR 0011). Kept small: the kubelet truncates termination messages

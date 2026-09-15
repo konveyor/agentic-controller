@@ -1,0 +1,6 @@
+kind: bugfix
+description: >
+  A run whose only model call the provider rejected (a dead credential, an
+  invalid model id) now fails instead of reporting Succeeded, with the
+  provider's error line, not narration streamed before it, as the
+  termination log's stopReason and in the viewer notice.

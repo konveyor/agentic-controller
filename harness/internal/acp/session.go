@@ -394,26 +394,39 @@ var (
 // LooksLikeProviderError reports whether one agent message is, or ends
 // with, one of goose's provider-failure messages. A turn ending on one
 // never reached the model, or lost it mid-way, yet from the outside it
-// looks like an ordinary end of turn. goose emits the failure as its own
-// message, but text it had already streamed can precede it in the same
-// entry when no message id separates them, so prefixes are also checked
-// at the start of each line.
+// looks like an ordinary end of turn.
 func LooksLikeProviderError(text string) bool {
+	return ProviderErrorText(text) != ""
+}
+
+// ProviderErrorText returns the provider-failure message within one agent
+// message, or "" when it holds none (see LooksLikeProviderError). goose
+// emits the failure as its own message, but text it had already streamed
+// can precede it in the same entry when no message id separates them, so
+// prefixes are also checked at the start of each line. That narration is
+// not the error and is left out: the result runs from the line the failure
+// starts on — the line before a trailer, or the last line opening with a
+// prefix — to the end of the message.
+func ProviderErrorText(text string) string {
 	t := strings.TrimSpace(text)
 	for _, m := range providerErrorSuffixes {
 		if strings.HasSuffix(t, m) {
-			return true
+			// body is t up to the trailer (t has no leading space to trim):
+			// the failure starts on its last line, or is the trailer alone.
+			body := strings.TrimSpace(strings.TrimSuffix(t, m))
+			return strings.TrimSpace(t[strings.LastIndex(body, "\n")+1:])
 		}
 	}
-	for line := range strings.SplitSeq(t, "\n") {
-		line = strings.TrimSpace(line)
+	lines := strings.Split(t, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
 		for _, m := range providerErrorPrefixes {
 			if strings.HasPrefix(line, m) {
-				return true
+				return strings.TrimSpace(strings.Join(lines[i:], "\n"))
 			}
 		}
 	}
-	return false
+	return ""
 }
 
 // SendPrompt sends a prompt to a session and collects the streaming

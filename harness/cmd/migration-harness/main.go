@@ -456,7 +456,15 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		teeSrv.SetRunActive(false)
 	}
 
-	stageOutcome, limit := classifyOutcome(primaryResult, err, params.NativeTurnLimit(cfg.MaxTurns))
+	// The closing message is read first: a provider refusal rendered as
+	// prose decides the outcome when no turn was used (#231).
+	providerErr := primaryResult != nil && logAgentClosingMessage(primaryResult, red)
+	providerRejected := providerErr && primaryResult.TurnsUsed == 0
+	var providerSummary string
+	if providerErr {
+		providerSummary = providerErrorSummary(red.redact(primaryResult.FinalMessage()))
+	}
+	stageOutcome, limit := classifyOutcome(primaryResult, err, params.NativeTurnLimit(cfg.MaxTurns), providerErr)
 
 	// An unanswered ask_user question is a HITL gate the harness stopped the
 	// turn on: it also surfaces as stopReason=cancelled (the harness fired
@@ -474,8 +482,13 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	if err != nil {
 		logging.Err("prompt failed: %s", red.redact(err.Error()))
 	}
-	if primaryResult != nil && logAgentClosingMessage(primaryResult, red) {
-		emitNotice("agent ended on goose's provider-error text — the model call may have failed; see the pod log")
+	// Tell the people watching in words they can act on: the console
+	// viewer has no pod log, but the provider's own error names the fix.
+	switch {
+	case providerRejected:
+		emitNotice("the model provider rejected the call — no work was done: %s", providerSummary)
+	case providerErr:
+		emitNotice("the model provider rejected a call after %d turns: %s", primaryResult.TurnsUsed, providerSummary)
 	}
 
 	// 9b. One-shot handoff prompt when a limit was reached (ADR 0011).
@@ -534,6 +547,12 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			LimitReached: string(limit),
 			StopReason:   primaryResult.StopReason,
 			Usage:        &u,
+		}
+		if providerRejected {
+			// "end_turn" is what goose said; the provider's message is
+			// what happened, and stopReason is the blob's free-text field
+			// for it (#231).
+			term.StopReason = "provider error: " + providerSummary
 		}
 	} else {
 		term = terminationBlob{ExitCode: stageOutcome.exitCode(), Outcome: stageOutcome.String()}
@@ -598,6 +617,8 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			emitNotice("run cancelled by viewer — partial work pushed to branch %s", creds.Branch)
 		case viewerCancelled:
 			emitNotice("run cancelled by viewer — no commits to push")
+		case providerRejected:
+			emitNotice("stage failed — the model provider rejected the call; no work was done")
 		case pushed:
 			emitNotice("stage failed — partial work pushed to branch %s", creds.Branch)
 		default:
@@ -606,6 +627,10 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		if hitlUnanswered {
 			logging.Err("stage failed: ask_user question unanswered (HITL gate)")
 			return 1, fmt.Errorf("stage failed: ask_user question unanswered (HITL gate)")
+		}
+		if providerRejected {
+			logging.Err("stage failed: the model provider rejected the call — %s", providerSummary)
+			return 1, fmt.Errorf("stage failed: provider error: %s", providerSummary)
 		}
 		logging.Err("stage failed")
 		return 1, fmt.Errorf("stage failed")

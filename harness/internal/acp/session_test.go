@@ -829,3 +829,22 @@ func TestLooksLikeProviderError(t *testing.T) {
 		t.Fatal("provider error in a later message not detected")
 	}
 }
+
+// The failure text leaves out narration streamed ahead of it, so what a
+// person is shown is the error, not "Here is the plan:".
+func TestProviderErrorText(t *testing.T) {
+	retry := "\n\nPlease retry if you think this is a transient or recoverable error."
+	cases := []struct{ in, want string }{
+		{"Ran into this error: 503." + retry, "Ran into this error: 503." + retry},
+		{"Here is the plan:\n1. Update pom.xml\nRan into this error: ThrottlingException." + retry, "Ran into this error: ThrottlingException." + retry},
+		{"Here is the plan:\nConnection reset by peer\n\nPlease resend your message to try again.", "Connection reset by peer\n\nPlease resend your message to try again."},
+		{"Please resend your message to try again.", "Please resend your message to try again."},
+		{"The build log said \"Ran into this error: missing jakarta import\"; fixed in 2 files.", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := ProviderErrorText(c.in); got != c.want {
+			t.Errorf("ProviderErrorText(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

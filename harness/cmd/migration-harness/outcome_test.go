@@ -34,9 +34,34 @@ func TestClassifyOutcome(t *testing.T) {
 		result         *acp.PromptResult
 		err            error
 		nativeMaxTurns int
+		providerError  bool
 		wantOut        outcome
 		wantLimit      limitKind
 	}{
+		{
+			// #231: goose renders a refused model call as prose and ends
+			// the turn with end_turn; with no turn used nothing happened.
+			name:          "provider error before any turn is a failure",
+			result:        &acp.PromptResult{StopReason: "end_turn", TurnsUsed: 0},
+			providerError: true,
+			wantOut:       outcomeFailed,
+			wantLimit:     limitNone,
+		},
+		{
+			name:          "provider error after real work keeps the turn's outcome",
+			result:        &acp.PromptResult{StopReason: "end_turn", TurnsUsed: 7},
+			providerError: true,
+			wantOut:       outcomeSucceeded,
+			wantLimit:     limitNone,
+		},
+		{
+			name:           "provider error at the native limit is still limitReached",
+			result:         &acp.PromptResult{StopReason: "end_turn", TurnsUsed: 34},
+			nativeMaxTurns: 34,
+			providerError:  true,
+			wantOut:        outcomeLimitReached,
+			wantLimit:      limitMaxTurns,
+		},
 		{
 			name:      "error is a failure",
 			result:    nil,
@@ -154,7 +179,7 @@ func TestClassifyOutcome(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			gotOut, gotLimit := classifyOutcome(c.result, c.err, c.nativeMaxTurns)
+			gotOut, gotLimit := classifyOutcome(c.result, c.err, c.nativeMaxTurns, c.providerError)
 			if gotOut != c.wantOut || gotLimit != c.wantLimit {
 				t.Errorf("classifyOutcome() = (%v, %v), want (%v, %v)", gotOut, gotLimit, c.wantOut, c.wantLimit)
 			}
@@ -352,5 +377,30 @@ func TestExecuteErrorTerminationBlobUsesGivenExitCode(t *testing.T) {
 	blob := executeErrorTerminationBlob(errors.New("boom"), 2)
 	if blob.ExitCode != 2 {
 		t.Errorf("ExitCode = %d, want 2", blob.ExitCode)
+	}
+}
+
+func TestProviderErrorSummary(t *testing.T) {
+	long := strings.Repeat("x", providerErrorSummaryLen+50)
+	retry := "\n\nPlease retry if you think this is a transient or recoverable error."
+	// The shape of #231's line (request ids zeroed): goose renders the AWS
+	// SDK error with Debug formatting, which puts the reason past rune 160.
+	bedrock := `Ran into this error: Server error: Failed to call Bedrock: Unhandled(Unhandled { source: ErrorMetadata { code: Some("UnrecognizedClientException"), message: Some("The security token included in the request is invalid."), extras: Some({"aws_request_id": "00000000-0000-0000-0000-000000000000"}) }, meta: ErrorMetadata { code: Some("UnrecognizedClientException"), message: Some("The security token included in the request is invalid."), extras: Some({"aws_request_id": "00000000-0000-0000-0000-000000000000"}) } }).`
+	cases := []struct{ in, want string }{
+		{"Ran into this error: Server error: Failed to call Bedrock: UnrecognizedClientException\n\nPlease retry if you think this is transient.", "Ran into this error: Server error: Failed to call Bedrock: UnrecognizedClientException"},
+		{bedrock + retry, bedrock},
+		// Narration streamed ahead of the failure, in the same message or an
+		// earlier one (FinalMessage joins them), is not the error.
+		{"Here is the plan:\n1. Update pom.xml\nRan into this error: ThrottlingException." + retry, "Ran into this error: ThrottlingException."},
+		{"Done with the first file.\nRan into this error: 503." + retry, "Ran into this error: 503."},
+		{"Here is the plan:\nConnection reset by peer\n\nPlease resend your message to try again.", "Connection reset by peer"},
+		{"\n\n  The provider refused this request.  \n", "The provider refused this request."},
+		{long, strings.Repeat("x", providerErrorSummaryLen-1) + "…"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := providerErrorSummary(c.in); got != c.want {
+			t.Errorf("providerErrorSummary(%q) = %q, want %q", c.in[:min(len(c.in), 40)], got, c.want)
+		}
 	}
 }
