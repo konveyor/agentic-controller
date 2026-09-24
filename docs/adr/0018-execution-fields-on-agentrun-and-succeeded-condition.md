@@ -5,12 +5,12 @@ description: "Defines execution-field placement, workflow-stage stamping, and th
 status: proposed
 status_note: "Amends ADRs 0011 and 0009 and supersedes their conflicting field-placement, exit-code, and guide-substitution details."
 date: "2026-08-19"
-last_updated: "2026-08-31"
+last_updated: "2026-09-24"
 authors:
   - "David Zager"
-last_reviewed: "2026-08-31"
+last_reviewed: "2026-09-24"
 implementation_status: in-sync
-review_note: "Execution fields on AgentRun, workflow-stage stamping, Succeeded terminal condition, and guide scoping are implemented. The ADR remains proposed pending formal acceptance."
+review_note: "Execution fields on AgentRun, workflow-stage stamping, Succeeded terminal condition, guide scoping, and the Refused outcome (exit 3) are implemented. The ADR remains proposed pending formal acceptance."
 ---
 
 # ADR 0018: Execution Fields on AgentRun, and a `Succeeded` Terminal Condition
@@ -20,6 +20,13 @@ placement, workflow-stage stamping, `Succeeded` terminal condition, phase
 mirror, and workflow-guide scope described here. The ADR remains proposed
 pending formal acceptance; its implementation status is tracked in the ADR
 reconciliation index.
+
+**Update (2026-09-24):** The first of the "future outcomes" is implemented
+(#241): harness exit 3 → phase `Failed` + `Succeeded{False, Refused}`. The
+harness reads the stage's own verdict — the `- Status:` line of the last
+section of `.konveyor/handoff.md`, when the stage wrote it — after the
+turn; `failed` is a refusal. The reason rides `terminationData.stopReason`,
+as the limit kind does for exit 2. `NoChanges` remains future (#129).
 
 ## Context
 
@@ -114,9 +121,13 @@ The controller sets a **`Succeeded`** condition as the terminal signal:
 | 0 | `Succeeded` | `True`, reason `Succeeded` |
 | 1 | `Failed` | `False`, reason `Failed` |
 | 2 | `Failed` | `False`, reason `LimitReached` |
+| 3 | `Failed` | `False`, reason `Refused` |
 
-Future outcomes (issue #129) extend the reason set — `Refused`,
-`NoChanges` — without new phases or condition types.
+Future outcomes (issue #129) extend the reason set — `Refused` (added
+2026-09-24, #241), `NoChanges` — without new phases or condition types.
+`Refused` is the agent's own verdict: it ended its turn normally, but the
+handoff section it wrote records `Status: failed`. `Failed` stays the
+machinery breaking — a crash, a provider error, a failed push.
 
 This supersedes ADR 0011's "exit 2 → phase `Succeeded` + `LimitReached`
 condition." Exit 2 is phase `Failed` (it did not cleanly complete) with

@@ -56,6 +56,7 @@ The controller delivers resolved parameters to `/run/konveyor/params.json` (ADR 
 - **Credential Isolation** — Push credentials remain in the entry point and are stripped from the working tree remote before launching the runtime.
 - **Agent-Authored Commits** — The agent creates all commits locally. The entry point **never creates commits of its own**.
 - **Push on Exit** — A debounced watcher pushes agent commits incrementally; a final push runs on stage exit. If no new commits were authored (`HEAD == baseSHA`), push is skipped to avoid creating empty branches.
+- **Handoff Verdict** — After the turn, the entry point reads the `- Status:` line of the last `## ` section of `.konveyor/handoff.md`, if the stage wrote or changed that file. `failed` means the stage did not do its work: the run exits `3` (refused) even though the agent ended its turn normally. `completed` / `passed` are the values the catalog skills write for a stage that did; anything else is recorded (`handoffStatus`) but not acted on. Nothing else in the handoff is read — its body is knowledge for the next stage, not execution control.
 
 ---
 
@@ -76,6 +77,9 @@ The controller delivers resolved parameters to `/run/konveyor/params.json` (ADR 
 | `0` | Succeeded — agent completed work | `Phase: Succeeded` |
 | `1` | Failed — execution error or fatal crash | `Phase: Failed` |
 | `2` | Limit reached — budget exhausted, handoff committed | `Phase: Failed`, `Succeeded=False`, `reason=LimitReached` |
+| `3` | Refused — the stage's own handoff records `Status: failed` | `Phase: Failed`, `Succeeded=False`, `reason=Refused` |
+
+Any non-zero exit stops a workflow: the next stage does not run.
 
 ### Termination Log (`/dev/termination-log`)
 
@@ -86,6 +90,7 @@ On exit, the entry point writes a JSON blob to `/dev/termination-log` (copied to
   "exitCode": 0,
   "outcome": "succeeded",
   "limitReached": "",
+  "handoffStatus": "completed",
   "stopReason": "end_turn",
   "usage": {
     "turns": 42,
