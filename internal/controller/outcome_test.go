@@ -90,6 +90,19 @@ func TestSetTerminalOutcome(t *testing.T) {
 			wantReason: konveyoriov1alpha1.AgentRunReasonLimitReached,
 		},
 		{
+			// #241: the agent's own handoff said the stage did not do its
+			// work. The termination message is the harness's JSON blob and
+			// must not become the condition message; the condition names
+			// the outcome, the blob carries the detail.
+			name:           "exit 3 is refused, with a fixed message",
+			pod:            podWithExit(3, `{"exitCode":3,"outcome":"refused","stopReason":"handoff: docs/plan.md not found"}`),
+			failureMessage: `{"exitCode":3,"outcome":"refused","stopReason":"handoff: docs/plan.md not found"}`,
+			wantPhase:      konveyoriov1alpha1.AgentRunPhaseFailed,
+			wantStatus:     metav1.ConditionFalse,
+			wantReason:     konveyoriov1alpha1.AgentRunReasonRefused,
+			wantMessage:    "The agent's handoff records that the stage did not do its work; .konveyor/handoff.md on the run's branch says why",
+		},
+		{
 			name:          "no exit code falls back to sandbox PodSucceeded",
 			pod:           nil,
 			sandboxReason: sandboxFinishedReasonSucceeded,

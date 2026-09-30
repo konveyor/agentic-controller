@@ -285,8 +285,8 @@ func (r *AgentWorkflowRunReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	stageStatus.Phase = agentRun.Status.Phase
 
 	// Sequence on the AgentRun's Succeeded condition, not phase (ADR 0018):
-	// True advances to the next stage, False (failure or limit reached)
-	// stops the workflow, Unknown/absent keeps waiting. This is the
+	// True advances to the next stage, False (failure, limit reached, or
+	// refused) stops the workflow, Unknown/absent keeps waiting. This is the
 	// controller state machine reading Succeeded so phase can eventually
 	// be retired.
 	succeeded := meta.FindStatusCondition(agentRun.Status.Conditions,
@@ -304,8 +304,8 @@ func (r *AgentWorkflowRunReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return r.patchRunStatus(ctx, &pbRun, original)
 
 	case succeeded != nil && succeeded.Status == metav1.ConditionFalse:
-		// Stage did not succeed (failure or limit reached) — fail the
-		// entire workflow run.
+		// Stage did not succeed (failure, limit reached, or refused) — fail
+		// the entire workflow run.
 		pbRun.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
 		now := metav1.Now()
 		pbRun.Status.CompletionTime = &now

@@ -37,8 +37,8 @@ var rootCmd = &cobra.Command{
 
 // exitCode carries runStage's exit code out of cobra's RunE closure —
 // cobra's own Execute() error handling only distinguishes "no error"
-// from "error", which cannot express the harness's three-way exit-code
-// contract (ADR 0011: 0 succeeded, 1 failed, 2 limit reached).
+// from "error", which cannot express the harness's exit-code contract
+// (ADR 0011/0018: 0 succeeded, 1 failed, 2 limit reached, 3 refused).
 var exitCode int
 
 // ranRunStage records whether runCmd's RunE actually ran. runStage's own
@@ -534,6 +534,33 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		}
 	}
 
+	// 11b. The stage's own verdict (#241). The catalog skills record
+	// whether the stage did its work as `- Status:` in their handoff
+	// section and then end the turn normally, so the ACP result alone
+	// reads a refusal as success. Only a turn that earned success is
+	// re-read: a limit, crash or provider failure keeps its outcome, and
+	// the limit handoff is not a verdict on finished work.
+	var verdict handoffVerdict
+	if stageOutcome == outcomeSucceeded {
+		if v, ok := stageHandoff(cloneDir, repo, baseSHA); ok {
+			verdict = v
+			switch {
+			case v.failed():
+				stageOutcome = outcomeRefused
+				msg := "handoff reports Status: failed — the stage did not do its work"
+				if v.Detail != "" {
+					msg += ": " + v.Detail
+				}
+				logging.Warn("%s", msg)
+			case v.recognised():
+				logging.Info("handoff reports Status: %s", v.Status)
+			default:
+				logging.Warn("handoff reports Status: %q, which the harness does not recognise "+
+					"(completed, passed, failed) — ignored", v.Status)
+			}
+		}
+	}
+
 	// 12. Stop watcher before final push
 	w.Stop()
 
@@ -544,17 +571,22 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	if primaryResult != nil {
 		u := combineUsage(primaryResult, handoffResult)
 		term = terminationBlob{
-			ExitCode:     stageOutcome.exitCode(),
-			Outcome:      stageOutcome.String(),
-			LimitReached: string(limit),
-			StopReason:   primaryResult.StopReason,
-			Usage:        &u,
+			ExitCode:      stageOutcome.exitCode(),
+			Outcome:       stageOutcome.String(),
+			LimitReached:  string(limit),
+			HandoffStatus: verdict.Status,
+			StopReason:    primaryResult.StopReason,
+			Usage:         &u,
 		}
-		if providerRejected {
+		switch {
+		case providerRejected:
 			// "end_turn" is what goose said; the provider's message is
 			// what happened, and stopReason is the blob's free-text field
 			// for it (#231).
 			term.StopReason = "provider error: " + providerSummary
+		case stageOutcome == outcomeRefused:
+			// Likewise: the handoff's reason is what happened.
+			term.StopReason = verdict.stopReason()
 		}
 	} else {
 		term = terminationBlob{ExitCode: stageOutcome.exitCode(), Outcome: stageOutcome.String()}
@@ -608,6 +640,19 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			logging.Warn("stage stopped at execution limit (%s) — handoff prompt ran but produced no commit", limit)
 		}
 		return 2, nil
+
+	case outcomeRefused:
+		// The agent finished its turn and said, in its handoff, that the
+		// stage did not do its work. Not a success, not the machinery
+		// breaking: exit 3, and the workflow stops here (ADR 0018).
+		reason := verdict.stopReason()
+		if pushed {
+			emitNotice("stage refused — %s; handoff pushed to branch %s", reason, creds.Branch)
+		} else {
+			emitNotice("stage refused — %s; no commits to push", reason)
+		}
+		logging.Warn("stage refused — %s", reason)
+		return 3, nil
 
 	default: // outcomeFailed
 		switch {

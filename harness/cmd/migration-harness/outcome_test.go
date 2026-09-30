@@ -20,10 +20,27 @@ func TestOutcomeExitCode(t *testing.T) {
 		{outcomeSucceeded, 0},
 		{outcomeFailed, 1},
 		{outcomeLimitReached, 2},
+		{outcomeRefused, 3},
 	}
 	for _, c := range cases {
 		if got := c.o.exitCode(); got != c.want {
 			t.Errorf("%v.exitCode() = %d, want %d", c.o, got, c.want)
+		}
+	}
+}
+
+func TestOutcomeString(t *testing.T) {
+	// The strings are the termination blob's outcome vocabulary, read by
+	// the Konveyor UI — a rename is a contract change.
+	cases := map[outcome]string{
+		outcomeSucceeded:    "succeeded",
+		outcomeFailed:       "failed",
+		outcomeLimitReached: "limitReached",
+		outcomeRefused:      "refused",
+	}
+	for o, want := range cases {
+		if got := o.String(); got != want {
+			t.Errorf("%d.String() = %q, want %q", int(o), got, want)
 		}
 	}
 }
@@ -251,6 +268,36 @@ func TestWriteTerminationLogRoundTrip(t *testing.T) {
 	}
 	if got.Usage == nil || *got.Usage != *term.Usage {
 		t.Errorf("usage round trip mismatch: got %+v, want %+v", got.Usage, term.Usage)
+	}
+}
+
+func TestWriteTerminationLogRefusedBlob(t *testing.T) {
+	// The refused blob (#241): exit 3, the handoff's status word, and the
+	// reason in stopReason where the UI reads free text from.
+	path := filepath.Join(t.TempDir(), "termination-log")
+	term := terminationBlob{
+		ExitCode:      outcomeRefused.exitCode(),
+		Outcome:       outcomeRefused.String(),
+		HandoffStatus: "failed",
+		StopReason:    "handoff: docs/plan.md not found",
+		Usage:         &usage{TurnsUsed: 3},
+	}
+	writeTerminationLog(path, term)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["exitCode"] != float64(3) || got["outcome"] != "refused" ||
+		got["handoffStatus"] != "failed" || got["stopReason"] != "handoff: docs/plan.md not found" {
+		t.Errorf("refused blob = %s", data)
+	}
+	if _, present := got["limitReached"]; present {
+		t.Errorf("limitReached should be omitted when empty: %s", data)
 	}
 }
 

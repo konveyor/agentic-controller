@@ -11,14 +11,20 @@ import (
 	"github.com/konveyor/migration-harness/internal/logging"
 )
 
-// outcome is the three-way result of a stage's primary prompt, per the
-// harness exit-code contract (ADR 0011).
+// outcome is the result of a stage, per the harness exit-code contract
+// (ADR 0011, extended by ADR 0018): what the primary prompt earned, then
+// what the stage's own handoff says about it.
 type outcome int
 
 const (
 	outcomeSucceeded outcome = iota
 	outcomeFailed
 	outcomeLimitReached
+	// outcomeRefused: the agent ended its turn normally but its handoff
+	// records that the stage did not do its work (#241). Distinct from
+	// outcomeFailed, which is the machinery breaking — a crash, a provider
+	// error, a failed push — not the agent's own verdict.
+	outcomeRefused
 )
 
 func (o outcome) String() string {
@@ -27,19 +33,24 @@ func (o outcome) String() string {
 		return "succeeded"
 	case outcomeLimitReached:
 		return "limitReached"
+	case outcomeRefused:
+		return "refused"
 	default:
 		return "failed"
 	}
 }
 
-// exitCode maps outcome to the harness exit-code contract: 0
-// succeeded, 1 failed, 2 limit reached with handoff committed.
+// exitCode maps outcome to the harness exit-code contract: 0 succeeded,
+// 1 failed, 2 limit reached with handoff committed, 3 refused by the
+// stage's own handoff. Any non-zero code stops a workflow.
 func (o outcome) exitCode() int {
 	switch o {
 	case outcomeSucceeded:
 		return 0
 	case outcomeLimitReached:
 		return 2
+	case outcomeRefused:
+		return 3
 	default:
 		return 1
 	}
@@ -211,8 +222,12 @@ type terminationBlob struct {
 	ExitCode     int    `json:"exitCode"`
 	Outcome      string `json:"outcome"`
 	LimitReached string `json:"limitReached,omitempty"`
-	StopReason   string `json:"stopReason,omitempty"`
-	Usage        *usage `json:"usage,omitempty"`
+	// HandoffStatus is the status word the stage's handoff section
+	// recorded, whatever it was, when the stage wrote one (#241). The
+	// outcome says whether the harness acted on it.
+	HandoffStatus string `json:"handoffStatus,omitempty"`
+	StopReason    string `json:"stopReason,omitempty"`
+	Usage         *usage `json:"usage,omitempty"`
 }
 
 // executeErrorTerminationBlob builds the termination-log blob for an error

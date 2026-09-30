@@ -117,16 +117,20 @@ Execution limits and mode, plus workflow/agent parameter values, are delivered v
 6. **Agent commits** — the agent authors all commits locally with descriptive messages. The entry point **never creates commits of its own**.
 7. **Watcher** — background fsnotify watcher pushes agent commits after a 30s quiet period
 8. **Final push** — pushes agent commits on stage completion. If no new commits were created, push is skipped to avoid empty remote branches.
+9. **Handoff verdict** — reads the `- Status:` line of the last section of `.konveyor/handoff.md` when the stage wrote or changed it. `failed` means the stage did not do its work and the run exits `3` (refused), whatever the agent's turn looked like. Nothing else in the handoff is read.
 
 ---
 
-## Exit Code Contract (ADR 0011)
+## Exit Code Contract (ADR 0011, ADR 0018)
 
 | Exit Code | Meaning | Controller Status |
 |-----------|---------|-------------------|
 | `0` | Succeeded — agent completed work | `Phase: Succeeded` |
 | `1` | Failed — execution error or crash | `Phase: Failed` |
 | `2` | Limit reached — budget exhausted, handoff committed | `Phase: Failed`, `Succeeded=False`, `reason=LimitReached` |
+| `3` | Refused — the stage's own handoff records `Status: failed` | `Phase: Failed`, `Succeeded=False`, `reason=Refused` |
+
+Any non-zero exit stops a workflow.
 
 ---
 
@@ -148,6 +152,7 @@ The entry point requires **no specific skills** — it discovers and loads whate
 ```
 cmd/migration-harness/
 ├── main.go        CLI entry point (cobra, single "run" command)
+├── handoff.go     The stage's own verdict from .konveyor/handoff.md
 └── outcome.go     Outcome classification & termination log
 internal/
 ├── config/        Env-var & params.json configuration
