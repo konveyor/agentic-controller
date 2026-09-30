@@ -393,19 +393,19 @@ func TestPlanTaskRung(t *testing.T) {
 			name:  "progress against the budget",
 			cfg:   config.Config{Model: "m", MaxTurns: 40},
 			turns: 12,
-			want:  "Agent works its standing prompt (m, turn 12 of 40)",
+			want:  "Agent is working (m, turn 12 of 40)",
 		},
 		{
 			name:  "progress without a budget",
 			cfg:   config.Config{Model: "m"},
 			turns: 12,
-			want:  "Agent works its standing prompt (m, 12 turns)",
+			want:  "Agent is working (m, 12 turns)",
 		},
 		{
 			name:  "first turn without a budget",
 			cfg:   config.Config{},
 			turns: 1,
-			want:  "Agent works its standing prompt (1 turn)",
+			want:  "Agent is working (1 turn)",
 		},
 		{
 			name: "standalone run with instructions",
@@ -430,12 +430,12 @@ func TestPlanTaskRung(t *testing.T) {
 				Model:       "m",
 				AgentPrompt: "\n\n- You are a Java migration agent.",
 			},
-			want: `Agent works its standing prompt (m)`,
+			want: `Agent is working (m)`,
 		},
 		{
 			name: "no instructions on a workflow stage",
 			cfg:  config.Config{WorkflowStage: "1", WorkflowStageCount: "2", Model: "m", MaxTurns: 10},
-			want: `Stage 1 of 2 — agent works its standing prompt (m, up to 10 turns)`,
+			want: `Stage 1 of 2 — agent is working (m, up to 10 turns)`,
 		},
 		{
 			name: "hard-wrapped paragraph is joined before the cut",
@@ -455,12 +455,20 @@ func TestPlanTaskRung(t *testing.T) {
 		{
 			name: "no text, no model, no budget",
 			cfg:  config.Config{},
-			want: "Agent works its standing prompt",
+			want: "Agent is working",
+		},
+		{
+			name: "a cross-region Bedrock id is shown as the model it routes to",
+			cfg: config.Config{
+				Model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0", MaxTurns: 200,
+			},
+			turns: 17,
+			want:  "Agent is working (claude-sonnet-4-5-20250929, turn 17 of 200)",
 		},
 		{
 			name: "invalid stage metadata is ignored",
 			cfg:  config.Config{WorkflowStage: "5", WorkflowStageCount: "3", Model: "m"},
-			want: "Agent works its standing prompt (m)",
+			want: "Agent is working (m)",
 		},
 	}
 	for _, tt := range tests {
@@ -554,5 +562,34 @@ func TestPlanPrepRung(t *testing.T) {
 				t.Errorf("planPrepRung() =\n  %q\nwant\n  %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestModelDisplayName: the plan rung is the only place a viewer sees the
+// model while a run is going, so the routing envelope comes off but the
+// model's identity — name and snapshot date — must survive, and anything
+// that is not the dotted Bedrock shape must be left alone.
+func TestModelDisplayName(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		// Bedrock cross-region inference profiles.
+		{"us.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"},
+		{"eu.anthropic.claude-haiku-4-5-20251001-v1:0", "claude-haiku-4-5-20251001"},
+		{"apac.meta.llama3-1-70b-instruct-v1:0", "llama3-1-70b-instruct"},
+		{"us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"},
+		// Plain Bedrock ids: vendor namespace and version suffix go too.
+		{"anthropic.claude-3-5-sonnet-20241022-v2:0", "claude-3-5-sonnet-20241022"},
+		// A version in the model name is not a vendor namespace.
+		{"gemini-2.5-pro", "gemini-2.5-pro"},
+		{"gpt-4.1", "gpt-4.1"},
+		{"ai21.jamba-1-5-large-v1:0", "ai21.jamba-1-5-large"},
+		// Already plain, path-shaped, or empty: untouched.
+		{"claude-sonnet-4-5", "claude-sonnet-4-5"},
+		{"publishers/anthropic/models/claude-sonnet-4-5", "publishers/anthropic/models/claude-sonnet-4-5"},
+		{"", ""},
+		{"us.", "us."},
+	} {
+		if got := modelDisplayName(tt.in); got != tt.want {
+			t.Errorf("modelDisplayName(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
