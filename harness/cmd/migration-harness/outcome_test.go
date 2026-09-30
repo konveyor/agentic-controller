@@ -9,6 +9,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/konveyor/migration-harness/internal/git"
+
 	"github.com/konveyor/migration-harness/internal/acp"
 )
 
@@ -402,5 +404,85 @@ func TestProviderErrorSummary(t *testing.T) {
 		if got := providerErrorSummary(c.in); got != c.want {
 			t.Errorf("providerErrorSummary(%q) = %q, want %q", c.in[:min(len(c.in), 40)], got, c.want)
 		}
+	}
+}
+
+func TestGitWriteAccessErrorNoCredential(t *testing.T) {
+	cred := &git.Credentials{
+		RepoURL: "https://github.com/konveyor/migration-1790082780",
+		Branch:  "migration-1790082780",
+	}
+
+	got := gitWriteAccessError(cred).Error()
+	want := "git write access: no write access to https://github.com/konveyor/migration-1790082780 " +
+		"for branch migration-1790082780: the application has no source credential " +
+		"(attach a Source Control credential with push access to the application in the Hub)"
+	if got != want {
+		t.Errorf("stop reason =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestGitWriteAccessErrorCredentialCannotPush(t *testing.T) {
+	cred := &git.Credentials{
+		RepoURL:      "https://github.com/konveyor/migration-1790082780",
+		Branch:       "migration-1790082780",
+		IdentityName: "github-readonly",
+		Username:     "x-access-token",
+		Token:        "s3cret",
+	}
+
+	got := gitWriteAccessError(cred).Error()
+	want := "git write access: no write access to https://github.com/konveyor/migration-1790082780 " +
+		`with credential "github-readonly": the token can read but not push`
+	if got != want {
+		t.Errorf("stop reason =\n%q\nwant\n%q", got, want)
+	}
+	if strings.Contains(got, cred.Token) {
+		t.Error("the stop reason must name the identity, never its secret")
+	}
+}
+
+// The prefix is a contract with the UI (konveyor/tackle2-ui#3616): it has
+// to reach terminationData.stopReason intact, which means surviving
+// runStage's deferred blob writer and the kubelet-size trim inside it.
+func TestGitWriteAccessPrefixReachesTerminationLog(t *testing.T) {
+	cred := &git.Credentials{
+		RepoURL: "https://github.com/konveyor/migration-1790082780",
+		Branch:  "migration-1790082780",
+	}
+	err := gitWriteAccessError(cred)
+
+	// Exactly what runStage's deferred writer does for a setup failure
+	// that returns before any prompt outcome is recorded.
+	term := terminationBlob{ExitCode: 1, Outcome: outcomeFailed.String()}
+	if err != nil && term.StopReason == "" {
+		term.StopReason = err.Error()
+	}
+	path := filepath.Join(t.TempDir(), "termination-log")
+	writeTerminationLog(path, term)
+
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("read termination log: %v", readErr)
+	}
+	var got terminationBlob
+	if unmarshalErr := json.Unmarshal(data, &got); unmarshalErr != nil {
+		t.Fatalf("termination log is not valid JSON: %v (data: %s)", unmarshalErr, data)
+	}
+	if got.ExitCode != 1 || got.Outcome != outcomeFailed.String() {
+		t.Errorf("termination blob = %+v, want ExitCode=1, Outcome=%q", got, outcomeFailed.String())
+	}
+	if !strings.HasPrefix(got.StopReason, gitWriteAccessPrefix) {
+		t.Errorf("stopReason = %q, want it to start with %q", got.StopReason, gitWriteAccessPrefix)
+	}
+	if got.StopReason != err.Error() {
+		t.Errorf("stopReason = %q, want the pre-flight error preserved: %q", got.StopReason, err.Error())
+	}
+}
+
+func TestGitWriteAccessPrefixIsVerbatim(t *testing.T) {
+	// The UI keys off this literal; a reword silently breaks it.
+	if gitWriteAccessPrefix != "git write access:" {
+		t.Errorf("gitWriteAccessPrefix = %q, want %q", gitWriteAccessPrefix, "git write access:")
 	}
 }

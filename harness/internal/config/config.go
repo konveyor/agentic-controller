@@ -73,6 +73,14 @@ type Config struct {
 	// HARNESS_HITL_ASK=off wins over both.
 	HITLAsk bool
 
+	// GitWriteCheck: before the stage runs, the harness proves the
+	// resolved credential can actually push to the application's source
+	// repository and fails the run early when it cannot, instead of
+	// spending every turn and discovering it at the final push (#247).
+	// Default on; HARNESS_GIT_WRITE_CHECK=off is for setups that
+	// deliberately run against a repository they never push to.
+	GitWriteCheck bool
+
 	// Prompt context layers, composed by internal/prompt.
 	AgentPrompt       string
 	WorkflowGuide     string
@@ -196,6 +204,7 @@ func LoadFromEnv() (*Config, error) {
 	// a run (an unanswered question, ADR 0017), so it is opt-in.
 	cfg.HITLAsk = (cfg.Params.Execution.AskUser || envSwitchedOn("HARNESS_HITL_ASK")) &&
 		!envSwitchedOff("HARNESS_HITL_ASK")
+	cfg.GitWriteCheck = !envSwitchedOff("HARNESS_GIT_WRITE_CHECK")
 	if n, err := strconv.Atoi(os.Getenv("HARNESS_HITL_TIMEOUT_SECONDS")); err == nil && n > 0 {
 		// Ceiling: a single ask parking the run for hours isn't HITL,
 		// it's abandonment — the pod deadline should not be spent inside

@@ -43,6 +43,9 @@ AGENT_IMAGE="${AGENT_IMAGE:-quay.io/konveyor/agent-base:e2e}"
 EMULATOR_IMAGE="${EMULATOR_IMAGE:-docker.io/library/openai-emulator:e2e}"
 # The application the harness resolves and clones. Nothing is pushed: the run
 # changes no files, so HEAD stays at the base commit and the push is skipped.
+# The clone is anonymous, so the push pre-flight is switched off on each run
+# (HARNESS_GIT_WRITE_CHECK below) — it would otherwise refuse the run before
+# the turn this test is about ever reaches the model.
 APP_REPO="${APP_REPO:-https://github.com/konveyor-ecosystem/coolstore}"
 # Hub is installed by hack/install-konveyor.sh, from tackle2-operator's own
 # Helm chart. Nothing about its deployment is defined in this repo.
@@ -270,6 +273,7 @@ spec:
   - {name: HUB_BASE_URL,  value: "${HUB_BASE_URL}"}
   - {name: APP_ID,        value: "${APP_ID}"}
   - {name: TARGET_BRANCH, value: "rule-e2e-target"}
+  - {name: HARNESS_GIT_WRITE_CHECK, value: "off"}
 EOF
 }
 

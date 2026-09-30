@@ -38,6 +38,7 @@ func clearKonveyorEnv(t *testing.T) {
 		"HARNESS_HITL_STEER",
 		"HARNESS_HITL_ASK",
 		"HARNESS_HITL_TIMEOUT_SECONDS",
+		"HARNESS_GIT_WRITE_CHECK",
 		"KONVEYOR_GIT_AUTHOR_NAME",
 		"KONVEYOR_GIT_AUTHOR_EMAIL",
 	} {
@@ -574,5 +575,27 @@ func TestHITLAskIsOptIn(t *testing.T) {
 				t.Errorf("HITLAsk = %v, want %v", cfg.HITLAsk, tc.want)
 			}
 		})
+	}
+}
+
+func TestGitWriteCheckSwitch(t *testing.T) {
+	clearKonveyorEnv(t)
+	setRequiredEnv(t)
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if !cfg.GitWriteCheck {
+		t.Error("GitWriteCheck should default on: a run that cannot push must fail before it spends turns")
+	}
+
+	t.Setenv("HARNESS_GIT_WRITE_CHECK", " OFF ")
+	cfg, err = LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.GitWriteCheck {
+		t.Error("HARNESS_GIT_WRITE_CHECK=OFF (padded, uppercase) should disable the push pre-flight")
 	}
 }

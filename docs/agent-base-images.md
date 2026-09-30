@@ -219,6 +219,7 @@ to `off` only when the behavior is deliberately disabled:
 | --- | --- |
 | `HARNESS_ACP_TEE` | Disable the harness ACP tee |
 | `HARNESS_HITL_STEER` | Refuse viewer steer/cancel frames |
+| `HARNESS_GIT_WRITE_CHECK` | Skip the git write-access pre-flight before the stage runs |
 | `HARNESS_HITL_TIMEOUT_SECONDS` | Viewer wait timeout, capped at 600 seconds |
 
 `ask_user` is the exception — it is off unless the run opts in with
