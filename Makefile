@@ -59,6 +59,12 @@ generate-adr-index: ## Generate the ADR index and reconciliation table from ADR 
 verify-adr-index: ## Verify that generated ADR indexes match ADR front matter.
 	hack/generate-adr-index.sh --check
 
+DECK ?= docs/slides/demo-2026-09-30.md
+
+.PHONY: slides
+slides: ## Render a Marp deck to PDF. Override the source with DECK=<path>.
+	npx --yes @marp-team/marp-cli --theme docs/slides/konveyor-theme.css --allow-local-files "$(DECK)" -o "$(DECK:.md=.pdf)"
+
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...
