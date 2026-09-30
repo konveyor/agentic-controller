@@ -7,9 +7,10 @@ executing agent workloads via [Agent Sandbox](https://github.com/kubernetes-sigs
 ## Overview
 
 The controller follows the Tekton Task/TaskRun pattern: an **Agent**
-declares what is available (skills, gateways (provider/model combinations), container image,
-prompt, typed parameters) and an **AgentRun** supplies concrete values
-(gateway selection, parameter values, instructions) to trigger execution.
+declares what is available — skills, gateways (provider/model
+combinations), container image, prompt, typed parameters — and an
+**AgentRun** supplies concrete values (gateway selection, parameter
+values, instructions) to trigger execution.
 
 The controller is domain-agnostic. It does not call Hub, Backstage, or
 any inventory system. Parameter values are opaque — the controller
