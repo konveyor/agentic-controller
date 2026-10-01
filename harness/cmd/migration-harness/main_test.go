@@ -439,7 +439,11 @@ func TestPlanTaskRung(t *testing.T) {
 				Model: "gemini-2.5-pro", MaxTurns: 200,
 				StageInstructions: "## Remediate\n\nFix the findings from the assess stage.",
 			},
-			want: `Stage 2 of 3 — agent works the task: “Remediate” (gemini-2.5-pro, up to 170 turns)`,
+			// Both Track A changes land on this one line: the excerpt
+			// is the paragraph under the heading rather than the heading,
+			// and the budget is the runtime's native ceiling rather than
+			// the configured maximum.
+			want: `Stage 2 of 3 — agent works the task: “Fix the findings from the assess stage.” (gemini-2.5-pro, up to 170 turns)`,
 		},
 		{
 			name: "no instructions: the agent prompt is not quoted",
@@ -491,6 +495,82 @@ func TestPlanTaskRung(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := planTaskRung(&tt.cfg, nil, tt.turns); got != tt.want {
 				t.Errorf("planTaskRung() =\n  %q\nwant\n  %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskSummary(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "a heading is skipped for the paragraph under it",
+			text: "# Stage 2: CDI migration\n\nReplace every EJB session bean with a CDI equivalent.",
+			want: "Replace every EJB session bean with a CDI equivalent.",
+		},
+		{
+			name: "a labelled preamble is skipped",
+			text: "Context: the app is a JEE6 monolith on WildFly 10.\n\nPort it to Quarkus, module by module.",
+			want: "Port it to Quarkus, module by module.",
+		},
+		{
+			name: "heading then preamble then the work",
+			text: "## Remediate\n\nBackground: the assess stage found 50 insights.\n\nFix them, highest effort first.",
+			want: "Fix them, highest effort first.",
+		},
+		{
+			name: "a heading with nothing under it is still better than nothing",
+			text: "# Stage 2: CDI migration\n",
+			want: "Stage 2: CDI migration",
+		},
+		{
+			name: "a preamble with nothing after it is used as-is",
+			text: "Context: the app is a JEE6 monolith.",
+			want: "Context: the app is a JEE6 monolith.",
+		},
+		{
+			name: "the label word without a colon is ordinary prose",
+			text: "Context matters: pick the target that fits the app.\n\nSecond paragraph.",
+			want: "Context matters: pick the target that fits the app.",
+		},
+		{
+			name: "a heading run together with its text is one sentence, not a title",
+			text: "# Migrate the order service\nand keep the tests green.\n\nSecond paragraph.",
+			want: "Migrate the order service and keep the tests green.",
+		},
+		{
+			name: "hard-wrapped prose is joined, later paragraphs dropped",
+			text: "Migrate the coolstore services to\nQuarkus, one module at a time.\n\nNot this.",
+			want: "Migrate the coolstore services to Quarkus, one module at a time.",
+		},
+		{
+			name: "list markers are stripped from the opening line",
+			text: "- Replace the JMS listeners with SmallRye Reactive Messaging.",
+			want: "Replace the JMS listeners with SmallRye Reactive Messaging.",
+		},
+		{
+			name: "a rule line opens nothing",
+			text: "---\nMigrate the catalog service.",
+			want: "Migrate the catalog service.",
+		},
+		{
+			name: "blank",
+			text: "\n  \n",
+			want: "",
+		},
+		{
+			name: "the chosen paragraph is still cut to length",
+			text: "## Title\n\n" + strings.Repeat("word ", 40),
+			want: strings.TrimSpace(strings.Repeat("word ", 40)[:taskSummaryMaxLen-1]) + "…",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := taskSummary(tt.text); got != tt.want {
+				t.Errorf("taskSummary() =\n  %q\nwant\n  %q", got, tt.want)
 			}
 		})
 	}

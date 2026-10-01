@@ -897,31 +897,93 @@ func planTaskRung(cfg *config.Config, red *redactor, turnsUsed int) string {
 	return b.String()
 }
 
-// taskSummary returns the first paragraph of text as one line — the
-// lines up to the first blank one, joined with spaces, so hard-wrapped
+// taskSummaryPreambles are labels that open a framing paragraph rather
+// than the work. Stage instructions that begin "Context: the app is a
+// JEE6 monolith on WildFly 10" put the premise on the plan ladder and
+// never say what the agent was asked to do.
+var taskSummaryPreambles = map[string]bool{
+	"context":       true,
+	"background":    true,
+	"overview":      true,
+	"prerequisites": true,
+	"assumptions":   true,
+	"note":          true,
+	"notes":         true,
+}
+
+// taskSummary returns the paragraph of text that describes the work as
+// one line — the paragraph's lines joined with spaces, so hard-wrapped
 // YAML prose is not cut at its first wrap — stripped of leading Markdown
 // heading and list markers and cut to taskSummaryMaxLen runes with an
 // ellipsis. Empty when the text is blank.
+//
+// A lone Markdown heading ("## Remediate") and a labelled preamble
+// ("Context: …") are skipped in favour of the next paragraph: both are
+// common openings for stage instructions and both quote something other
+// than the task. When every paragraph is skippable the first one is used
+// anyway — a title says more than nothing.
 func taskSummary(text string) string {
-	var words []string
+	var (
+		summary  string // first paragraph that describes the work
+		fallback string // first paragraph of any kind
+		words    []string
+		lines    int
+		hashed   bool // the paragraph opened with a Markdown heading marker
+	)
+	// flush ends the current paragraph and offers it as the summary.
+	flush := func() {
+		if len(words) == 0 {
+			return
+		}
+		para := strings.Join(words, " ")
+		// A heading marker on a paragraph that runs to several lines is
+		// an oddly written sentence, not a title.
+		skip := (hashed && lines == 1) || isTaskSummaryPreamble(para)
+		words, lines = nil, 0
+		if fallback == "" {
+			fallback = para
+		}
+		if summary == "" && !skip {
+			summary = para
+		}
+	}
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
-		if len(words) == 0 {
-			line = strings.TrimSpace(strings.TrimLeft(line, "#*->"))
-		}
 		if line == "" {
-			if len(words) > 0 {
-				break
-			}
+			flush()
 			continue
 		}
+		if len(words) == 0 {
+			hashed = strings.HasPrefix(line, "#")
+			line = strings.TrimSpace(strings.TrimLeft(line, "#*->"))
+			if line == "" {
+				// A bare marker line ("---", "###") opens nothing.
+				continue
+			}
+		}
+		lines++
 		words = append(words, strings.Fields(line)...)
 	}
-	summary := strings.Join(words, " ")
+	flush()
+	if summary == "" {
+		summary = fallback
+	}
 	if r := []rune(summary); len(r) > taskSummaryMaxLen {
 		summary = strings.TrimSpace(string(r[:taskSummaryMaxLen-1])) + "…"
 	}
 	return summary
+}
+
+// isTaskSummaryPreamble reports whether a paragraph opens with one of
+// taskSummaryPreambles used as a label. The trailing colon is required:
+// "Context: the app is a monolith" is a label, "Context matters when
+// choosing a target" is the task talking.
+func isTaskSummaryPreamble(para string) bool {
+	first, _, _ := strings.Cut(para, " ")
+	if !strings.HasSuffix(first, ":") {
+		return false
+	}
+	return taskSummaryPreambles[strings.ToLower(strings.TrimSuffix(first, ":"))]
 }
 
 // fetchAndWriteAnalysis writes the application's analysis insights to
