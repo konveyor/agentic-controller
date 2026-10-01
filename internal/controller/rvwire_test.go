@@ -57,7 +57,7 @@ var _ = Describe("Update without a resourceVersion", func() {
 		c, err := client.New(&cfg, client.Options{Scheme: k8sClient.Scheme()})
 		Expect(err).NotTo(HaveOccurred())
 
-		key := types.NamespacedName{Name: "rv-wire", Namespace: "default"}
+		key := types.NamespacedName{Name: "rv-wire", Namespace: testNamespace}
 		build := func(v string) *corev1.ConfigMap {
 			return &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
@@ -93,7 +93,7 @@ var _ = Describe("Update without a resourceVersion", func() {
 	// verb needs a read first.
 	It("is the same for a merge patch", func() {
 		ctx := context.Background()
-		key := types.NamespacedName{Name: "rv-verbs", Namespace: "default"}
+		key := types.NamespacedName{Name: "rv-verbs", Namespace: testNamespace}
 		base := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
 			Data:       map[string]string{skillFileKey: "original"},

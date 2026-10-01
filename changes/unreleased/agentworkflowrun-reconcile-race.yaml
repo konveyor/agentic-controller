@@ -1,0 +1,5 @@
+kind: bugfix
+description: >
+  Preserve workflow stage state while a newly created AgentRun initializes its
+  status, preventing reconciliation races from marking the workflow run
+  failed before the child run reaches a valid phase.

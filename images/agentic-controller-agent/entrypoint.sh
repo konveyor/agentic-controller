@@ -38,5 +38,6 @@ sleep "${ACP_DELAY}"
 echo "ACP: listening on :4000"
 python3 -m http.server 4000 &
 server=$!
-trap 'kill "${server}" 2>/dev/null' TERM INT
+trap 'kill "${server}" 2>/dev/null || true' TERM INT
 wait "${server}"
+exit 0

@@ -1,0 +1,5 @@
+kind: enhancement
+description: >
+  Add deterministic controller idempotency tests and a Kubernetes E2E scenario
+  that verifies workflow reconciliation across a controller restart using a
+  dedicated test-only agent stub image.
