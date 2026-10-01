@@ -674,6 +674,51 @@ func TestHarnessStatusEmitAndReplay(t *testing.T) {
 	v.expect("live tool_call", func(f string) bool { return strings.Contains(f, "harness-push-1") })
 }
 
+// TestLateViewerLearnsHowTheRunEnded is the end-to-end form of the replay
+// guarantee: a viewer that attaches to a finished, busy run is told the
+// ladder and the outcome, not only the last handful of pushes. Nothing
+// covered the late-attach path before, which is how the outcome came to
+// depend on being the last thing emitted.
+func TestLateViewerLearnsHowTheRunEnded(t *testing.T) {
+	_, _, s := startTee(t, Config{})
+
+	s.EmitRunUpdate(map[string]any{
+		"sessionUpdate": "plan",
+		"entries": []map[string]any{
+			{"content": "Prepare workspace", "priority": "medium", "status": "completed"},
+			{"content": "Agent works the task", "priority": "medium", "status": "completed"},
+			{"content": "Push results to branch main", "priority": "medium", "status": "completed"},
+		},
+	})
+	s.EmitRunOutcome("stage succeeded — results pushed to branch main")
+	// A busy tail: far more push traffic than the ring can hold, all of
+	// it after the outcome.
+	for i := 0; i < 3*replayCap; i++ {
+		id := fmt.Sprintf("harness-push-%d", i)
+		s.EmitRunUpdate(map[string]any{
+			"sessionUpdate": "tool_call", "toolCallId": id,
+			"title": "git push to branch main (auto-commit watcher)",
+			"kind":  "execute", "status": "in_progress",
+		})
+		s.EmitRunUpdate(map[string]any{
+			"sessionUpdate": "tool_call_update", "toolCallId": id, "status": "completed",
+		})
+	}
+
+	v, err := dialViewer(t, s, testKey)
+	if err != nil {
+		t.Fatalf("viewer dial: %v", err)
+	}
+	plan := v.expect("replayed plan", func(f string) bool { return strings.Contains(f, `"sessionUpdate":"plan"`) })
+	if !strings.Contains(plan, "Push results to branch main") {
+		t.Fatalf("bad replayed plan frame: %s", plan)
+	}
+	outcome := v.expect("replayed outcome", func(f string) bool { return strings.Contains(f, "status_message") })
+	if !strings.Contains(outcome, "stage succeeded — results pushed to branch main") {
+		t.Fatalf("late viewer was not told how the run ended: %s", outcome)
+	}
+}
+
 func TestUpstreamDialCarriesHeaderNotURL(t *testing.T) {
 	g, _, s := startTee(t, Config{})
 
@@ -1127,5 +1172,82 @@ func TestReplayKeepsOnlyLatestPlan(t *testing.T) {
 	}
 	if !strings.Contains(string(replay[len(replay)-1]), `"sessionUpdate":"plan"`) {
 		t.Errorf("latest plan should sit at the tail of the replay, got %s", replay[len(replay)-1])
+	}
+}
+
+// TestReplayKeepsOutcomeWhateverFollowsIt pins the guarantee a late viewer
+// depends on: the line saying how the stage ended is in the replay ring
+// however many frames arrive afterwards. Today the outcome reaches a late
+// viewer only because emitOutcome happens to be the last call in
+// runStage — emit anything after it and the ring would drop it. An
+// ordinary notice stays unkeyed and is still evictable.
+func TestReplayKeepsOutcomeWhateverFollowsIt(t *testing.T) {
+	s := New(Config{SecretKey: "k"})
+	s.runMu.Lock()
+	s.runSessionID = "run-1"
+	s.runMu.Unlock()
+
+	s.EmitRunNotice("stage running")
+	s.EmitRunOutcome("stage succeeded — results pushed to branch main")
+	s.EmitRunUpdate(map[string]any{
+		"sessionUpdate": "plan",
+		"entries":       []map[string]any{{"content": "x", "status": "completed"}},
+	})
+	// Far more than replayCap, all after the outcome.
+	for i := 0; i < 200; i++ {
+		s.EmitRunUpdate(map[string]any{
+			"sessionUpdate": "tool_call", "toolCallId": fmt.Sprintf("p%d", i), "title": "git push",
+		})
+	}
+
+	s.mu.Lock()
+	replay := append([][]byte(nil), s.replay...)
+	s.mu.Unlock()
+
+	if len(replay) != replayCap {
+		t.Fatalf("replay holds %d frames, want %d", len(replay), replayCap)
+	}
+	outcomes, plans, notices := 0, 0, 0
+	for _, f := range replay {
+		switch {
+		case strings.Contains(string(f), "stage succeeded — results pushed to branch main"):
+			outcomes++
+		case strings.Contains(string(f), `"sessionUpdate":"plan"`):
+			plans++
+		case strings.Contains(string(f), "stage running"):
+			notices++
+		}
+	}
+	if outcomes != 1 {
+		t.Errorf("replay holds %d outcome frames, want 1 — a late viewer is not told how the run ended", outcomes)
+	}
+	if plans != 1 {
+		t.Errorf("replay holds %d plan frames, want 1", plans)
+	}
+	if notices != 0 {
+		t.Errorf("unkeyed notice survived %d evictions, want it evicted", notices)
+	}
+}
+
+// TestReplayKeepsOnlyLatestOutcome: a second outcome supersedes the first
+// rather than leaving two contradictory endings in the ring.
+func TestReplayKeepsOnlyLatestOutcome(t *testing.T) {
+	s := New(Config{SecretKey: "k"})
+	s.runMu.Lock()
+	s.runSessionID = "run-1"
+	s.runMu.Unlock()
+
+	s.EmitRunOutcome("stage succeeded — no changes to push")
+	s.EmitRunOutcome("stage failed — final push error: boom")
+
+	s.mu.Lock()
+	replay := append([][]byte(nil), s.replay...)
+	s.mu.Unlock()
+
+	if len(replay) != 1 {
+		t.Fatalf("replay holds %d frames, want 1", len(replay))
+	}
+	if !strings.Contains(string(replay[0]), "final push error") {
+		t.Errorf("replayed outcome is not the latest: %s", replay[0])
 	}
 }

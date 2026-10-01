@@ -1,0 +1,8 @@
+kind: bugfix
+
+description: >
+  Keep the stage outcome and the plan ladder in the harness tee's replay ring
+  regardless of what is emitted after them. The outcome notice is now a keyed
+  replay frame, and the ring evicts the oldest unkeyed frame rather than the
+  oldest frame, so a viewer attaching late is told how the run ended instead of
+  seeing only recent git pushes.
