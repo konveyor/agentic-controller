@@ -835,8 +835,10 @@ const taskSummaryMaxLen = 80
 //
 // turnsUsed is the run's turn count so far: zero before the prompt is
 // sent ("up to N turns"), then "turn 12 of N" as the ladder is re-emitted
-// per turn. N is the configured budget; the runtime's native ceiling
-// sits at ReserveFraction of it, with the rest kept for the handoff.
+// per turn. N is the runtime's native ceiling — ReserveFraction of the
+// configured budget — because that is where the prompt actually stops;
+// the configured budget only becomes the denominator once the wind-down
+// handoff starts spending the reserve.
 func planTaskRung(cfg *config.Config, red *redactor, turnsUsed int) string {
 	var b strings.Builder
 	// Redact the whole text BEFORE the excerpt is cut: exact-match
@@ -857,16 +859,29 @@ func planTaskRung(cfg *config.Config, red *redactor, turnsUsed int) string {
 	default:
 		b.WriteString("Agent works its standing prompt")
 	}
+	// The ceiling shown is the runtime's native per-prompt limit, not the
+	// configured budget: the prompt stops at NativeTurnLimit(maxTurns) and
+	// the remainder is reserved for the wind-down handoff (ADR 0011). At
+	// the default 200 the rung used to read "turn 170 of 200" as the run
+	// ended, promising 30 turns it was never going to take.
+	ceiling := params.NativeTurnLimit(cfg.MaxTurns)
+	if turnsUsed > ceiling {
+		// Past the native ceiling the handoff prompt is spending the
+		// reserve, so the configured budget is the honest denominator.
+		ceiling = cfg.MaxTurns
+	}
 	var budget string
 	switch {
-	case turnsUsed > 0 && cfg.MaxTurns > 0:
-		budget = fmt.Sprintf("turn %d of %d", turnsUsed, cfg.MaxTurns)
+	case turnsUsed > 0 && ceiling > 0:
+		budget = fmt.Sprintf("turn %d of %d", turnsUsed, ceiling)
 	case turnsUsed == 1:
 		budget = "1 turn"
 	case turnsUsed > 1:
 		budget = fmt.Sprintf("%d turns", turnsUsed)
-	case cfg.MaxTurns > 0:
-		budget = fmt.Sprintf("up to %d turns", cfg.MaxTurns)
+	case ceiling == 1:
+		budget = "up to 1 turn"
+	case ceiling > 0:
+		budget = fmt.Sprintf("up to %d turns", ceiling)
 	}
 	if cfg.Model != "" || budget != "" {
 		b.WriteString(" (")

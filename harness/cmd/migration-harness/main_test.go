@@ -390,10 +390,27 @@ func TestPlanTaskRung(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "progress against the budget",
+			// 40 configured, 34 native — the prompt stops at 34 and the
+			// rest is the wind-down reserve, so 34 is what a viewer is told.
+			name:  "progress against the native ceiling, not the configured budget",
 			cfg:   config.Config{Model: "m", MaxTurns: 40},
 			turns: 12,
-			want:  "Agent works its standing prompt (m, turn 12 of 40)",
+			want:  "Agent works its standing prompt (m, turn 12 of 34)",
+		},
+		{
+			name:  "the last turn of the prompt reads as the last turn",
+			cfg:   config.Config{Model: "m", MaxTurns: 200},
+			turns: 170,
+			want:  "Agent works its standing prompt (m, turn 170 of 170)",
+		},
+		{
+			// Once the handoff prompt spends the reserve, turnsUsed passes
+			// the native ceiling; the configured budget is then the only
+			// denominator that is not already behind us.
+			name:  "wind-down past the native ceiling falls back to the configured budget",
+			cfg:   config.Config{Model: "m", MaxTurns: 200},
+			turns: 178,
+			want:  "Agent works its standing prompt (m, turn 178 of 200)",
 		},
 		{
 			name:  "progress without a budget",
@@ -413,7 +430,7 @@ func TestPlanTaskRung(t *testing.T) {
 				Model: "claude-sonnet-4-5", MaxTurns: 40,
 				StageInstructions: "Assess the coolstore repository for Quarkus migration.\nList blockers.",
 			},
-			want: `Agent works the task: “Assess the coolstore repository for Quarkus migration. List blockers.” (claude-sonnet-4-5, up to 40 turns)`,
+			want: `Agent works the task: “Assess the coolstore repository for Quarkus migration. List blockers.” (claude-sonnet-4-5, up to 34 turns)`,
 		},
 		{
 			name: "workflow stage prefix",
@@ -422,7 +439,7 @@ func TestPlanTaskRung(t *testing.T) {
 				Model: "gemini-2.5-pro", MaxTurns: 200,
 				StageInstructions: "## Remediate\n\nFix the findings from the assess stage.",
 			},
-			want: `Stage 2 of 3 — agent works the task: “Remediate” (gemini-2.5-pro, up to 200 turns)`,
+			want: `Stage 2 of 3 — agent works the task: “Remediate” (gemini-2.5-pro, up to 170 turns)`,
 		},
 		{
 			name: "no instructions: the agent prompt is not quoted",
@@ -435,7 +452,14 @@ func TestPlanTaskRung(t *testing.T) {
 		{
 			name: "no instructions on a workflow stage",
 			cfg:  config.Config{WorkflowStage: "1", WorkflowStageCount: "2", Model: "m", MaxTurns: 10},
-			want: `Stage 1 of 2 — agent works its standing prompt (m, up to 10 turns)`,
+			want: `Stage 1 of 2 — agent works its standing prompt (m, up to 8 turns)`,
+		},
+		{
+			// NativeTurnLimit floors at 1, so a one-turn budget does not
+			// render as "up to 0 turns".
+			name: "a one-turn budget keeps its turn",
+			cfg:  config.Config{Model: "m", MaxTurns: 1},
+			want: `Agent works its standing prompt (m, up to 1 turn)`,
 		},
 		{
 			name: "hard-wrapped paragraph is joined before the cut",

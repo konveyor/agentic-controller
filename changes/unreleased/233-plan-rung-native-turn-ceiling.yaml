@@ -1,0 +1,8 @@
+kind: bugfix
+
+description: >
+  The plan ladder's turn counter now reports the runtime's native ceiling
+  instead of the configured maxTurns, so a default run reads "turn 170 of 170"
+  at the end rather than "turn 170 of 200" — a viewer is no longer promised
+  turns the prompt reserves for its wind-down handoff. Once the handoff is
+  spending that reserve the configured budget becomes the denominator again.
