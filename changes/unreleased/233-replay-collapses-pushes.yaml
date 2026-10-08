@@ -1,0 +1,8 @@
+kind: bugfix
+
+description: >
+  Collapse the harness tee's repeated git-push frames in the replay ring. The
+  auto-commit watcher pushes dozens of times in a long run, two frames each,
+  which used to crowd everything else out of a late viewer's catch-up. Only the
+  most recent push is kept — both its tool call and its result, so the console
+  can still pair them — leaving room for the plan ladder and the stage outcome.

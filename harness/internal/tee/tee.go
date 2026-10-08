@@ -90,6 +90,25 @@ const (
 	replayKeyPlan    = "plan"
 	replayKeyOutcome = "outcome"
 
+	// replayKeyPush / replayKeyPushUpdate key the auto-commit watcher's
+	// git pushes. A push is two frames — the tool call and its result —
+	// and a run makes dozens, which is the single biggest source of
+	// replay traffic. Only the most recent push tells a late viewer
+	// anything ("it is still pushing, and the last one worked"), so the
+	// two frames get a slot each and every earlier push is superseded.
+	//
+	// Two keys rather than one because the pair must survive together:
+	// the console looks up a tool_call_update by toolCallId and drops it
+	// when the opening tool_call is not in its list, so keeping only the
+	// result would make the push vanish from the catch-up entirely.
+	replayKeyPush       = "push"
+	replayKeyPushUpdate = "push/update"
+
+	// harnessPushPrefix marks the toolCallIds the harness mints for its
+	// own git pushes (harness-push-<n>), as opposed to the agent's tool
+	// calls, which pass through the tee untouched and are never replayed.
+	harnessPushPrefix = "harness-push-"
+
 	// relayTimeout bounds a viewer request relayed onto the run
 	// connection (steer). goose answers these immediately — steer only
 	// queues a message — so a slow answer means a broken run connection.
@@ -342,12 +361,27 @@ func (s *Server) EmitRunUpdate(update any) {
 
 // replayKeyFor returns the replay-ring key for a harness update:
 // replayKeyPlan for a plan ladder (each carries the whole ladder, so only
-// the latest is worth replaying), empty for everything else.
+// the latest is worth replaying), replayKeyPush / replayKeyPushUpdate for
+// the harness's own git pushes (only the most recent one is news), empty
+// for everything else.
 func replayKeyFor(update any) string {
-	if m, ok := update.(map[string]any); ok {
-		if kind, _ := m["sessionUpdate"].(string); kind == replayKeyPlan {
-			return kind
+	m, ok := update.(map[string]any)
+	if !ok {
+		return ""
+	}
+	kind, _ := m["sessionUpdate"].(string)
+	switch kind {
+	case replayKeyPlan:
+		return kind
+	case "tool_call", "tool_call_update":
+		id, _ := m["toolCallId"].(string)
+		if !strings.HasPrefix(id, harnessPushPrefix) {
+			return ""
 		}
+		if kind == "tool_call" {
+			return replayKeyPush
+		}
+		return replayKeyPushUpdate
 	}
 	return ""
 }
