@@ -1,0 +1,9 @@
+kind: bugfix
+
+description: >
+  Pace the harness plan ladder's per-turn refresh instead of re-broadcasting the
+  whole ladder on every turn. A long run now emits roughly twenty ladder updates
+  across its turn budget — the first turn, a fixed stride through the middle, and
+  the end of the budget — rather than one per turn fanned out to every attached
+  viewer. The ladder emitted when the stage finishes still carries the exact
+  final turn count.
