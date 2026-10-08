@@ -355,6 +355,13 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// turnsSeen is the run's turn count so far across the primary prompt
 	// and the handoff; the task rung re-renders with it on every turn.
 	var turnsSeen atomic.Int64
+	// pushesLanded counts the pushes that actually reached the remote,
+	// and commitsPushed the commits they carried — the two numbers the
+	// bottom rung reports. commitsPushed stays -1 ("not counted yet")
+	// until the final push: counting it walks git history, which has no
+	// business running on the per-turn ladder path.
+	var pushesLanded, commitsPushed atomic.Int64
+	commitsPushed.Store(-1)
 	emitPlan := func(prep, agentRun, finish string) {
 		if teeSrv == nil {
 			return
@@ -367,21 +374,30 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			"entries": []map[string]any{
 				entry(prepRung, prep),
 				entry(planTaskRung(cfg, red, int(turnsSeen.Load())), agentRun),
-				entry(fmt.Sprintf("Push results to branch %s", creds.Branch), finish),
+				entry(planPushRung(creds.Branch, int(pushesLanded.Load()), int(commitsPushed.Load()), finish == "completed"), finish),
 			},
 		})
 	}
 	var pushSeq atomic.Int64
 	emitPush := func(title string, fn func() (bool, error)) (bool, error) {
+		// A push that was skipped (no commits) or failed did not land,
+		// so only a true/nil answer counts towards the rung.
+		run := func() (bool, error) {
+			pushed, err := fn()
+			if pushed && err == nil {
+				pushesLanded.Add(1)
+			}
+			return pushed, err
+		}
 		if teeSrv == nil {
-			return fn()
+			return run()
 		}
 		id := fmt.Sprintf("harness-push-%d", pushSeq.Add(1))
 		teeSrv.EmitRunUpdate(map[string]any{
 			"sessionUpdate": "tool_call", "toolCallId": id, "title": title,
 			"kind": "execute", "status": "in_progress",
 		})
-		pushed, err := fn()
+		pushed, err := run()
 		status := "completed"
 		if err != nil {
 			status = "failed"
@@ -578,6 +594,14 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		// stage failed — surface it instead of the stale value.
 		term.StopReason = fmt.Sprintf("final push: %v", pushErr)
 		return 1, fmt.Errorf("final push: %w", pushErr)
+	}
+	// What the run produced, counted once now that the last commit is in:
+	// the closing rung says "pushed 7 commits to branch x" rather than
+	// repeating the instruction it was given at the start.
+	if n, err := git.CommitsSince(repo, baseSHA); err != nil {
+		logging.Warn("count commits for the plan ladder: %v — the rung omits the count", err)
+	} else {
+		commitsPushed.Store(int64(n))
 	}
 	emitPlan("completed", "completed", "completed")
 
@@ -804,6 +828,44 @@ func planPrepRung(repoURL, branch string, insightCount int, red *redactor) strin
 		fmt.Fprintf(&b, ", %d analysis insights", insightCount)
 	}
 	return b.String()
+}
+
+// planPushRung is the last rung of the plan ladder: where the run's work
+// goes, and — once any of it has gone there — how much. Before this the
+// rung read "Push results to branch x" from the first frame to the last,
+// so a viewer watching the auto-commit watcher push thirty times saw a
+// rung that never acknowledged a single one.
+//
+// pushes is how many pushes reached the remote so far. commits is how
+// many commits they carried, counted once at the end: -1 means not
+// counted (either too early to know, or the count failed), which is why
+// the finished rung can still fall back to saying only that it pushed.
+func planPushRung(branch string, pushes, commits int, done bool) string {
+	where := "branch " + branch
+	if branch == "" {
+		where = "the run branch"
+	}
+	if !done {
+		switch {
+		case pushes == 1:
+			return fmt.Sprintf("Push results to %s — 1 push so far", where)
+		case pushes > 1:
+			return fmt.Sprintf("Push results to %s — %d pushes so far", where, pushes)
+		default:
+			return fmt.Sprintf("Push results to %s", where)
+		}
+	}
+	switch {
+	case commits == 1:
+		return fmt.Sprintf("Pushed 1 commit to %s", where)
+	case commits > 1:
+		return fmt.Sprintf("Pushed %d commits to %s", commits, where)
+	case commits == 0 || pushes == 0:
+		// Nothing landed: say so rather than implying the branch moved.
+		return fmt.Sprintf("No changes to push to %s", where)
+	default:
+		return fmt.Sprintf("Pushed results to %s", where)
+	}
 }
 
 // repoDisplayName reduces a clone URL to host and path for a viewer:

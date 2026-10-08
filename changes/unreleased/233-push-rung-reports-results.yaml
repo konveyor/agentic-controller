@@ -1,0 +1,8 @@
+kind: bugfix
+
+description: >
+  Report real progress on the plan ladder's push rung. It used to read "Push
+  results to branch x" from the first frame to the last, even after the
+  auto-commit watcher had pushed dozens of times. It now counts the pushes that
+  reached the remote while the run is working, and closes with how many commits
+  the run produced — or says plainly that there were no changes to push.

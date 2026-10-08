@@ -660,3 +660,54 @@ func TestPlanPrepRung(t *testing.T) {
 		})
 	}
 }
+
+func TestPlanPushRung(t *testing.T) {
+	tests := []struct {
+		name    string
+		branch  string
+		pushes  int
+		commits int
+		done    bool
+		want    string
+	}{
+		{
+			name: "nothing pushed yet", branch: "migration-1", commits: -1,
+			want: "Push results to branch migration-1",
+		},
+		{
+			name: "one push landed", branch: "migration-1", pushes: 1, commits: -1,
+			want: "Push results to branch migration-1 — 1 push so far",
+		},
+		{
+			name: "the watcher has been busy", branch: "migration-1", pushes: 17, commits: -1,
+			want: "Push results to branch migration-1 — 17 pushes so far",
+		},
+		{
+			name: "finished with a count", branch: "migration-1", pushes: 4, commits: 7, done: true,
+			want: "Pushed 7 commits to branch migration-1",
+		},
+		{
+			name: "finished with one commit", branch: "migration-1", pushes: 1, commits: 1, done: true,
+			want: "Pushed 1 commit to branch migration-1",
+		},
+		{
+			name: "finished having produced nothing", branch: "migration-1", commits: 0, done: true,
+			want: "No changes to push to branch migration-1",
+		},
+		{
+			name: "finished but the count is unknown", branch: "migration-1", pushes: 2, commits: -1, done: true,
+			want: "Pushed results to branch migration-1",
+		},
+		{
+			name: "no branch name to show", pushes: 1, commits: 2, done: true,
+			want: "Pushed 2 commits to the run branch",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := planPushRung(tt.branch, tt.pushes, tt.commits, tt.done); got != tt.want {
+				t.Errorf("planPushRung() =\n  %q\nwant\n  %q", got, tt.want)
+			}
+		})
+	}
+}
