@@ -355,6 +355,13 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// turnsSeen is the run's turn count so far across the primary prompt
 	// and the handoff; the task rung re-renders with it on every turn.
 	var turnsSeen atomic.Int64
+	// pushesLanded counts the pushes that actually reached the remote,
+	// and commitsPushed the commits they carried — the two numbers the
+	// bottom rung reports. commitsPushed stays -1 ("not counted yet")
+	// until the final push: counting it walks git history, which has no
+	// business running on the per-turn ladder path.
+	var pushesLanded, commitsPushed atomic.Int64
+	commitsPushed.Store(-1)
 	emitPlan := func(prep, agentRun, finish string) {
 		if teeSrv == nil {
 			return
@@ -367,21 +374,30 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			"entries": []map[string]any{
 				entry(prepRung, prep),
 				entry(planTaskRung(cfg, red, int(turnsSeen.Load())), agentRun),
-				entry(fmt.Sprintf("Push results to branch %s", creds.Branch), finish),
+				entry(planPushRung(creds.Branch, int(pushesLanded.Load()), int(commitsPushed.Load()), finish == "completed"), finish),
 			},
 		})
 	}
 	var pushSeq atomic.Int64
 	emitPush := func(title string, fn func() (bool, error)) (bool, error) {
+		// A push that was skipped (no commits) or failed did not land,
+		// so only a true/nil answer counts towards the rung.
+		run := func() (bool, error) {
+			pushed, err := fn()
+			if pushed && err == nil {
+				pushesLanded.Add(1)
+			}
+			return pushed, err
+		}
 		if teeSrv == nil {
-			return fn()
+			return run()
 		}
 		id := fmt.Sprintf("harness-push-%d", pushSeq.Add(1))
 		teeSrv.EmitRunUpdate(map[string]any{
 			"sessionUpdate": "tool_call", "toolCallId": id, "title": title,
 			"kind": "execute", "status": "in_progress",
 		})
-		pushed, err := fn()
+		pushed, err := run()
 		status := "completed"
 		if err != nil {
 			status = "failed"
@@ -578,6 +594,14 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		// stage failed — surface it instead of the stale value.
 		term.StopReason = fmt.Sprintf("final push: %v", pushErr)
 		return 1, fmt.Errorf("final push: %w", pushErr)
+	}
+	// What the run produced, counted once now that the last commit is in:
+	// the closing rung says "pushed 7 commits to branch x" rather than
+	// repeating the instruction it was given at the start.
+	if n, err := git.CommitsSince(repo, baseSHA); err != nil {
+		logging.Warn("count commits for the plan ladder: %v — the rung omits the count", err)
+	} else {
+		commitsPushed.Store(int64(n))
 	}
 	emitPlan("completed", "completed", "completed")
 
@@ -806,6 +830,44 @@ func planPrepRung(repoURL, branch string, insightCount int, red *redactor) strin
 	return b.String()
 }
 
+// planPushRung is the last rung of the plan ladder: where the run's work
+// goes, and — once any of it has gone there — how much. Before this the
+// rung read "Push results to branch x" from the first frame to the last,
+// so a viewer watching the auto-commit watcher push thirty times saw a
+// rung that never acknowledged a single one.
+//
+// pushes is how many pushes reached the remote so far. commits is how
+// many commits they carried, counted once at the end: -1 means not
+// counted (either too early to know, or the count failed), which is why
+// the finished rung can still fall back to saying only that it pushed.
+func planPushRung(branch string, pushes, commits int, done bool) string {
+	where := "branch " + branch
+	if branch == "" {
+		where = "the run branch"
+	}
+	if !done {
+		switch {
+		case pushes == 1:
+			return fmt.Sprintf("Push results to %s — 1 push so far", where)
+		case pushes > 1:
+			return fmt.Sprintf("Push results to %s — %d pushes so far", where, pushes)
+		default:
+			return fmt.Sprintf("Push results to %s", where)
+		}
+	}
+	switch {
+	case commits == 1:
+		return fmt.Sprintf("Pushed 1 commit to %s", where)
+	case commits > 1:
+		return fmt.Sprintf("Pushed %d commits to %s", commits, where)
+	case commits == 0 || pushes == 0:
+		// Nothing landed: say so rather than implying the branch moved.
+		return fmt.Sprintf("No changes to push to %s", where)
+	default:
+		return fmt.Sprintf("Pushed results to %s", where)
+	}
+}
+
 // repoDisplayName reduces a clone URL to host and path for a viewer:
 // scheme, embedded credentials and a trailing .git dropped. Empty when
 // the URL is empty or does not parse.
@@ -835,8 +897,10 @@ const taskSummaryMaxLen = 80
 //
 // turnsUsed is the run's turn count so far: zero before the prompt is
 // sent ("up to N turns"), then "turn 12 of N" as the ladder is re-emitted
-// per turn. N is the configured budget; the runtime's native ceiling
-// sits at ReserveFraction of it, with the rest kept for the handoff.
+// per turn. N is the runtime's native ceiling — ReserveFraction of the
+// configured budget — because that is where the prompt actually stops;
+// the configured budget only becomes the denominator once the wind-down
+// handoff starts spending the reserve.
 func planTaskRung(cfg *config.Config, red *redactor, turnsUsed int) string {
 	var b strings.Builder
 	// Redact the whole text BEFORE the excerpt is cut: exact-match
@@ -857,16 +921,29 @@ func planTaskRung(cfg *config.Config, red *redactor, turnsUsed int) string {
 	default:
 		b.WriteString("Agent works its standing prompt")
 	}
+	// The ceiling shown is the runtime's native per-prompt limit, not the
+	// configured budget: the prompt stops at NativeTurnLimit(maxTurns) and
+	// the remainder is reserved for the wind-down handoff (ADR 0011). At
+	// the default 200 the rung used to read "turn 170 of 200" as the run
+	// ended, promising 30 turns it was never going to take.
+	ceiling := params.NativeTurnLimit(cfg.MaxTurns)
+	if turnsUsed > ceiling {
+		// Past the native ceiling the handoff prompt is spending the
+		// reserve, so the configured budget is the honest denominator.
+		ceiling = cfg.MaxTurns
+	}
 	var budget string
 	switch {
-	case turnsUsed > 0 && cfg.MaxTurns > 0:
-		budget = fmt.Sprintf("turn %d of %d", turnsUsed, cfg.MaxTurns)
+	case turnsUsed > 0 && ceiling > 0:
+		budget = fmt.Sprintf("turn %d of %d", turnsUsed, ceiling)
 	case turnsUsed == 1:
 		budget = "1 turn"
 	case turnsUsed > 1:
 		budget = fmt.Sprintf("%d turns", turnsUsed)
-	case cfg.MaxTurns > 0:
-		budget = fmt.Sprintf("up to %d turns", cfg.MaxTurns)
+	case ceiling == 1:
+		budget = "up to 1 turn"
+	case ceiling > 0:
+		budget = fmt.Sprintf("up to %d turns", ceiling)
 	}
 	if cfg.Model != "" || budget != "" {
 		b.WriteString(" (")
@@ -882,31 +959,93 @@ func planTaskRung(cfg *config.Config, red *redactor, turnsUsed int) string {
 	return b.String()
 }
 
-// taskSummary returns the first paragraph of text as one line — the
-// lines up to the first blank one, joined with spaces, so hard-wrapped
+// taskSummaryPreambles are labels that open a framing paragraph rather
+// than the work. Stage instructions that begin "Context: the app is a
+// JEE6 monolith on WildFly 10" put the premise on the plan ladder and
+// never say what the agent was asked to do.
+var taskSummaryPreambles = map[string]bool{
+	"context":       true,
+	"background":    true,
+	"overview":      true,
+	"prerequisites": true,
+	"assumptions":   true,
+	"note":          true,
+	"notes":         true,
+}
+
+// taskSummary returns the paragraph of text that describes the work as
+// one line — the paragraph's lines joined with spaces, so hard-wrapped
 // YAML prose is not cut at its first wrap — stripped of leading Markdown
 // heading and list markers and cut to taskSummaryMaxLen runes with an
 // ellipsis. Empty when the text is blank.
+//
+// A lone Markdown heading ("## Remediate") and a labelled preamble
+// ("Context: …") are skipped in favour of the next paragraph: both are
+// common openings for stage instructions and both quote something other
+// than the task. When every paragraph is skippable the first one is used
+// anyway — a title says more than nothing.
 func taskSummary(text string) string {
-	var words []string
+	var (
+		summary  string // first paragraph that describes the work
+		fallback string // first paragraph of any kind
+		words    []string
+		lines    int
+		hashed   bool // the paragraph opened with a Markdown heading marker
+	)
+	// flush ends the current paragraph and offers it as the summary.
+	flush := func() {
+		if len(words) == 0 {
+			return
+		}
+		para := strings.Join(words, " ")
+		// A heading marker on a paragraph that runs to several lines is
+		// an oddly written sentence, not a title.
+		skip := (hashed && lines == 1) || isTaskSummaryPreamble(para)
+		words, lines = nil, 0
+		if fallback == "" {
+			fallback = para
+		}
+		if summary == "" && !skip {
+			summary = para
+		}
+	}
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
-		if len(words) == 0 {
-			line = strings.TrimSpace(strings.TrimLeft(line, "#*->"))
-		}
 		if line == "" {
-			if len(words) > 0 {
-				break
-			}
+			flush()
 			continue
 		}
+		if len(words) == 0 {
+			hashed = strings.HasPrefix(line, "#")
+			line = strings.TrimSpace(strings.TrimLeft(line, "#*->"))
+			if line == "" {
+				// A bare marker line ("---", "###") opens nothing.
+				continue
+			}
+		}
+		lines++
 		words = append(words, strings.Fields(line)...)
 	}
-	summary := strings.Join(words, " ")
+	flush()
+	if summary == "" {
+		summary = fallback
+	}
 	if r := []rune(summary); len(r) > taskSummaryMaxLen {
 		summary = strings.TrimSpace(string(r[:taskSummaryMaxLen-1])) + "…"
 	}
 	return summary
+}
+
+// isTaskSummaryPreamble reports whether a paragraph opens with one of
+// taskSummaryPreambles used as a label. The trailing colon is required:
+// "Context: the app is a monolith" is a label, "Context matters when
+// choosing a target" is the task talking.
+func isTaskSummaryPreamble(para string) bool {
+	first, _, _ := strings.Cut(para, " ")
+	if !strings.HasSuffix(first, ":") {
+		return false
+	}
+	return taskSummaryPreambles[strings.ToLower(strings.TrimSuffix(first, ":"))]
 }
 
 // fetchAndWriteAnalysis writes the application's analysis insights to

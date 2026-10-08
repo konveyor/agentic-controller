@@ -390,10 +390,27 @@ func TestPlanTaskRung(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "progress against the budget",
+			// 40 configured, 34 native — the prompt stops at 34 and the
+			// rest is the wind-down reserve, so 34 is what a viewer is told.
+			name:  "progress against the native ceiling, not the configured budget",
 			cfg:   config.Config{Model: "m", MaxTurns: 40},
 			turns: 12,
-			want:  "Agent works its standing prompt (m, turn 12 of 40)",
+			want:  "Agent works its standing prompt (m, turn 12 of 34)",
+		},
+		{
+			name:  "the last turn of the prompt reads as the last turn",
+			cfg:   config.Config{Model: "m", MaxTurns: 200},
+			turns: 170,
+			want:  "Agent works its standing prompt (m, turn 170 of 170)",
+		},
+		{
+			// Once the handoff prompt spends the reserve, turnsUsed passes
+			// the native ceiling; the configured budget is then the only
+			// denominator that is not already behind us.
+			name:  "wind-down past the native ceiling falls back to the configured budget",
+			cfg:   config.Config{Model: "m", MaxTurns: 200},
+			turns: 178,
+			want:  "Agent works its standing prompt (m, turn 178 of 200)",
 		},
 		{
 			name:  "progress without a budget",
@@ -413,7 +430,7 @@ func TestPlanTaskRung(t *testing.T) {
 				Model: "claude-sonnet-4-5", MaxTurns: 40,
 				StageInstructions: "Assess the coolstore repository for Quarkus migration.\nList blockers.",
 			},
-			want: `Agent works the task: “Assess the coolstore repository for Quarkus migration. List blockers.” (claude-sonnet-4-5, up to 40 turns)`,
+			want: `Agent works the task: “Assess the coolstore repository for Quarkus migration. List blockers.” (claude-sonnet-4-5, up to 34 turns)`,
 		},
 		{
 			name: "workflow stage prefix",
@@ -422,7 +439,11 @@ func TestPlanTaskRung(t *testing.T) {
 				Model: "gemini-2.5-pro", MaxTurns: 200,
 				StageInstructions: "## Remediate\n\nFix the findings from the assess stage.",
 			},
-			want: `Stage 2 of 3 — agent works the task: “Remediate” (gemini-2.5-pro, up to 200 turns)`,
+			// Both Track A changes land on this one line: the excerpt
+			// is the paragraph under the heading rather than the heading,
+			// and the budget is the runtime's native ceiling rather than
+			// the configured maximum.
+			want: `Stage 2 of 3 — agent works the task: “Fix the findings from the assess stage.” (gemini-2.5-pro, up to 170 turns)`,
 		},
 		{
 			name: "no instructions: the agent prompt is not quoted",
@@ -435,7 +456,14 @@ func TestPlanTaskRung(t *testing.T) {
 		{
 			name: "no instructions on a workflow stage",
 			cfg:  config.Config{WorkflowStage: "1", WorkflowStageCount: "2", Model: "m", MaxTurns: 10},
-			want: `Stage 1 of 2 — agent works its standing prompt (m, up to 10 turns)`,
+			want: `Stage 1 of 2 — agent works its standing prompt (m, up to 8 turns)`,
+		},
+		{
+			// NativeTurnLimit floors at 1, so a one-turn budget does not
+			// render as "up to 0 turns".
+			name: "a one-turn budget keeps its turn",
+			cfg:  config.Config{Model: "m", MaxTurns: 1},
+			want: `Agent works its standing prompt (m, up to 1 turn)`,
 		},
 		{
 			name: "hard-wrapped paragraph is joined before the cut",
@@ -467,6 +495,82 @@ func TestPlanTaskRung(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := planTaskRung(&tt.cfg, nil, tt.turns); got != tt.want {
 				t.Errorf("planTaskRung() =\n  %q\nwant\n  %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTaskSummary(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "a heading is skipped for the paragraph under it",
+			text: "# Stage 2: CDI migration\n\nReplace every EJB session bean with a CDI equivalent.",
+			want: "Replace every EJB session bean with a CDI equivalent.",
+		},
+		{
+			name: "a labelled preamble is skipped",
+			text: "Context: the app is a JEE6 monolith on WildFly 10.\n\nPort it to Quarkus, module by module.",
+			want: "Port it to Quarkus, module by module.",
+		},
+		{
+			name: "heading then preamble then the work",
+			text: "## Remediate\n\nBackground: the assess stage found 50 insights.\n\nFix them, highest effort first.",
+			want: "Fix them, highest effort first.",
+		},
+		{
+			name: "a heading with nothing under it is still better than nothing",
+			text: "# Stage 2: CDI migration\n",
+			want: "Stage 2: CDI migration",
+		},
+		{
+			name: "a preamble with nothing after it is used as-is",
+			text: "Context: the app is a JEE6 monolith.",
+			want: "Context: the app is a JEE6 monolith.",
+		},
+		{
+			name: "the label word without a colon is ordinary prose",
+			text: "Context matters: pick the target that fits the app.\n\nSecond paragraph.",
+			want: "Context matters: pick the target that fits the app.",
+		},
+		{
+			name: "a heading run together with its text is one sentence, not a title",
+			text: "# Migrate the order service\nand keep the tests green.\n\nSecond paragraph.",
+			want: "Migrate the order service and keep the tests green.",
+		},
+		{
+			name: "hard-wrapped prose is joined, later paragraphs dropped",
+			text: "Migrate the coolstore services to\nQuarkus, one module at a time.\n\nNot this.",
+			want: "Migrate the coolstore services to Quarkus, one module at a time.",
+		},
+		{
+			name: "list markers are stripped from the opening line",
+			text: "- Replace the JMS listeners with SmallRye Reactive Messaging.",
+			want: "Replace the JMS listeners with SmallRye Reactive Messaging.",
+		},
+		{
+			name: "a rule line opens nothing",
+			text: "---\nMigrate the catalog service.",
+			want: "Migrate the catalog service.",
+		},
+		{
+			name: "blank",
+			text: "\n  \n",
+			want: "",
+		},
+		{
+			name: "the chosen paragraph is still cut to length",
+			text: "## Title\n\n" + strings.Repeat("word ", 40),
+			want: strings.TrimSpace(strings.Repeat("word ", 40)[:taskSummaryMaxLen-1]) + "…",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := taskSummary(tt.text); got != tt.want {
+				t.Errorf("taskSummary() =\n  %q\nwant\n  %q", got, tt.want)
 			}
 		})
 	}
@@ -552,6 +656,57 @@ func TestPlanPrepRung(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := planPrepRung(tt.repoURL, tt.branch, tt.count, nil); got != tt.want {
 				t.Errorf("planPrepRung() =\n  %q\nwant\n  %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlanPushRung(t *testing.T) {
+	tests := []struct {
+		name    string
+		branch  string
+		pushes  int
+		commits int
+		done    bool
+		want    string
+	}{
+		{
+			name: "nothing pushed yet", branch: "migration-1", commits: -1,
+			want: "Push results to branch migration-1",
+		},
+		{
+			name: "one push landed", branch: "migration-1", pushes: 1, commits: -1,
+			want: "Push results to branch migration-1 — 1 push so far",
+		},
+		{
+			name: "the watcher has been busy", branch: "migration-1", pushes: 17, commits: -1,
+			want: "Push results to branch migration-1 — 17 pushes so far",
+		},
+		{
+			name: "finished with a count", branch: "migration-1", pushes: 4, commits: 7, done: true,
+			want: "Pushed 7 commits to branch migration-1",
+		},
+		{
+			name: "finished with one commit", branch: "migration-1", pushes: 1, commits: 1, done: true,
+			want: "Pushed 1 commit to branch migration-1",
+		},
+		{
+			name: "finished having produced nothing", branch: "migration-1", commits: 0, done: true,
+			want: "No changes to push to branch migration-1",
+		},
+		{
+			name: "finished but the count is unknown", branch: "migration-1", pushes: 2, commits: -1, done: true,
+			want: "Pushed results to branch migration-1",
+		},
+		{
+			name: "no branch name to show", pushes: 1, commits: 2, done: true,
+			want: "Pushed 2 commits to the run branch",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := planPushRung(tt.branch, tt.pushes, tt.commits, tt.done); got != tt.want {
+				t.Errorf("planPushRung() =\n  %q\nwant\n  %q", got, tt.want)
 			}
 		})
 	}

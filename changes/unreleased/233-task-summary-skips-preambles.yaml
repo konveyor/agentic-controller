@@ -1,0 +1,8 @@
+kind: enhancement
+
+description: >
+  The plan ladder's task excerpt now skips a leading Markdown heading or a
+  labelled preamble paragraph ("Context:", "Background:", ...) and quotes the
+  first paragraph that describes the work. Stage instructions that open with a
+  title or a premise used to put that on screen instead of the task. When every
+  paragraph is skippable the first one is still shown.

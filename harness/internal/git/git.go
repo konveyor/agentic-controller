@@ -146,6 +146,42 @@ func HeadSHA(repo *gogit.Repository) (string, error) {
 	return head.Hash().String(), nil
 }
 
+// CommitsSince counts the commits between baseSHA — the commit the run
+// started from — and HEAD, i.e. how much work this run actually
+// produced. It walks first-parent history from HEAD and stops at
+// baseSHA; a merge brought in from elsewhere therefore counts as one
+// commit, which is what a viewer reading "pushed 7 commits" means.
+//
+// An empty baseSHA means the starting point was never recorded, so
+// nothing can be counted and the result is -1, not 0 — the difference
+// between "no work" and "unknown" matters to the caller rendering it.
+// A baseSHA that is not an ancestor of HEAD (history rewritten under
+// the run) also yields -1 rather than the whole branch's length.
+func CommitsSince(repo *gogit.Repository, baseSHA string) (int, error) {
+	if baseSHA == "" {
+		return -1, nil
+	}
+	head, err := repo.Head()
+	if err != nil {
+		return -1, fmt.Errorf("resolve HEAD: %w", err)
+	}
+	base := plumbing.NewHash(baseSHA)
+	n := 0
+	for hash := head.Hash(); hash != base; {
+		commit, err := repo.CommitObject(hash)
+		if err != nil {
+			return -1, fmt.Errorf("walk history from %s: %w", hash, err)
+		}
+		n++
+		if commit.NumParents() == 0 {
+			// Walked to the root without meeting baseSHA.
+			return -1, nil
+		}
+		hash = commit.ParentHashes[0]
+	}
+	return n, nil
+}
+
 // Push updates refs/heads/<branch> on origin. baseSHA is the commit the
 // run started from (HEAD after clone/checkout): when HEAD still equals
 // it the run produced no commits and the push is skipped, so no-op runs

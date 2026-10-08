@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -474,5 +475,61 @@ func TestPushSkipsWhenStageAddsNoNewCommits(t *testing.T) {
 	}
 	if ref.Hash() != hash {
 		t.Errorf("remote hash = %s, want stage 1 tip %s", ref.Hash(), hash)
+	}
+}
+
+// TestCommitsSince counts what a run produced, which is what the plan
+// ladder's closing rung reports to viewers.
+func TestCommitsSince(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+
+	cred := &Credentials{
+		Username: "test",
+		Token:    "token",
+		RepoURL:  remoteDir,
+		Branch:   "migration-work",
+	}
+	cloneDir := filepath.Join(t.TempDir(), "work")
+	repo, err := Clone(context.Background(), cred, cloneDir)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if err := CheckoutBranch(repo, cred.Branch); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+	baseSHA, err := HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+
+	if n, err := CommitsSince(repo, baseSHA); err != nil || n != 0 {
+		t.Fatalf("CommitsSince before any work = %d, %v; want 0, nil", n, err)
+	}
+
+	wt, _ := repo.Worktree()
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("migrated%d.java", i)
+		os.WriteFile(filepath.Join(cloneDir, name), []byte("class Foo {}\n"), 0644)
+		wt.Add(name)
+		if _, err := wt.Commit("migrate: "+name, &gogit.CommitOptions{
+			Author: &object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+		}); err != nil {
+			t.Fatalf("commit %d: %v", i, err)
+		}
+	}
+
+	if n, err := CommitsSince(repo, baseSHA); err != nil || n != 3 {
+		t.Errorf("CommitsSince after 3 commits = %d, %v; want 3, nil", n, err)
+	}
+
+	// Unknown starting point and an unrelated base are both "cannot
+	// tell", never a count the rung would state as fact.
+	if n, err := CommitsSince(repo, ""); err != nil || n != -1 {
+		t.Errorf("CommitsSince with no base = %d, %v; want -1, nil", n, err)
+	}
+	stranger := plumbing.NewHash("0123456789012345678901234567890123456789").String()
+	if n, err := CommitsSince(repo, stranger); err != nil || n != -1 {
+		t.Errorf("CommitsSince with a base not in history = %d, %v; want -1, nil", n, err)
 	}
 }
