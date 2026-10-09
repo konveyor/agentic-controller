@@ -911,8 +911,8 @@ var bedrockVersionSuffix = regexp.MustCompile(`-v\d+:\d+$`)
 // in front of a model id to say which region group serves it.
 var geoPrefixes = []string{"us-gov.", "us.", "eu.", "apac."}
 
-// modelDisplayName strips the routing envelope a provider wraps around a
-// model id, leaving the part a viewer recognises: Bedrock's
+// modelDisplayName strips the routing envelope Bedrock wraps around a
+// model id, leaving the part a viewer recognises:
 // "us.anthropic.claude-sonnet-4-5-20250929-v1:0" becomes
 // "claude-sonnet-4-5-20250929". The plan rung is the only place a viewer
 // sees the model while a run is going, so this keeps identity — the name
@@ -920,22 +920,30 @@ var geoPrefixes = []string{"us-gov.", "us.", "eu.", "apac."}
 // namespace and the version suffix. The full id stays on the Gateway the
 // run named, and in the pod's KONVEYOR_LLM_MODEL.
 //
-// Anything that is not that dotted shape is returned untouched: a vendor
-// segment is only dropped when it is all letters, so "gemini-2.5-pro" and
-// "gpt-4.1" keep their versions, and a path-shaped ref (Vertex's
-// "publishers/anthropic/models/…") is left alone entirely.
+// Only an id Bedrock itself marked is touched: one carrying a cross-region
+// geo prefix or a "-vN:N" version suffix. Every other id is shown as the
+// run asked for it, because a dot is a vendor namespace nowhere else —
+// "gemini-2.5-pro" keeps its version, an OpenAI-compatible Gateway alias
+// like "migration.production" keeps its scope, and a path-shaped ref
+// (Vertex's "publishers/anthropic/models/…") is left alone entirely.
 func modelDisplayName(model string) string {
 	name := strings.TrimSpace(model)
 	if name == "" || strings.ContainsAny(name, "/ \t") {
 		return model
 	}
-	for _, geo := range geoPrefixes {
-		if rest, ok := strings.CutPrefix(name, geo); ok {
-			name = rest
+	geo := false
+	for _, prefix := range geoPrefixes {
+		if rest, ok := strings.CutPrefix(name, prefix); ok {
+			name, geo = rest, true
 			break
 		}
 	}
-	if head, rest, ok := strings.Cut(name, "."); ok && rest != "" && isAllLetters(head) {
+	if !geo && !bedrockVersionSuffix.MatchString(name) {
+		return model
+	}
+	// Inside a Bedrock id the segment before the first dot is the vendor
+	// namespace ("anthropic", "meta", "ai21"), never part of the name.
+	if _, rest, ok := strings.Cut(name, "."); ok && rest != "" {
 		name = rest
 	}
 	name = bedrockVersionSuffix.ReplaceAllString(name, "")
@@ -943,21 +951,6 @@ func modelDisplayName(model string) string {
 		return model
 	}
 	return name
-}
-
-// isAllLetters reports whether s is non-empty and only ASCII letters — the
-// shape of a vendor namespace ("anthropic", "meta"), not of a model name
-// with a version in it ("gemini-2", "gpt-4").
-func isAllLetters(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
-			return false
-		}
-	}
-	return true
 }
 
 // planTaskRung is the middle rung of the plan ladder the harness shows

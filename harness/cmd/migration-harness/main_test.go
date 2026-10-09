@@ -614,9 +614,9 @@ func TestShouldEmitTurnKeepsLadderAliveWithoutFlooding(t *testing.T) {
 }
 
 // TestModelDisplayName: the plan rung is the only place a viewer sees the
-// model while a run is going, so the routing envelope comes off but the
-// model's identity — name and snapshot date — must survive, and anything
-// that is not the dotted Bedrock shape must be left alone.
+// model while a run is going, so Bedrock's routing envelope comes off but
+// the model's identity — name and snapshot date — must survive, and an id
+// Bedrock did not mark must reach the viewer as the run asked for it.
 func TestModelDisplayName(t *testing.T) {
 	for _, tt := range []struct{ in, want string }{
 		// Bedrock cross-region inference profiles.
@@ -626,10 +626,14 @@ func TestModelDisplayName(t *testing.T) {
 		{"us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0", "claude-sonnet-4-5-20250929"},
 		// Plain Bedrock ids: vendor namespace and version suffix go too.
 		{"anthropic.claude-3-5-sonnet-20241022-v2:0", "claude-3-5-sonnet-20241022"},
-		// A version in the model name is not a vendor namespace.
+		// A vendor namespace with a digit in it is still a namespace.
+		{"ai21.jamba-1-5-large-v1:0", "jamba-1-5-large"},
+		// A dot outside a Bedrock id is not a vendor namespace: a version
+		// in the model name, or a Gateway alias's own scope.
 		{"gemini-2.5-pro", "gemini-2.5-pro"},
 		{"gpt-4.1", "gpt-4.1"},
-		{"ai21.jamba-1-5-large-v1:0", "ai21.jamba-1-5-large"},
+		{"migration.production", "migration.production"},
+		{"openai.gpt-4o", "openai.gpt-4o"},
 		// Already plain, path-shaped, or empty: untouched.
 		{"claude-sonnet-4-5", "claude-sonnet-4-5"},
 		{"publishers/anthropic/models/claude-sonnet-4-5", "publishers/anthropic/models/claude-sonnet-4-5"},

@@ -1,0 +1,12 @@
+kind: bugfix
+
+description: >
+  The plan ladder's task rung now shows the model a viewer recognises
+  rather than Bedrock's routing envelope, so
+  "us.anthropic.claude-sonnet-4-5-20250929-v1:0" reads
+  "claude-sonnet-4-5-20250929" while the geo group, vendor namespace and
+  version suffix come off and the name and snapshot date survive; ids
+  Bedrock did not mark, including OpenAI-compatible Gateway aliases such
+  as "migration.production", reach the rung exactly as the run asked for
+  them. The rung also says "agent is working" instead of describing a
+  standing prompt the viewer cannot see.
