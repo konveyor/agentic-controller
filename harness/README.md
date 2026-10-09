@@ -87,6 +87,7 @@ Configuration comes from two sources: environment variables (required and option
 | `HARNESS_HITL_STEER` | `on` | `off` makes the run stream watch-only: viewer steer/cancel frames for the run session are refused instead of relayed |
 | `HARNESS_HITL_TIMEOUT_SECONDS` | `180` | How long a permission ask or an `ask_user` question waits for an attached viewer; values above 600 are clamped to 600 |
 | `HARNESS_HITL_ASK` | — | The `ask_user` tool is opt-in, normally via the run's `spec.execution.askUser` (params.json `execution.askUser`). `on` mounts it for a harness run outside the controller; `off` leaves it out even when the run asked for it |
+| `HARNESS_GIT_WRITE_CHECK` | `on` | `off` skips the pre-flight that proves the resolved credential can push to the source repository before the stage runs; only for runs that deliberately never push |
 
 ### Parameters (`/run/konveyor/params.json`)
 

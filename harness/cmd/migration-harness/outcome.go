@@ -3,13 +3,43 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/konveyor/migration-harness/internal/acp"
+	"github.com/konveyor/migration-harness/internal/git"
 	"github.com/konveyor/migration-harness/internal/logging"
 )
+
+// gitWriteAccessPrefix opens the stop reason of every run stopped by the
+// push pre-flight (#247). The UI matches this exact string to recognise
+// the failure class and link the viewer to the credentials page
+// (konveyor/tackle2-ui#3616), so it is a contract with that UI, not a
+// label: do not reword it.
+const gitWriteAccessPrefix = "git write access:"
+
+// gitWriteAccessError is the error the pre-flight fails the run with —
+// returned from runStage, so runStage's deferred writer puts it in the
+// termination blob's stopReason like any other setup failure.
+//
+// The two cases are deliberately distinct. Nothing attached to the
+// application at all is the common mistake and needs different words
+// from a credential that resolved but cannot push: a Source Control
+// credential existing in the Hub is not the same as one the application
+// can push with, and #247 was reported by someone who burned three runs
+// on exactly that difference.
+func gitWriteAccessError(cred *git.Credentials) error {
+	if cred.IdentityName == "" {
+		return fmt.Errorf(
+			"%s no write access to %s for branch %s: the application has no source credential "+
+				"(attach a Source Control credential with push access to the application in the Hub)",
+			gitWriteAccessPrefix, cred.RepoURL, cred.Branch)
+	}
+	return fmt.Errorf("%s no write access to %s with credential %q: the token can read but not push",
+		gitWriteAccessPrefix, cred.RepoURL, cred.IdentityName)
+}
 
 // outcome is the three-way result of a stage's primary prompt, per the
 // harness exit-code contract (ADR 0011).

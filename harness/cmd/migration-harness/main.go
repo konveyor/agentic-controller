@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -210,6 +211,32 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	if err != nil {
 		// Fail open — an unknown base must never block a push of real work.
 		logging.Warn("resolve base commit: %v", err)
+	}
+
+	// 3b. Pre-flight the push. The clone above only proves the repository
+	// can be read, which a public repository grants anonymously; the
+	// first thing needing write access is the final push, by which point
+	// every turn and every dollar of the run is already spent (#247). One
+	// remote round trip here buys the whole run.
+	if cfg.GitWriteCheck {
+		switch err := git.CheckWriteAccess(ctx, creds); {
+		case errors.Is(err, git.ErrNoWriteAccess):
+			// The go-git error names what the server said; the returned
+			// error names what the viewer can do about it.
+			logging.Err("git write access pre-flight: %s", red.redact(err.Error()))
+			return 1, gitWriteAccessError(creds)
+		case err != nil:
+			// Inconclusive, not a refusal. The clone just succeeded, so
+			// killing the run over a round trip that proved nothing would
+			// cost more than the late push failure it guards against.
+			logging.Warn("git write access pre-flight inconclusive: %s — continuing",
+				red.redact(err.Error()))
+		default:
+			logging.Ok("push access confirmed for %s", creds.RepoURL)
+		}
+	} else {
+		logging.Warn("push pre-flight disabled (HARNESS_GIT_WRITE_CHECK=off) — a missing or " +
+			"read-only credential will not surface until the final push")
 	}
 
 	// 4. Discover skills early — controls which setup steps run
@@ -730,10 +757,17 @@ func resolveFromHub(cfg *config.Config, hubClient *hub.Client) (*git.Credentials
 	if identity != nil {
 		creds.Username = identity.User
 		creds.Token = identity.Password
+		creds.IdentityName = identity.Name
 		if creds.Username == "" {
 			creds.Username = "x-access-token"
 		}
 		logging.Ok("git identity: %s", identity.Name)
+	} else {
+		// The anonymous case logged nothing at all, so a run that was
+		// never going to be able to push looked exactly like a
+		// credentialed one until the final push failed (#247).
+		logging.Warn("git identity: none (anonymous) - pushes will fail unless " +
+			"the repository allows anonymous writes")
 	}
 
 	return creds, nil

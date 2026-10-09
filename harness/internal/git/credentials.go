@@ -10,6 +10,12 @@ type Credentials struct {
 	Token    string
 	RepoURL  string
 	Branch   string
+	// IdentityName is the Hub identity these credentials came from, empty
+	// when none resolved and the run is anonymous. Carried so a failed
+	// write-access pre-flight can name the credential that cannot push
+	// instead of only saying that pushing failed (issue #247). Never the
+	// secret itself — only the identity's display name.
+	IdentityName string
 }
 
 // Auth returns nil (a truly nil interface, not a typed-nil *http.BasicAuth)

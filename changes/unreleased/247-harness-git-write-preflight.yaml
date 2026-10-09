@@ -1,0 +1,13 @@
+kind: feature
+
+description: >
+  The harness now proves the resolved source credential can push to the
+  application's repository before the stage runs, instead of doing every turn
+  of work and failing at the final push. A run with no usable credential exits
+  with outcome "failed" before any LLM turn, and its stop reason starts with
+  the stable prefix "git write access:" so the UI can recognise the failure
+  and link to the credentials page. The two causes get distinct messages: no
+  source credential attached to the application, or a credential that resolved
+  but cannot push. The anonymous case is now also logged at startup alongside
+  the existing "git identity" line. Set HARNESS_GIT_WRITE_CHECK=off for runs
+  that deliberately never push.
