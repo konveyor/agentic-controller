@@ -1,0 +1,56 @@
+---
+# Minimal workflow resources for hack/run-e2e-workflow-reconcile.sh.
+# The Secret, Gateway, SkillCard, and Agent come from resources.yaml; this
+# file deliberately contains the workflow-specific Agent and its run.
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: e2e-workflow-agent
+spec:
+  image: quay.io/konveyor/agentic-controller-agent:e2e-stub
+  prompt: "You are an e2e workflow test agent."
+  gateways:
+    - ref: e2e-gateway
+  skillCards:
+    - ref: e2e-skill
+  params:
+    - name: source_url
+      type: string
+      description: Git URL of the source repository
+      required: true
+    - name: target_branch
+      type: string
+      default: konveyor/e2e-test
+---
+apiVersion: konveyor.io/v1alpha1
+kind: AgentWorkflow
+metadata:
+  name: e2e-workflow
+spec:
+  guide: "Deterministic workflow restart and reconciliation test"
+  stages:
+    - name: stage-a
+      agentRef: e2e-workflow-agent
+      instructions: "Complete stage A and exit successfully."
+    - name: stage-b
+      agentRef: e2e-workflow-agent
+      instructions: "Complete stage B and exit successfully."
+---
+apiVersion: konveyor.io/v1alpha1
+kind: AgentWorkflowRun
+metadata:
+  name: e2e-workflow-run
+spec:
+  workflowRef: e2e-workflow
+  gateway: e2e-gateway
+  params:
+    - name: source_url
+      value: "https://github.com/konveyor/example-app.git"
+  env:
+    # Keep stage A active while the controller deployment is restarted.
+    - name: STUB_ACP_DELAY_SECONDS
+      value: "12"
+    # Finish each stub stage after it has been observable as a live run, so
+    # the workflow can advance to stage B without a real harness runtime.
+    - name: STUB_EXIT_AFTER_SECONDS
+      value: "20"

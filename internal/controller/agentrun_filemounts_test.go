@@ -239,7 +239,7 @@ func TestReconcileInvalidFileMountSources(t *testing.T) {
 					}
 				}
 				agent := &konveyoriov1alpha1.Agent{
-					ObjectMeta: metav1.ObjectMeta{Name: "agent", Namespace: testNamespace},
+					ObjectMeta: metav1.ObjectMeta{Name: scopeAgent, Namespace: testNamespace},
 					Spec:       konveyoriov1alpha1.AgentSpec{Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: "gateway"}}},
 					Status:     konveyoriov1alpha1.AgentStatus{Conditions: []metav1.Condition{{Type: ConditionTypeReady, Status: metav1.ConditionTrue}}},
 				}

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +30,7 @@ const (
 	testAppURL      = "https://example.com/app"
 	testWorkflowApp = "coolstore"
 	testNumParam    = "max_fix"
+	testMaxCost25   = "2.5"
 )
 
 func ptrInt(i int) *int { return &i }
@@ -119,8 +121,8 @@ func TestCoerceParamsInvalid(t *testing.T) {
 
 func TestSubstitute(t *testing.T) {
 	scopes := map[string]map[string]string{
-		"agent":    {testParamName: testAppURL},
-		"workflow": {"application_name": testWorkflowApp},
+		scopeAgent:    {testParamName: testAppURL},
+		scopeWorkflow: {"application_name": testWorkflowApp},
 	}
 
 	cases := []struct {
@@ -200,6 +202,96 @@ func TestResolveExecution(t *testing.T) {
 	// Both nil -> nil.
 	if resolveExecution(nil, nil) != nil {
 		t.Errorf("resolveExecution(nil, nil) should be nil")
+	}
+}
+
+func TestResolveExecutionFieldMatrix(t *testing.T) {
+	turns200 := ptrInt(200)
+	turns50 := ptrInt(50)
+	turns0 := ptrInt(0)
+
+	cases := []struct {
+		name      string
+		override  *konveyoriov1alpha1.ExecutionSpec
+		base      *konveyoriov1alpha1.ExecutionLimits
+		wantNil   bool
+		wantMode  konveyoriov1alpha1.ExecutionMode
+		wantTurns *int
+		wantCost  string
+	}{
+		{
+			name:      "agent defaults only",
+			base:      &konveyoriov1alpha1.ExecutionLimits{MaxTurns: turns200, MaxCost: "10"},
+			wantTurns: turns200,
+			wantCost:  "10",
+		},
+		{
+			name: "stage overrides each configured field",
+			override: &konveyoriov1alpha1.ExecutionSpec{
+				Mode: konveyoriov1alpha1.ExecutionModeApprove,
+				ExecutionLimits: konveyoriov1alpha1.ExecutionLimits{
+					MaxTurns: turns50,
+					MaxCost:  testMaxCost25,
+				},
+			},
+			base:      &konveyoriov1alpha1.ExecutionLimits{MaxTurns: turns200, MaxCost: "10"},
+			wantMode:  konveyoriov1alpha1.ExecutionModeApprove,
+			wantTurns: turns50,
+			wantCost:  testMaxCost25,
+		},
+		{
+			name: "partial override falls back per field",
+			override: &konveyoriov1alpha1.ExecutionSpec{
+				ExecutionLimits: konveyoriov1alpha1.ExecutionLimits{MaxCost: testMaxCost25},
+			},
+			base:      &konveyoriov1alpha1.ExecutionLimits{MaxTurns: turns200, MaxCost: "10"},
+			wantTurns: turns200,
+			wantCost:  testMaxCost25,
+		},
+		{
+			name: "explicit zero turn pointer is preserved",
+			override: &konveyoriov1alpha1.ExecutionSpec{
+				ExecutionLimits: konveyoriov1alpha1.ExecutionLimits{MaxTurns: turns0},
+			},
+			base:      &konveyoriov1alpha1.ExecutionLimits{MaxTurns: turns200},
+			wantTurns: turns0,
+		},
+		{
+			name:    "empty inputs produce no execution spec",
+			wantNil: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveExecution(tc.override, tc.base)
+			if tc.wantNil {
+				if got != nil {
+					t.Fatalf("resolveExecution() = %+v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("resolveExecution() = nil, want resolved execution")
+			}
+			if got.Mode != tc.wantMode {
+				t.Errorf("mode = %q, want %q", got.Mode, tc.wantMode)
+			}
+			if tc.wantTurns == nil {
+				if got.MaxTurns != nil {
+					t.Errorf("maxTurns = %v, want nil", got.MaxTurns)
+				}
+			} else if got.MaxTurns == nil || *got.MaxTurns != *tc.wantTurns {
+				gotTurns := "nil"
+				if got.MaxTurns != nil {
+					gotTurns = fmt.Sprintf("%d", *got.MaxTurns)
+				}
+				t.Errorf("maxTurns = %s, want %d", gotTurns, *tc.wantTurns)
+			}
+			if got.MaxCost != tc.wantCost {
+				t.Errorf("maxCost = %q, want %q", got.MaxCost, tc.wantCost)
+			}
+		})
 	}
 }
 
