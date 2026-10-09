@@ -148,6 +148,52 @@ func TestParseHandoffVerdict(t *testing.T) {
 			wantOK:  false,
 		},
 		{
+			// The review case on #249: a fenced plan excerpt carries a real
+			// `## ` heading. Read as prose it opens a section the stage never
+			// wrote, the Status above it goes unseen, and a refusal advances
+			// the workflow.
+			name:       "a heading quoted in a fence does not open a section",
+			content:    "## Execute\n- Status: failed\n\nThe plan I was handed:\n\n```markdown\n## Goal\nMigrate the module.\n```\n",
+			wantOK:     true,
+			wantStatus: "failed",
+		},
+		{
+			name:       "a Status line quoted in a fence is not the stage's verdict",
+			content:    "## Execute\n- Status: completed\n\n```\n- Status: failed\n```\n",
+			wantOK:     true,
+			wantStatus: "completed",
+		},
+		{
+			// The stage's own verdict comes after the excerpt it quotes.
+			name:       "the verdict after a fenced excerpt is still read",
+			content:    "## Verify\n\n```sh\n$ mvn -q verify\n## no output\n```\n\n- Status: failed\n- Summary: build still broken\n",
+			wantOK:     true,
+			wantStatus: "failed",
+			wantDetail: "build still broken",
+		},
+		{
+			name:       "tilde fence, and an inner backtick run is content",
+			content:    "## Execute\n- Status: failed\n\n~~~\n```\n## Goal\n```\n~~~\n\n- Reason: docs/plan.md not found\n",
+			wantOK:     true,
+			wantStatus: "failed",
+			wantDetail: "docs/plan.md not found",
+		},
+		{
+			// A fence only closes on a run at least as long as its opening,
+			// so the inner ``` leaves the block open and `## Goal` stays in.
+			name:       "a longer fence is not closed by a shorter inner run",
+			content:    "## Execute\n- Status: failed\n\n````markdown\n```\n## Goal\n```\n````\n",
+			wantOK:     true,
+			wantStatus: "failed",
+		},
+		{
+			name:       "a failed table row quoted in a fence gives no detail",
+			content:    "## Execute\n- Status: completed\n\n```\n| 1 | failed | pom.xml unreadable |\n```\n",
+			wantOK:     true,
+			wantStatus: "completed",
+			wantDetail: "",
+		},
+		{
 			name:    "empty document",
 			content: "",
 			wantOK:  false,

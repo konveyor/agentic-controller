@@ -76,6 +76,9 @@ var (
 	handoffDetailLine = regexp.MustCompile(`(?i)^\s*(?:[-*]\s*)?\**(?:summary|error|reason)\**\s*:\s*(.+?)\s*$`)
 	// tableSeparator matches a Markdown table's header underline cells.
 	tableSeparator = regexp.MustCompile(`^:?-+:?$`)
+	// handoffFence matches a code fence: three or more backticks or
+	// tildes, indented no further than a heading may be.
+	handoffFence = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
 )
 
 // stageHandoff returns the verdict from the last section of the handoff
@@ -136,12 +139,12 @@ func parseHandoffVerdict(content string) (v handoffVerdict, ok bool) {
 	return v, true
 }
 
-// lastHandoffSection returns the lines after the document's last `## `
-// heading — the section the current stage appended — or every line when
-// the document has no such heading. Deeper headings (`###`) belong to the
-// section they sit in.
+// lastHandoffSection returns the prose lines after the document's last
+// `## ` heading — the section the current stage appended — or every prose
+// line when the document has no such heading. Deeper headings (`###`)
+// belong to the section they sit in.
 func lastHandoffSection(content string) []string {
-	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	lines := handoffProse(content)
 	start := 0
 	for i, line := range lines {
 		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "## ") {
@@ -149,6 +152,37 @@ func lastHandoffSection(content string) []string {
 		}
 	}
 	return lines[start:]
+}
+
+// handoffProse returns the document's lines with fenced code blocks — the
+// fences and everything between them — dropped. Stages quote their work
+// back into the handoff, and a quoted plan excerpt carries real `## `
+// headings and `- Status:` lines; read as prose, a fenced `## Goal` opens
+// a section the stage never wrote and hides the `- Status: failed` above
+// it, so the harness finds no verdict and the workflow advances from a
+// stage that refused its task — the very thing #241 closed.
+func handoffProse(content string) []string {
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	prose := make([]string, 0, len(lines))
+	fence := ""
+	for _, line := range lines {
+		marker := handoffFence.FindStringSubmatch(line)
+		switch {
+		case fence == "":
+			if marker != nil {
+				fence = marker[1]
+				continue
+			}
+			prose = append(prose, line)
+		// Only a bare run of the opening character, at least as long as
+		// the opening fence, closes it: an inner ``` inside a ~~~ block,
+		// or one carrying an info string, is content.
+		case marker != nil && marker[1][0] == fence[0] &&
+			len(marker[1]) >= len(fence) && strings.TrimSpace(line) == marker[1]:
+			fence = ""
+		}
+	}
+	return prose
 }
 
 // splitHandoffStatus separates a Status line's value into the status word
