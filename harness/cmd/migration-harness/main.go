@@ -424,6 +424,15 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		}
 		teeSrv.EmitRunNotice(fmt.Sprintf(format, args...))
 	}
+	// emitOutcome is emitNotice for the one line that says how the stage
+	// ended — kept in the replay ring so a viewer attaching after the run
+	// is told the result rather than a frozen ladder.
+	emitOutcome := func(format string, args ...any) {
+		if teeSrv == nil {
+			return
+		}
+		teeSrv.EmitRunOutcome(fmt.Sprintf(format, args...))
+	}
 
 	// Workspace prep all happened before the tee existed; publish it as
 	// already done so a viewer's first glance shows the ladder.
@@ -464,15 +473,23 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	if teeSrv != nil {
 		teeSrv.SetRunActive(true)
 	}
-	// Each turn re-emits the ladder so the task rung shows progress
-	// against the budget instead of one spinner for the whole turn. The
-	// handler fires from SendPrompt's own goroutine between
-	// notifications; turnBase carries the primary's count into the
-	// handoff prompt, whose result counts from zero again.
+	// Turns re-emit the ladder so the task rung shows progress against
+	// the budget instead of one spinner for the whole turn — but on a
+	// stride, not every turn: a 200-turn run would otherwise broadcast
+	// 200 ladders, each one a full-state frame fanned out to every
+	// attached viewer. The handler fires from SendPrompt's own goroutine
+	// between notifications; turnBase carries the primary's count into
+	// the handoff prompt, whose result counts from zero again.
+	//
+	// turnsSeen is stored on every turn regardless, so the ladder emitted
+	// after the run (step 9b below) always renders the exact final count.
 	turnBase := 0
 	session.SetTurnHandler(func(n int) {
-		turnsSeen.Store(int64(turnBase + n))
-		emitPlan("completed", "in_progress", "pending")
+		total := turnBase + n
+		turnsSeen.Store(int64(total))
+		if shouldEmitTurn(total, cfg.MaxTurns) {
+			emitPlan("completed", "in_progress", "pending")
+		}
 	})
 	primaryResult, err := session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
 		{Type: "text", Text: stagePrompt},
@@ -596,7 +613,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		return git.Push(pushCtx, creds, repo, creds.Branch, baseSHA)
 	})
 	if pushErr != nil {
-		emitNotice("stage failed — final push error: %v", pushErr)
+		emitOutcome("stage failed — final push error: %v", pushErr)
 		term.ExitCode = 1
 		term.Outcome = outcomeFailed.String()
 		term.LimitReached = ""
@@ -614,16 +631,16 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	case outcomeSucceeded:
 		stageSucceeded = true
 		if pushed {
-			emitNotice("stage succeeded — results pushed to branch %s", creds.Branch)
+			emitOutcome("stage succeeded — results pushed to branch %s", creds.Branch)
 		} else {
-			emitNotice("stage succeeded — no changes to push")
+			emitOutcome("stage succeeded — no changes to push")
 		}
 		logging.Ok("stage succeeded")
 		return 0, nil
 
 	case outcomeLimitReached:
 		if pushed {
-			emitNotice("execution limit reached (%s) — handoff committed, results pushed to branch %s", limit, creds.Branch)
+			emitOutcome("execution limit reached (%s) — handoff committed, results pushed to branch %s", limit, creds.Branch)
 			logging.Ok("stage stopped at execution limit (%s) — handoff committed", limit)
 		} else {
 			// The handoff prompt itself only gets the runtime's native
@@ -631,7 +648,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			// maxTurns, that may not be enough for the agent to actually
 			// write .konveyor/handoff.md and commit before its own turns
 			// run out. Report what actually happened, not what was hoped for.
-			emitNotice("execution limit reached (%s) — no commits to push", limit)
+			emitOutcome("execution limit reached (%s) — no commits to push", limit)
 			logging.Warn("stage stopped at execution limit (%s) — handoff prompt ran but produced no commit", limit)
 		}
 		return 2, nil
@@ -639,19 +656,19 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	default: // outcomeFailed
 		switch {
 		case hitlUnanswered && pushed:
-			emitNotice("run stopped — an ask_user question went unanswered (no human to decide); partial work pushed to branch %s", creds.Branch)
+			emitOutcome("run stopped — an ask_user question went unanswered (no human to decide); partial work pushed to branch %s", creds.Branch)
 		case hitlUnanswered:
-			emitNotice("run stopped — an ask_user question went unanswered (no human to decide); no commits to push")
+			emitOutcome("run stopped — an ask_user question went unanswered (no human to decide); no commits to push")
 		case viewerCancelled && pushed:
-			emitNotice("run cancelled by viewer — partial work pushed to branch %s", creds.Branch)
+			emitOutcome("run cancelled by viewer — partial work pushed to branch %s", creds.Branch)
 		case viewerCancelled:
-			emitNotice("run cancelled by viewer — no commits to push")
+			emitOutcome("run cancelled by viewer — no commits to push")
 		case providerRejected:
-			emitNotice("stage failed — the model provider rejected the call; no work was done")
+			emitOutcome("stage failed — the model provider rejected the call; no work was done")
 		case pushed:
-			emitNotice("stage failed — partial work pushed to branch %s", creds.Branch)
+			emitOutcome("stage failed — partial work pushed to branch %s", creds.Branch)
 		default:
-			emitNotice("stage failed — no commits to push")
+			emitOutcome("stage failed — no commits to push")
 		}
 		if hitlUnanswered {
 			logging.Err("stage failed: ask_user question unanswered (HITL gate)")
@@ -858,6 +875,32 @@ func repoDisplayName(rawURL string) string {
 // taskSummaryMaxLen bounds the task excerpt on the plan rung: one line of
 // the viewer's ladder, not the whole stage prompt.
 const taskSummaryMaxLen = 80
+
+// ladderTurnSteps is roughly how many times the task rung refreshes over
+// a whole turn budget. Enough for the count to look alive; few enough
+// that a long run does not spend its viewer bandwidth re-sending the
+// ladder. A 200-turn budget emits ~21 ladders instead of 200.
+const ladderTurnSteps = 20
+
+// shouldEmitTurn decides whether finishing turn n is worth re-rendering
+// the plan ladder for. The first turn always is (it is the one a viewer
+// is waiting on to know the agent started) and so is anything at or past
+// the ceiling (the end of the budget, and the overrun turns that say the
+// run is out of road); in between the ladder refreshes on a fixed
+// stride. With no budget configured there is no scale to pace against,
+// so every turn is emitted, as before.
+func shouldEmitTurn(n, ceiling int) bool {
+	if n <= 1 || ceiling <= 0 || n >= ceiling {
+		return true
+	}
+	// Round the stride up, so the emit count stays at or under
+	// ladderTurnSteps rather than overshooting it by up to 2x.
+	step := (ceiling + ladderTurnSteps - 1) / ladderTurnSteps
+	if step < 2 {
+		return true
+	}
+	return n%step == 0
+}
 
 // planTaskRung is the middle rung of the plan ladder the harness shows
 // viewers: which stage this is, what the task asks, and the model and turn

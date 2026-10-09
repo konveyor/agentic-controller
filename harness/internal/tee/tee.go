@@ -83,6 +83,32 @@ const (
 	// is a complete catch-up in practice.
 	replayCap = 32
 
+	// replayKeyPlan / replayKeyOutcome name the keyed frames: the plan
+	// ladder and the notice saying how the stage ended. Each carries the
+	// whole of its state, so only the latest is worth keeping — and it is
+	// worth keeping whatever else arrives afterwards.
+	replayKeyPlan    = "plan"
+	replayKeyOutcome = "outcome"
+
+	// replayKeyPush / replayKeyPushUpdate key the auto-commit watcher's
+	// git pushes. A push is two frames — the tool call and its result —
+	// and a run makes dozens, which is the single biggest source of
+	// replay traffic. Only the most recent push tells a late viewer
+	// anything ("it is still pushing, and the last one worked"), so the
+	// two frames get a slot each and every earlier push is superseded.
+	//
+	// Two keys rather than one because the pair must survive together:
+	// the console looks up a tool_call_update by toolCallId and drops it
+	// when the opening tool_call is not in its list, so keeping only the
+	// result would make the push vanish from the catch-up entirely.
+	replayKeyPush       = "push"
+	replayKeyPushUpdate = "push/update"
+
+	// harnessPushPrefix marks the toolCallIds the harness mints for its
+	// own git pushes (harness-push-<n>), as opposed to the agent's tool
+	// calls, which pass through the tee untouched and are never replayed.
+	harnessPushPrefix = "harness-push-"
+
 	// relayTimeout bounds a viewer request relayed onto the run
 	// connection (steer). goose answers these immediately — steer only
 	// queues a message — so a slow answer means a broken run connection.
@@ -170,7 +196,8 @@ type Server struct {
 	// replayKeys parallels replay: a non-empty key marks a frame that
 	// supersedes any earlier frame with the same key (the plan ladder,
 	// re-emitted as the turn progresses, would otherwise fill the ring
-	// and evict the push and outcome frames a late viewer needs).
+	// and evict the push and outcome frames a late viewer needs), and
+	// that survives the ring's trim until something supersedes it.
 	replayKeys []string
 	// replay holds the harness's own emitted status frames for viewers
 	// that attach later. Guarded by mu.
@@ -332,14 +359,29 @@ func (s *Server) EmitRunUpdate(update any) {
 	s.emitRunFrame("session/update", update, replayKeyFor(update))
 }
 
-// replayKeyFor returns the replay-ring key for a harness update: "plan"
-// for a plan ladder (each carries the whole ladder, so only the latest
-// is worth replaying), empty for everything else.
+// replayKeyFor returns the replay-ring key for a harness update:
+// replayKeyPlan for a plan ladder (each carries the whole ladder, so only
+// the latest is worth replaying), replayKeyPush / replayKeyPushUpdate for
+// the harness's own git pushes (only the most recent one is news), empty
+// for everything else.
 func replayKeyFor(update any) string {
-	if m, ok := update.(map[string]any); ok {
-		if kind, _ := m["sessionUpdate"].(string); kind == "plan" {
-			return kind
+	m, ok := update.(map[string]any)
+	if !ok {
+		return ""
+	}
+	kind, _ := m["sessionUpdate"].(string)
+	switch kind {
+	case replayKeyPlan:
+		return kind
+	case "tool_call", "tool_call_update":
+		id, _ := m["toolCallId"].(string)
+		if !strings.HasPrefix(id, harnessPushPrefix) {
+			return ""
 		}
+		if kind == "tool_call" {
+			return replayKeyPush
+		}
+		return replayKeyPushUpdate
 	}
 	return ""
 }
@@ -348,10 +390,22 @@ func replayKeyFor(update any) string {
 // custom status_message vocabulary (`_goose/unstable/session/update`), so
 // a client that renders goose notices renders harness notices too.
 func (s *Server) EmitRunNotice(message string) {
-	s.emitRunFrame(gooseUpdateMethod, map[string]any{
+	s.emitRunFrame(gooseUpdateMethod, noticeUpdate(message), "")
+}
+
+// EmitRunOutcome broadcasts the notice that says how the stage ended.
+// Same frame as EmitRunNotice, but keyed: how the run finished is the one
+// thing a late viewer attaches to learn, and today it reaches the replay
+// ring only because nothing happens to be emitted after it.
+func (s *Server) EmitRunOutcome(message string) {
+	s.emitRunFrame(gooseUpdateMethod, noticeUpdate(message), replayKeyOutcome)
+}
+
+func noticeUpdate(message string) map[string]any {
+	return map[string]any{
 		"sessionUpdate": "status_message",
 		"status":        map[string]any{"type": "notice", "message": message},
-	}, "")
+	}
 }
 
 func (s *Server) emitRunFrame(method string, update any, replayKey string) {
@@ -381,13 +435,31 @@ func (s *Server) emitRunFrame(method string, update any, replayKey string) {
 	}
 	s.replay = append(s.replay, frame)
 	s.replayKeys = append(s.replayKeys, replayKey)
-	if len(s.replay) > replayCap {
-		s.replay = s.replay[len(s.replay)-replayCap:]
-		s.replayKeys = s.replayKeys[len(s.replayKeys)-replayCap:]
-	}
+	s.trimReplayLocked()
 	s.mu.Unlock()
 
 	s.broadcast(frame)
+}
+
+// trimReplayLocked brings the ring back to replayCap by evicting the
+// oldest *unkeyed* frame each time, so state outlives history: keyed
+// frames are one per key and each is the only surviving copy of what it
+// describes, while unkeyed frames are a stream whose older entries a late
+// viewer cannot use anyway. Only when the ring is all keyed — which needs
+// more distinct keys than exist — does the oldest keyed frame go.
+// Callers hold s.mu.
+func (s *Server) trimReplayLocked() {
+	for len(s.replay) > replayCap {
+		drop := 0
+		for i, key := range s.replayKeys {
+			if key == "" {
+				drop = i
+				break
+			}
+		}
+		s.replay = append(s.replay[:drop], s.replay[drop+1:]...)
+		s.replayKeys = append(s.replayKeys[:drop], s.replayKeys[drop+1:]...)
+	}
 }
 
 // ForwardPermission implements acp.PermissionForwarder: broadcast the ask

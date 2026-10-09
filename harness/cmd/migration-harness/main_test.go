@@ -556,3 +556,51 @@ func TestPlanPrepRung(t *testing.T) {
 		})
 	}
 }
+
+// TestShouldEmitTurn pins the pacing of the plan ladder's per-turn
+// refresh: the turns a viewer actually waits on are always emitted, the
+// middle of a long budget is sampled, and a short budget still shows
+// every turn.
+func TestShouldEmitTurn(t *testing.T) {
+	tests := []struct {
+		name       string
+		n, ceiling int
+		want       bool
+	}{
+		{name: "first turn of a long budget", n: 1, ceiling: 200, want: true},
+		{name: "off-stride turn is skipped", n: 7, ceiling: 200, want: false},
+		{name: "on-stride turn is emitted", n: 20, ceiling: 200, want: true},
+		{name: "last turn", n: 200, ceiling: 200, want: true},
+		{name: "overrun past the ceiling still reports", n: 213, ceiling: 200, want: true},
+		{name: "short budget emits every turn", n: 3, ceiling: 10, want: true},
+		{name: "no budget emits every turn", n: 37, ceiling: 0, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldEmitTurn(tt.n, tt.ceiling); got != tt.want {
+				t.Errorf("shouldEmitTurn(%d, %d) = %v, want %v", tt.n, tt.ceiling, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestShouldEmitTurnKeepsLadderAliveWithoutFlooding is the property that
+// matters more than any single turn: across a whole budget the viewer
+// gets a manageable number of ladders, never none, and never one per
+// turn.
+func TestShouldEmitTurnKeepsLadderAliveWithoutFlooding(t *testing.T) {
+	for _, ceiling := range []int{10, 50, 170, 200, 1000} {
+		emits := 0
+		for n := 1; n <= ceiling; n++ {
+			if shouldEmitTurn(n, ceiling) {
+				emits++
+			}
+		}
+		if emits < 2 {
+			t.Errorf("ceiling %d: %d ladder emits — the task rung never moves", ceiling, emits)
+		}
+		if ceiling > 2*ladderTurnSteps && emits > ladderTurnSteps+2 {
+			t.Errorf("ceiling %d: %d ladder emits, want at most %d", ceiling, emits, ladderTurnSteps+2)
+		}
+	}
+}

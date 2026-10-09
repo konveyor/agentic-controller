@@ -674,6 +674,51 @@ func TestHarnessStatusEmitAndReplay(t *testing.T) {
 	v.expect("live tool_call", func(f string) bool { return strings.Contains(f, "harness-push-1") })
 }
 
+// TestLateViewerLearnsHowTheRunEnded is the end-to-end form of the replay
+// guarantee: a viewer that attaches to a finished, busy run is told the
+// ladder and the outcome, not only the last handful of pushes. Nothing
+// covered the late-attach path before, which is how the outcome came to
+// depend on being the last thing emitted.
+func TestLateViewerLearnsHowTheRunEnded(t *testing.T) {
+	_, _, s := startTee(t, Config{})
+
+	s.EmitRunUpdate(map[string]any{
+		"sessionUpdate": "plan",
+		"entries": []map[string]any{
+			{"content": "Prepare workspace", "priority": "medium", "status": "completed"},
+			{"content": "Agent works the task", "priority": "medium", "status": "completed"},
+			{"content": "Push results to branch main", "priority": "medium", "status": "completed"},
+		},
+	})
+	s.EmitRunOutcome("stage succeeded — results pushed to branch main")
+	// A busy tail: far more push traffic than the ring can hold, all of
+	// it after the outcome.
+	for i := 0; i < 3*replayCap; i++ {
+		id := fmt.Sprintf("harness-push-%d", i)
+		s.EmitRunUpdate(map[string]any{
+			"sessionUpdate": "tool_call", "toolCallId": id,
+			"title": "git push to branch main (auto-commit watcher)",
+			"kind":  "execute", "status": "in_progress",
+		})
+		s.EmitRunUpdate(map[string]any{
+			"sessionUpdate": "tool_call_update", "toolCallId": id, "status": "completed",
+		})
+	}
+
+	v, err := dialViewer(t, s, testKey)
+	if err != nil {
+		t.Fatalf("viewer dial: %v", err)
+	}
+	plan := v.expect("replayed plan", func(f string) bool { return strings.Contains(f, `"sessionUpdate":"plan"`) })
+	if !strings.Contains(plan, "Push results to branch main") {
+		t.Fatalf("bad replayed plan frame: %s", plan)
+	}
+	outcome := v.expect("replayed outcome", func(f string) bool { return strings.Contains(f, "status_message") })
+	if !strings.Contains(outcome, "stage succeeded — results pushed to branch main") {
+		t.Fatalf("late viewer was not told how the run ended: %s", outcome)
+	}
+}
+
 func TestUpstreamDialCarriesHeaderNotURL(t *testing.T) {
 	g, _, s := startTee(t, Config{})
 
@@ -1102,7 +1147,7 @@ func TestReplayKeepsOnlyLatestPlan(t *testing.T) {
 		}
 	}
 	s.EmitRunUpdate(plan("pending"))
-	s.EmitRunUpdate(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "p1", "title": "git push"})
+	s.EmitRunUpdate(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "edit file"})
 	s.EmitRunUpdate(plan("in_progress"))
 	s.EmitRunNotice("stage succeeded")
 	s.EmitRunUpdate(plan("completed"))
@@ -1127,5 +1172,198 @@ func TestReplayKeepsOnlyLatestPlan(t *testing.T) {
 	}
 	if !strings.Contains(string(replay[len(replay)-1]), `"sessionUpdate":"plan"`) {
 		t.Errorf("latest plan should sit at the tail of the replay, got %s", replay[len(replay)-1])
+	}
+}
+
+// TestReplayKeepsOutcomeWhateverFollowsIt pins the guarantee a late viewer
+// depends on: the line saying how the stage ended is in the replay ring
+// however many frames arrive afterwards. Today the outcome reaches a late
+// viewer only because emitOutcome happens to be the last call in
+// runStage — emit anything after it and the ring would drop it. An
+// ordinary notice stays unkeyed and is still evictable.
+func TestReplayKeepsOutcomeWhateverFollowsIt(t *testing.T) {
+	s := New(Config{SecretKey: "k"})
+	s.runMu.Lock()
+	s.runSessionID = "run-1"
+	s.runMu.Unlock()
+
+	s.EmitRunNotice("stage running")
+	s.EmitRunOutcome("stage succeeded — results pushed to branch main")
+	s.EmitRunUpdate(map[string]any{
+		"sessionUpdate": "plan",
+		"entries":       []map[string]any{{"content": "x", "status": "completed"}},
+	})
+	// Far more than replayCap, all after the outcome, and all unkeyed —
+	// plain agent tool calls, not the harness's own keyed pushes.
+	for i := 0; i < 200; i++ {
+		s.EmitRunUpdate(map[string]any{
+			"sessionUpdate": "tool_call", "toolCallId": fmt.Sprintf("t%d", i), "title": "edit file",
+		})
+	}
+
+	s.mu.Lock()
+	replay := append([][]byte(nil), s.replay...)
+	s.mu.Unlock()
+
+	if len(replay) != replayCap {
+		t.Fatalf("replay holds %d frames, want %d", len(replay), replayCap)
+	}
+	outcomes, plans, notices := 0, 0, 0
+	for _, f := range replay {
+		switch {
+		case strings.Contains(string(f), "stage succeeded — results pushed to branch main"):
+			outcomes++
+		case strings.Contains(string(f), `"sessionUpdate":"plan"`):
+			plans++
+		case strings.Contains(string(f), "stage running"):
+			notices++
+		}
+	}
+	if outcomes != 1 {
+		t.Errorf("replay holds %d outcome frames, want 1 — a late viewer is not told how the run ended", outcomes)
+	}
+	if plans != 1 {
+		t.Errorf("replay holds %d plan frames, want 1", plans)
+	}
+	if notices != 0 {
+		t.Errorf("unkeyed notice survived %d evictions, want it evicted", notices)
+	}
+}
+
+// TestReplayKeepsOnlyLatestPush proves the auto-commit watcher cannot
+// flood the replay ring. A long run pushes dozens of times, two frames
+// each, and before this they were all unkeyed: a late viewer's catch-up
+// was a wall of identical "git push to branch X" cards that had already
+// evicted the plan ladder. Only the most recent push is news, so the pair
+// is keyed and every earlier push is superseded.
+//
+// Both frames of the pair must survive: the console resolves a
+// tool_call_update against the tool_call it already holds and drops it
+// when there is none, so replaying the result alone would show nothing.
+func TestReplayKeepsOnlyLatestPush(t *testing.T) {
+	s := New(Config{SecretKey: "k"})
+	s.runMu.Lock()
+	s.runSessionID = "run-1"
+	s.runMu.Unlock()
+
+	s.EmitRunUpdate(map[string]any{
+		"sessionUpdate": "plan",
+		"entries":       []map[string]any{{"content": "x", "status": "in_progress"}},
+	})
+	for i := 1; i <= 40; i++ {
+		id := fmt.Sprintf("harness-push-%d", i)
+		s.EmitRunUpdate(map[string]any{
+			"sessionUpdate": "tool_call", "toolCallId": id,
+			"title": "Harness: git push to branch demo (auto-commit watcher)",
+			"kind":  "execute", "status": "in_progress",
+		})
+		s.EmitRunUpdate(map[string]any{
+			"sessionUpdate": "tool_call_update", "toolCallId": id, "status": "completed",
+		})
+	}
+	s.EmitRunOutcome("stage succeeded — results pushed to branch demo")
+
+	s.mu.Lock()
+	replay := append([][]byte(nil), s.replay...)
+	s.mu.Unlock()
+
+	// plan + push tool_call + push tool_call_update + outcome.
+	if len(replay) != 4 {
+		t.Fatalf("replay holds %d frames, want 4:\n%s", len(replay), strings.Join(asStrings(replay), "\n"))
+	}
+	calls, updates := 0, 0
+	for _, f := range replay {
+		switch {
+		case strings.Contains(string(f), `"sessionUpdate":"tool_call"`):
+			calls++
+			if !strings.Contains(string(f), `"harness-push-40"`) {
+				t.Errorf("replayed push is not the latest: %s", f)
+			}
+		case strings.Contains(string(f), `"sessionUpdate":"tool_call_update"`):
+			updates++
+			if !strings.Contains(string(f), `"harness-push-40"`) {
+				t.Errorf("replayed push result is not the latest: %s", f)
+			}
+		}
+	}
+	if calls != 1 || updates != 1 {
+		t.Errorf("replay holds %d push calls and %d push results, want 1 each", calls, updates)
+	}
+}
+
+// TestReplayKeepsPushPairTogether: an in-flight push — the tool_call with
+// no result yet — must not be evicted by the ring filling up behind it,
+// or the console drops the result when it finally lands.
+func TestReplayKeepsPushPairTogether(t *testing.T) {
+	s := New(Config{SecretKey: "k"})
+	s.runMu.Lock()
+	s.runSessionID = "run-1"
+	s.runMu.Unlock()
+
+	s.EmitRunUpdate(map[string]any{
+		"sessionUpdate": "tool_call", "toolCallId": "harness-push-1",
+		"title": "Harness: git push to branch demo (auto-commit watcher)",
+		"kind":  "execute", "status": "in_progress",
+	})
+	// The push is slow; the agent keeps working while it runs.
+	for i := 0; i < 3*replayCap; i++ {
+		s.EmitRunUpdate(map[string]any{
+			"sessionUpdate": "tool_call", "toolCallId": fmt.Sprintf("t%d", i), "title": "edit file",
+		})
+	}
+	s.EmitRunUpdate(map[string]any{
+		"sessionUpdate": "tool_call_update", "toolCallId": "harness-push-1", "status": "completed",
+	})
+
+	s.mu.Lock()
+	replay := append([][]byte(nil), s.replay...)
+	s.mu.Unlock()
+
+	var sawCall, sawUpdate bool
+	for _, f := range replay {
+		if strings.Contains(string(f), `"harness-push-1"`) {
+			if strings.Contains(string(f), `"sessionUpdate":"tool_call_update"`) {
+				sawUpdate = true
+			} else {
+				sawCall = true
+			}
+		}
+	}
+	if !sawCall {
+		t.Error("the push's opening tool_call was evicted — the console will drop its result")
+	}
+	if !sawUpdate {
+		t.Error("the push's result is missing from the replay")
+	}
+}
+
+func asStrings(frames [][]byte) []string {
+	out := make([]string, len(frames))
+	for i, f := range frames {
+		out[i] = string(f)
+	}
+	return out
+}
+
+// TestReplayKeepsOnlyLatestOutcome: a second outcome supersedes the first
+// rather than leaving two contradictory endings in the ring.
+func TestReplayKeepsOnlyLatestOutcome(t *testing.T) {
+	s := New(Config{SecretKey: "k"})
+	s.runMu.Lock()
+	s.runSessionID = "run-1"
+	s.runMu.Unlock()
+
+	s.EmitRunOutcome("stage succeeded — no changes to push")
+	s.EmitRunOutcome("stage failed — final push error: boom")
+
+	s.mu.Lock()
+	replay := append([][]byte(nil), s.replay...)
+	s.mu.Unlock()
+
+	if len(replay) != 1 {
+		t.Fatalf("replay holds %d frames, want 1", len(replay))
+	}
+	if !strings.Contains(string(replay[0]), "final push error") {
+		t.Errorf("replayed outcome is not the latest: %s", replay[0])
 	}
 }
