@@ -117,7 +117,9 @@ the file). Do NOT overwrite the `## Execute` section or any earlier content.
 
 Record the overall status, the build/test/runtime results, and a one-sentence
 summary. Overall status is `passed` only if the build passes — test and runtime
-failures are documented but do not block the stage.
+failures are documented but do not block the stage. The harness reads that
+line: `failed` ends the run as refused and stops the workflow, with the
+`Summary` line as the reason.
 
 ```markdown
 ## Verify
