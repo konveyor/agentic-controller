@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -902,6 +903,56 @@ func shouldEmitTurn(n, ceiling int) bool {
 	return n%step == 0
 }
 
+// bedrockVersionSuffix matches Bedrock's trailing model version
+// ("…-v1:0"), which names the API contract, not the model.
+var bedrockVersionSuffix = regexp.MustCompile(`-v\d+:\d+$`)
+
+// geoPrefixes are the cross-region inference-profile prefixes Bedrock puts
+// in front of a model id to say which region group serves it.
+var geoPrefixes = []string{"us-gov.", "us.", "eu.", "apac."}
+
+// modelDisplayName strips the routing envelope Bedrock wraps around a
+// model id, leaving the part a viewer recognises:
+// "us.anthropic.claude-sonnet-4-5-20250929-v1:0" becomes
+// "claude-sonnet-4-5-20250929". The plan rung is the only place a viewer
+// sees the model while a run is going, so this keeps identity — the name
+// AND the snapshot date — and drops only the geo group, the vendor
+// namespace and the version suffix. The full id stays on the Gateway the
+// run named, and in the pod's KONVEYOR_LLM_MODEL.
+//
+// Only an id Bedrock itself marked is touched: one carrying a cross-region
+// geo prefix or a "-vN:N" version suffix. Every other id is shown as the
+// run asked for it, because a dot is a vendor namespace nowhere else —
+// "gemini-2.5-pro" keeps its version, an OpenAI-compatible Gateway alias
+// like "migration.production" keeps its scope, and a path-shaped ref
+// (Vertex's "publishers/anthropic/models/…") is left alone entirely.
+func modelDisplayName(model string) string {
+	name := strings.TrimSpace(model)
+	if name == "" || strings.ContainsAny(name, "/ \t") {
+		return model
+	}
+	geo := false
+	for _, prefix := range geoPrefixes {
+		if rest, ok := strings.CutPrefix(name, prefix); ok {
+			name, geo = rest, true
+			break
+		}
+	}
+	if !geo && !bedrockVersionSuffix.MatchString(name) {
+		return model
+	}
+	// Inside a Bedrock id the segment before the first dot is the vendor
+	// namespace ("anthropic", "meta", "ai21"), never part of the name.
+	if _, rest, ok := strings.Cut(name, "."); ok && rest != "" {
+		name = rest
+	}
+	name = bedrockVersionSuffix.ReplaceAllString(name, "")
+	if name == "" {
+		return model
+	}
+	return name
+}
+
 // planTaskRung is the middle rung of the plan ladder the harness shows
 // viewers: which stage this is, what the task asks, and the model and turn
 // budget it runs under. Before this the rung read "Agent works the stage
@@ -928,11 +979,11 @@ func planTaskRung(cfg *config.Config, red *redactor, turnsUsed int) string {
 	case staged && excerpt != "":
 		fmt.Fprintf(&b, "Stage %d of %d — agent works the task: \u201c%s\u201d", stage, count, excerpt)
 	case staged:
-		fmt.Fprintf(&b, "Stage %d of %d — agent works its standing prompt", stage, count)
+		fmt.Fprintf(&b, "Stage %d of %d — agent is working", stage, count)
 	case excerpt != "":
 		fmt.Fprintf(&b, "Agent works the task: \u201c%s\u201d", excerpt)
 	default:
-		b.WriteString("Agent works its standing prompt")
+		b.WriteString("Agent is working")
 	}
 	var budget string
 	switch {
@@ -945,10 +996,11 @@ func planTaskRung(cfg *config.Config, red *redactor, turnsUsed int) string {
 	case cfg.MaxTurns > 0:
 		budget = fmt.Sprintf("up to %d turns", cfg.MaxTurns)
 	}
-	if cfg.Model != "" || budget != "" {
+	model := modelDisplayName(cfg.Model)
+	if model != "" || budget != "" {
 		b.WriteString(" (")
-		if cfg.Model != "" {
-			b.WriteString(cfg.Model)
+		if model != "" {
+			b.WriteString(model)
 			if budget != "" {
 				b.WriteString(", ")
 			}
