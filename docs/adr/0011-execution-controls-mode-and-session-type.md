@@ -4,7 +4,7 @@ title: "Execution Controls and Mode on CRDs"
 description: "Defines runtime-agnostic execution limits and supervision mode on CRDs, with enforcement and translation in the harness."
 status: proposed
 date: "2026-08-05"
-last_updated: "2026-08-31"
+last_updated: "2026-09-24"
 authors:
   - "David Zager"
 last_reviewed: "2026-08-31"
@@ -20,6 +20,10 @@ mode translation, handoff, exit codes, and opaque termination data. ADR 0018
 supersedes this ADR’s AgentRun field-placement table, workflow-stage
 stamping model, and exit-2 status mapping; those original statements remain
 as decision history.
+
+**Update (2026-09-24):** Exit code 3 (refused: the stage's own handoff
+records `Status: failed`) joins the contract; ADR 0018 carries its status
+mapping. The rule below that any non-zero exit stops a workflow holds.
 
 ## Context
 

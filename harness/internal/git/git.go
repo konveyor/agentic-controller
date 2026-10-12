@@ -12,6 +12,7 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	gogitcfg "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/konveyor/migration-harness/internal/logging"
 )
@@ -144,6 +145,46 @@ func HeadSHA(repo *gogit.Repository) (string, error) {
 		return "", fmt.Errorf("resolve HEAD: %w", err)
 	}
 	return head.Hash().String(), nil
+}
+
+// FileChangedSince reports whether the worktree file at relPath differs
+// from its content at baseSHA — created since the base, or different
+// bytes, committed or not. A file absent from the worktree is not a
+// change: there is nothing to read. An empty baseSHA fails open
+// (changed), as Push does: an unknown base must never hide the run's
+// own output.
+func FileChangedSince(repo *gogit.Repository, baseSHA, relPath string) (bool, error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return false, fmt.Errorf("get worktree: %w", err)
+	}
+	current, err := os.ReadFile(filepath.Join(wt.Filesystem.Root(), relPath))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read %s: %w", relPath, err)
+	}
+	if baseSHA == "" {
+		return true, nil
+	}
+
+	commit, err := repo.CommitObject(plumbing.NewHash(baseSHA))
+	if err != nil {
+		return false, fmt.Errorf("resolve base commit %s: %w", baseSHA, err)
+	}
+	f, err := commit.File(relPath)
+	if errors.Is(err, object.ErrFileNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read %s at %s: %w", relPath, baseSHA, err)
+	}
+	base, err := f.Contents()
+	if err != nil {
+		return false, fmt.Errorf("read %s at %s: %w", relPath, baseSHA, err)
+	}
+	return base != string(current), nil
 }
 
 // Push updates refs/heads/<branch> on origin. baseSHA is the commit the

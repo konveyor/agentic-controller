@@ -476,3 +476,75 @@ func TestPushSkipsWhenStageAddsNoNewCommits(t *testing.T) {
 		t.Errorf("remote hash = %s, want stage 1 tip %s", ref.Hash(), hash)
 	}
 }
+
+// initRepoWithCommit initialises a non-bare repository holding one
+// committed README and returns its path, the repository and the SHA of
+// that commit.
+func initRepoWithCommit(t *testing.T) (string, *gogit.Repository, string) {
+	t.Helper()
+	dir := t.TempDir()
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test\n"), 0644)
+	wt, _ := repo.Worktree()
+	wt.Add("README.md")
+	hash, err := wt.Commit("initial", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+	})
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	return dir, repo, hash.String()
+}
+
+func TestFileChangedSince(t *testing.T) {
+	dir, repo, base := initRepoWithCommit(t)
+	const path = ".konveyor/handoff.md"
+	os.MkdirAll(filepath.Join(dir, ".konveyor"), 0755)
+
+	// Absent from the worktree: nothing to read, so not a change.
+	if changed, err := FileChangedSince(repo, base, path); err != nil || changed {
+		t.Errorf("absent file: (%v, %v), want (false, nil)", changed, err)
+	}
+
+	// Present now, absent at the base: new since the base.
+	os.WriteFile(filepath.Join(dir, path), []byte("## Execute\n- Status: failed\n"), 0644)
+	if changed, err := FileChangedSince(repo, base, path); err != nil || !changed {
+		t.Errorf("new uncommitted file: (%v, %v), want (true, nil)", changed, err)
+	}
+
+	// Committed: still a change relative to the original base ...
+	wt, _ := repo.Worktree()
+	wt.Add(path)
+	hash, err := wt.Commit("handoff", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+	})
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if changed, err := FileChangedSince(repo, base, path); err != nil || !changed {
+		t.Errorf("committed file vs old base: (%v, %v), want (true, nil)", changed, err)
+	}
+	// ... but unchanged relative to the commit that carries it.
+	if changed, err := FileChangedSince(repo, hash.String(), path); err != nil || changed {
+		t.Errorf("committed file vs its own commit: (%v, %v), want (false, nil)", changed, err)
+	}
+
+	// Modified in the worktree after that commit: a change again.
+	os.WriteFile(filepath.Join(dir, path), []byte("## Execute\n- Status: failed\n\n## Verify\n- Status: passed\n"), 0644)
+	if changed, err := FileChangedSince(repo, hash.String(), path); err != nil || !changed {
+		t.Errorf("modified file vs its commit: (%v, %v), want (true, nil)", changed, err)
+	}
+
+	// An unknown base fails open.
+	if changed, err := FileChangedSince(repo, "", path); err != nil || !changed {
+		t.Errorf("empty base: (%v, %v), want (true, nil)", changed, err)
+	}
+
+	// A base that does not resolve is an error, not a guess.
+	if _, err := FileChangedSince(repo, "0123456789abcdef0123456789abcdef01234567", path); err == nil {
+		t.Error("unresolvable base: expected an error")
+	}
+}

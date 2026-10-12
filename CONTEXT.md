@@ -256,6 +256,20 @@ _Avoid_: encoding limits in skills as LLM instructions (e.g.
 `MAX_FIX_ITERATIONS`) — limits are harness concerns, not skill
 concerns.
 
+**Handoff** — The file stages hand work to each other through:
+`.konveyor/handoff.md` on the target branch (ADR 0001). Each stage
+appends a `## <Stage>` section; the catalog skills open it with a
+`- Status:` line, the stage's own verdict on its work. The harness
+reads that one line at stage end, when the stage wrote or changed the
+file: `failed` ends the run `Refused` (harness exit 3,
+`Succeeded=False`) and stops the workflow. The agent ends its turn
+normally either way, so the ACP result alone cannot tell a refusal
+from success. The limit-reached wind-down writes to the same file
+(see Execution Limits).
+_Avoid_: reading anything else in the handoff from the harness — the
+section body is knowledge for the next stage, not execution control;
+`Refused` for what the machinery broke — that is `Failed`.
+
 **Skill Content Boundary** — A skill contains knowledge and judgment
 criteria. It never contains execution control. Allowed: domain
 knowledge, approach guidance, quality criteria, output format,
