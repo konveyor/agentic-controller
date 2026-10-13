@@ -16,7 +16,7 @@ generated block by hand.
 | [0001](./0001-agentic-platform-crd-architecture.md) | Agentic Platform CRD Architecture | accepted | amended | 2026-08-31 |
 | [0002](./0002-acp-transport-and-observability.md) | ACP Transport and Agent Observability | accepted | amended | 2026-08-31 |
 | [0003](./0003-hub-curated-api-for-agent-resources.md) | Hub Curated API for Agent Resources | superseded | superseded | 2026-08-31 |
-| [0004](./0004-openshell-as-execution-interface.md) | OpenShell as Execution Interface | accepted | deferred | 2026-08-31 |
+| [0004](./0004-openshell-as-execution-interface.md) | OpenShell as Execution Interface | accepted | amended | 2026-10-13 |
 | [0006](./0006-hub-addon-pattern-for-agent-resources.md) | Hub follows the addon pattern for agent resources | proposed | amended | 2026-08-31 |
 | [0007](./0007-harness-thin-runner-and-skillcard-skills.md) | Harness as Thin Single-Stage Runner with SkillCard-Based Skills | accepted | amended | 2026-08-31 |
 | [0008](./0008-harness-owns-pod-acp-port.md) | Harness Owns the Pod ACP Port (Tee Topology) | proposed | in-sync | 2026-08-31 |
@@ -27,7 +27,7 @@ generated block by hand.
 | [0013](./0013-platform-resolved-params.md) | Platform-resolved agent params (param sources) | proposed | deferred | 2026-08-31 |
 | [0014](./0014-skill-loading-and-prompt-assembly.md) | Skill Loading and Prompt Assembly | proposed | amended | 2026-08-31 |
 | [0015](./0015-skill-packaging-and-delivery.md) | Skill Packaging and Delivery | proposed | amended | 2026-08-31 |
-| [0016](./0016-gateway-crd-as-interim-execution-interface.md) | Gateway CRD as Interim Execution Interface | accepted | amended | 2026-08-31 |
+| [0016](./0016-gateway-crd-as-interim-execution-interface.md) | Gateway CRD as Interim Execution Interface | accepted | amended | 2026-10-13 |
 | [0017](./0017-ask-user-tool-and-elicitation.md) | In-turn human questions via the ask_user tool and ACP elicitation | proposed | in-sync | 2026-08-31 |
 | [0018](./0018-execution-fields-on-agentrun-and-succeeded-condition.md) | Execution Fields on AgentRun, and a `Succeeded` Terminal Condition | proposed | in-sync | 2026-09-24 |
 | [0019](./0019-skill-catalog-repository-layout.md) | Skill Catalog Repository Layout | proposed | in-sync | 2026-08-31 |

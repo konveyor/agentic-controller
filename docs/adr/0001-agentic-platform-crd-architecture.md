@@ -4,7 +4,7 @@ title: "Agentic Platform CRD Architecture"
 description: "Defines the platform's CRDs and the boundaries between the controller, Hub, Agent Sandbox, and harness."
 status: accepted
 date: "2026-06-01"
-last_updated: "2026-09-02"
+last_updated: "2026-10-13"
 authors:
   - "David Zager"
   - "Dylan Murray"
@@ -28,6 +28,30 @@ still creates Agent Sandbox resources directly; OpenShell is deferred by ADR
 another code-graph generator. The earlier image description's Python runtime
 for Graphify was an unimplemented design remnant and has been removed from the
 current image contract.
+
+**Update (2026-10-13):** Two statements below rest on an OpenShell
+architecture that no longer exists upstream, and neither should be relied on.
+
+OpenShell v0.1.0 ([NVIDIA/OpenShell#3195][os-3195], closing
+[#3172][os-3172]) removed `inference.local`, the workspace-global inference
+route, and the `openshell-router` ("privacy router") crate. The replacement is
+per-sandbox provider profiles (`providers/*.yaml`): provider-specific,
+image-coupled, and carrying no model field.
+
+- **Consequences, "Dependency on Agent Sandbox":** "OpenShell (NVIDIA) layers
+  on top for security hardening" describes an intent, not a dependency. We do
+  not consume OpenShell, and adoption stays deferred (ADR 0016).
+- **Credential isolation (Decision):** "Full credential isolation requires
+  OpenShell (NVIDIA) filesystem policy enforcement" is no longer a plan. The
+  mitigation it named was the privacy router, which was deleted. The exposure
+  the original text describes — a determined or compromised agent can read the
+  mounted credential Secret — is **unchanged and currently unmitigated**, and
+  it now has no scheduled remediation. Treat it as an open hardening item
+  rather than something OpenShell will close. ADR 0016's Consequences carry the
+  same correction.
+
+[os-3195]: https://github.com/NVIDIA/OpenShell/pull/3195
+[os-3172]: https://github.com/NVIDIA/OpenShell/issues/3172
 
 ## Context
 

@@ -38,12 +38,12 @@ combination. Each Gateway declares a provider type (e.g. `anthropic`,
 `openai`, `gcp-vertex-ai`), an endpoint, credentials, and a single model
 with context window size and optional tier label. The provider type is
 injected as `KONVEYOR_LLM_PROVIDER` so the harness can map credentials
-to provider-specific env vars (e.g. `ANTHROPIC_API_KEY`). This is a
-pre-OpenShell shim — when OpenShell is integrated, `inference.local`
-eliminates provider-specific credential mapping and the field is removed.
-The controller verifies connectivity on create/update. When OpenShell
-lands, the Gateway CRD is replaced by OpenShell Gateway Services — the
-field names and interaction model are designed to make this swap seamless.
+to provider-specific env vars (e.g. `ANTHROPIC_API_KEY`). The controller
+verifies connectivity on create/update. Gateway is where model selection
+lives: no substrate under consideration offers a neutral inference
+endpoint or a model field, so provider-specific credential mapping has
+nowhere else to go. Treat Gateway as part of the stable API, not as a
+shim awaiting replacement.
 
 **Agent** — A capability definition declaring what is available for
 execution. References zero or more SkillCards and SkillCollections,
@@ -62,8 +62,7 @@ empty list means to a user (not yet runnable, or free choice) is a
 Hub/UI concern, not the controller's. An Agent with no gateways is
 still a valid, Ready template. The Agent controller validates that any
 referenced Gateway CRs exist in the namespace and are Ready, and that
-SkillCards/SkillCollections are ready. When OpenShell is integrated,
-Gateway CRs will be replaced by OpenShell Gateway Services.
+SkillCards/SkillCollections are ready.
 Subagent delegation is a runtime concern — the agent runtime may
 spawn subagents internally but this is not modeled in the CRD.
 _Avoid_: conflating Agent with AgentRun — Agent is a template,
@@ -110,10 +109,9 @@ Succeeded, Failed).
 ## Personas
 
 **Platform Admin** — Creates and manages SkillCards, SkillCollections,
-and OpenShell gateways. Deploys gateways via Helm, configures
-providers and inference routing on each gateway via the OpenShell CLI.
-Responsible for what capabilities and infrastructure are available to
-agents.
+and Gateways. Registers each provider/model combination as a Gateway CR
+with its endpoint and credential Secret. Responsible for what
+capabilities and infrastructure are available to agents.
 
 **Architect / PM** — Creates Agents and AgentWorkflows. Defines the
 workflow for how migrations (or other agentic work) should be
@@ -141,27 +139,26 @@ without adopting its packaging. See ADR 0015.
 agent workloads: Sandbox, SandboxTemplate, SandboxClaim, and
 SandboxWarmPool. Single-container design. Handles pod lifecycle,
 stable identity, network isolation, and warm pool pre-allocation.
-In the current implementation, the controller creates and watches Sandbox
-CRs directly. OpenShell is the deferred execution backend described by ADR
-0004; ADR 0016 records the accepted interim path.
+The controller creates and watches Sandbox CRs directly. This is the
+execution interface, not a step toward one (ADR 0004, ADR 0016).
 
-**OpenShell** — NVIDIA's secure-by-design runtime for autonomous
-agents. It is the intended future execution backend and runs on top of
-Agent Sandbox. It is not the current controller execution interface:
-today, the controller creates Sandbox CRs directly and uses the Gateway
-CRD as the pre-OpenShell provider/model configuration shim (ADR 0016).
-The intended OpenShell end state adds the gateway supervisor, policy
-enforcement, privacy-proxy credential injection, and `inference.local`.
-_Avoid_: describing that deferred end state as the current implementation.
+**OpenShell** — NVIDIA's secure-by-design runtime for autonomous agents,
+layered on top of Agent Sandbox. A CNCF Sandbox project. Konveyor does
+not use it: the controller creates Sandbox CRs directly, and adopting
+OpenShell is deferred (ADR 0016).
+_Avoid_: describing OpenShell as a planned replacement for any Konveyor
+concept. The architecture that earlier ADRs deferred to — a
+workspace-global inference route, a credential-isolating privacy router
+— was removed from OpenShell upstream in v0.1.0 and no longer exists to
+adopt.
 
-**OpenShell Gateway** — An instance of the OpenShell control plane
-deployed as a Kubernetes Service in the deferred OpenShell design. Each
-OpenShell Gateway serves one provider/model combination via
-`inference.local`. The current implementation instead uses the namespaced
-Gateway CRD, which the controller verifies with a Job and whose
-provider-specific credentials are injected into the Sandbox environment.
+**OpenShell provider profile** — OpenShell's current model-access
+mechanism: a per-sandbox YAML file naming one provider. Provider
+profiles are provider-specific, coupled to the sandbox image, and carry
+**no model field**. This is why model selection has no home in the
+substrate and lives in Konveyor's Gateway CRD instead.
 _Avoid_: gateway (lowercase) when referring to Kubernetes Gateway API
-resources — always capitalize when referring to an OpenShell Gateway.
+resources — always capitalize when referring to a Konveyor Gateway.
 
 **Hub** — The Konveyor application inventory and analysis engine. In
 the agentic platform Hub serves two roles: (1) a CRUD gateway for

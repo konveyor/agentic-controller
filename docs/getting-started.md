@@ -84,11 +84,14 @@ kubectl wait deployment/agent-sandbox-controller \
 > chart removes the conversion-webhook Service while the old CRDs still
 > reference it. Fresh installs (the command above) are unaffected.
 
-> **Future:** [OpenShell](https://github.com/NVIDIA/OpenShell) will
-> replace the direct Agent Sandbox dependency. When integrated, the
-> controller will provision sandboxes through the OpenShell gateway
-> API instead of creating Sandbox CRs directly. See
-> [ADR 0004](adr/0004-openshell-as-execution-interface.md).
+> **Note:** the controller creates
+> [Agent Sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
+> `Sandbox` CRs directly. An earlier design routed this through
+> [OpenShell](https://github.com/NVIDIA/OpenShell); that is deferred and the
+> interface it targeted no longer exists upstream. See
+> [ADR 0016](adr/0016-gateway-crd-as-interim-execution-interface.md),
+> and [ADR 0004](adr/0004-openshell-as-execution-interface.md) for the
+> history.
 
 ## 2. Install Konveyor Hub
 

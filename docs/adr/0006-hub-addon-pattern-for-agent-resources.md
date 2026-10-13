@@ -161,7 +161,7 @@ violating domain-agnostic design.
 - The harness must be a Hub API client, increasing its complexity. The
   addon adapter (`shared/addon/adapter`) is a reference implementation.
 - Sandbox pods in managed mode require network egress to Hub (configured
-  via SandboxTemplate network policy and/or OpenShell).
+  via SandboxTemplate network policy).
 - Non-Konveyor use cases work without Hub — the controller and harness
   are self-contained when `HUB_BASE_URL` is absent.
 - ADR 0003's CRUD handler structure survives (Hub still exposes REST

@@ -107,7 +107,6 @@ agentic-controller/
 | [konveyor/tackle2-ui](https://github.com/konveyor/tackle2-ui) | Web UI |
 | [kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) | Sandbox CRDs for agent workloads |
 | [agentskills.io](https://agentskills.io) | The skill format our skills are written in |
-| [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Secure runtime for autonomous agents |
 
 ## Contributing
 

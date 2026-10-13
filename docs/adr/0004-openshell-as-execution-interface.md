@@ -3,17 +3,66 @@ adr: "0004"
 title: "OpenShell as Execution Interface"
 description: "Defines OpenShell as the deferred future execution interface for secure sandbox lifecycle and inference routing."
 status: accepted
-status_note: "Aspirational and deferred; ADR 0016 supersedes the no-Gateway-CRD and immediate OpenShell-client clauses."
+status_note: "The mechanism this ADR defers to was deleted upstream in OpenShell v0.1.0. Retained as history; not a target. ADR 0016 supersedes the no-Gateway-CRD and immediate OpenShell-client clauses."
 date: "2026-07-20"
-last_updated: null
+last_updated: "2026-10-13"
 authors:
   - "David Zager"
-last_reviewed: "2026-08-31"
-implementation_status: deferred
-review_note: "Remains the deferred OpenShell target. ADR 0016 records the accepted current Gateway CRD and direct Agent Sandbox implementation."
+last_reviewed: "2026-10-13"
+implementation_status: amended
+review_note: "Premise falsified. inference.local, the workspace-global inference route, and the privacy router were removed in OpenShell v0.1.0, so the interface this ADR adopts no longer exists. Do not cite it as a planned direction."
 ---
 
 # ADR 0004: OpenShell as Execution Interface
+
+**Update (2026-10-13): the architecture this ADR adopts no longer exists.
+Read what follows as history, not as a plan.**
+
+On 2026-09-09, OpenShell v0.1.0 ([NVIDIA/OpenShell#3195][os-3195], closing
+[#3172][os-3172]) removed:
+
+- **`inference.local`** — the sandbox-local HTTPS inference endpoint.
+- **The workspace-global inference route.**
+- **The `openshell-router` crate** — the "privacy router" that was to strip
+  sandbox-supplied credentials and inject real backend credentials.
+
+The replacement is **per-sandbox provider profiles** (`providers/*.yaml`):
+provider-specific, coupled to the sandbox image, and carrying **no model
+field**. The issue discussion ([#3172][os-3172]) records OpenShell's reasoning
+— the project declined to own a neutral inference endpoint.
+
+Every load-bearing noun in this ADR is affected:
+
+| This ADR says | Actually |
+| --- | --- |
+| Inference routes through `inference.local` | No such endpoint. Provider profiles are per-sandbox and provider-specific. |
+| A privacy router isolates credentials from the agent | The crate was deleted. No credential isolation mechanism replaced it. |
+| One gateway = one model, mirroring OpenShell | Provider profiles have no model field. The model/gateway correspondence was never an OpenShell concept and is now purely ours. |
+| The LLMProvider (now Gateway) CRD is eliminated | Gateway is permanent. With no neutral substrate endpoint, model selection has nowhere else to live — and that is now the CRD's strongest justification, not a weakness. |
+| The OpenShell gateway API owns Sandbox CR lifecycle | The controller owns it, directly, via `agents.x-k8s.io`. |
+
+**What this does and does not change.** ADR 0016 already records the accepted
+implementation — Gateway CRD plus direct Agent Sandbox — so nothing shipping
+depended on this ADR. What changes is the *rationale* it supplied: ADR 0016's
+"one gateway = one model" was justified by OpenShell's routing, and that
+justification is gone. The decision survives on the reasoning in the table
+above instead.
+
+**What is not reopened here.** OpenShell's four deferral blockers
+([#1722][os-1722], [#1795][os-1795], [#1977][os-1977], [#2270][os-2270]) are
+all closed, and OpenShell is now a CNCF Sandbox project with three Red Hat
+maintainers. Reconsidering the ADR 0016 deferral on that basis still requires
+the SDK to be GA, team buy-in, and a superseding ADR. That is a separate
+effort and is deliberately not decided here.
+
+[os-3195]: https://github.com/NVIDIA/OpenShell/pull/3195
+[os-3172]: https://github.com/NVIDIA/OpenShell/issues/3172
+[os-1722]: https://github.com/NVIDIA/OpenShell/issues/1722
+[os-1795]: https://github.com/NVIDIA/OpenShell/issues/1795
+[os-1977]: https://github.com/NVIDIA/OpenShell/issues/1977
+[os-2270]: https://github.com/NVIDIA/OpenShell/issues/2270
+
+---
 
 The controller replaces its direct Agent Sandbox dependency with
 OpenShell as the execution interface. Instead of creating

@@ -60,9 +60,9 @@ type GatewaySpec struct {
 	// Provider is the runtime provider identifier (e.g. "anthropic",
 	// "openai", "gcp-vertex-ai"). Injected as KONVEYOR_LLM_PROVIDER
 	// so the harness can map credentials to provider-specific env vars.
-	// This is a pre-OpenShell shim — when OpenShell is integrated,
-	// inference.local eliminates the need for provider-specific
-	// credential mapping and this field is removed.
+	// Provider-specific credential mapping has no neutral substrate to
+	// move to, so this field is part of the stable API rather than a
+	// shim awaiting removal.
 	// +kubebuilder:validation:MinLength=1
 	Provider string `json:"provider"`
 
@@ -74,8 +74,9 @@ type GatewaySpec struct {
 	CredentialRef GatewayCredentialRef `json:"credentialRef"`
 
 	// Model is the model served by this gateway. Each Gateway serves
-	// exactly one provider/model combination, mirroring the OpenShell
-	// gateway model where one gateway = one model.
+	// exactly one provider/model combination, so that an Agent selects a
+	// model by referencing a Gateway and the controller never has to
+	// interpret a model name.
 	Model GatewayModel `json:"model"`
 }
 
@@ -115,8 +116,8 @@ type GatewayStatus struct {
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Gateway is an LLM service endpoint serving exactly one provider/model
-// combination. Each Gateway has credentials and a single model declaration.
-// This mirrors the OpenShell gateway model where one gateway = one model.
+// combination. Each Gateway has credentials and a single model declaration,
+// which is what makes a model selectable by reference from an Agent.
 // The controller verifies connectivity on create/update.
 type Gateway struct {
 	metav1.TypeMeta   `json:",inline"`

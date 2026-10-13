@@ -1,16 +1,16 @@
 ---
 adr: "0016"
 title: "Gateway CRD as Interim Execution Interface"
-description: "Defines the current Gateway CRD and direct Agent Sandbox path while OpenShell remains the deferred execution target."
+description: "Defines the Gateway CRD and direct Agent Sandbox path as the execution interface. Originally framed as interim pending OpenShell; now permanent."
 status: accepted
-status_note: "Supersedes two clauses of ADR 0004; ADR 0004's OpenShell end-state remains deferred."
+status_note: "Supersedes two clauses of ADR 0004. The OpenShell end-state ADR 0004 deferred to was deleted upstream, so 'interim' in the title is historical — the Gateway CRD is permanent."
 date: "2026-08-17"
-last_updated: "2026-09-01"
+last_updated: "2026-10-13"
 authors:
   - "David Zager"
-last_reviewed: "2026-08-31"
+last_reviewed: "2026-10-13"
 implementation_status: amended
-review_note: "Accepted current state: Gateway CRD, direct Agent Sandbox creation, verification Jobs, and provider-specific credential injection. OpenShell remains deferred."
+review_note: "Accepted current state: Gateway CRD, direct Agent Sandbox creation, verification Jobs, and provider-specific credential injection. OpenShell adoption remains deferred, but the privacy router it deferred to was deleted upstream — the LLM credential exposure in Consequences is now unmitigated and unscheduled."
 ---
 
 # ADR 0016: Gateway CRD as Interim Execution Interface
@@ -33,6 +33,54 @@ domain-agnostic and lets curated default Agents ship without knowing a
 customer's Gateway name at build time. `AgentRun.spec.gateway` and the
 `Agent.spec.gateways` / `AgentRun.spec.gateway` stable seam are otherwise
 unchanged; AgentWorkflow needs no change. Implementation tracked in #209.
+
+**Update (2026-10-13): "interim" is no longer accurate, and the credential
+exposure below has lost its planned remediation.**
+
+OpenShell v0.1.0 ([NVIDIA/OpenShell#3195][os-3195], closing
+[#3172][os-3172]) removed `inference.local`, the workspace-global inference
+route, and the `openshell-router` ("privacy router") crate. ADR 0004 carries
+the full correction.
+
+Three parts of this ADR change meaning as a result:
+
+1. **The credential exposure is unmitigated and unscheduled.** Consequences
+   says LLM credentials reaching the agent environment is "a known dev-preview
+   limitation that OpenShell adoption is expected to close." That expectation
+   is void — the privacy router was deleted, and OpenShell shipped nothing in
+   its place. The exposure is real, present, and now has **no remediation on
+   any roadmap**. It needs its own hardening decision rather than a pointer to
+   someone else's. "Hardening it further before then is out of scope" was
+   reasonable when "then" existed; it no longer does.
+2. **The Gateway CRD is permanent, not interim.** The title's word "interim"
+   and the framing throughout both assumed a successor. There is none:
+   OpenShell provider profiles have no model field, so model selection has no
+   home in the substrate. This strengthens the decision rather than weakening
+   it — Gateway should be treated as stable API, and `GatewaySpec.Provider`'s
+   documented removal trigger (corrected in the same change as this
+   amendment) could never have fired.
+3. **"One gateway = one model" has lost its stated rationale.** It was
+   justified by OpenShell's routing model. It survives on its own merits: a
+   Gateway that serves exactly one provider/model pair is what lets an Agent
+   select a model by reference without the controller interpreting a model
+   name, which ADR 0002 and ADR 0013 require.
+
+Unaffected: the accepted implementation itself. Direct `agents.x-k8s.io`
+Sandbox creation, verification Jobs, presence-gated gateway curation, and the
+`Agent.spec.gateways` / `AgentRun.spec.gateway` seam all stand unchanged.
+
+**Not reopened here.** All four deferral blockers cited below
+([#1722][os-1722], [#1795][os-1795], [#1977][os-1977], [#2270][os-2270]) are
+closed and OpenShell is a CNCF Sandbox project with three Red Hat maintainers.
+Flipping the deferral still requires the SDK to be GA, team buy-in, and a
+superseding ADR — a separate effort, deliberately not decided here.
+
+[os-3195]: https://github.com/NVIDIA/OpenShell/pull/3195
+[os-3172]: https://github.com/NVIDIA/OpenShell/issues/3172
+[os-1722]: https://github.com/NVIDIA/OpenShell/issues/1722
+[os-1795]: https://github.com/NVIDIA/OpenShell/issues/1795
+[os-1977]: https://github.com/NVIDIA/OpenShell/issues/1977
+[os-2270]: https://github.com/NVIDIA/OpenShell/issues/2270
 
 > Numbering note: an earlier PR proposed 0016 (harness git-backend
 > migration) and 0017 (goose credential isolation). Both were nacked and
@@ -82,8 +130,10 @@ It is a Konveyor custom resource, not an OpenShell Gateway Service.
 - **The controller injects LLM credentials into the sandbox** via
   `KONVEYOR_LLM_*` env vars (and `envFrom` for keyless multi-var
   credentials). There is no privacy router; the agent process can read the
-  LLM credentials in its environment. This is the exposure OpenShell's
-  privacy router is meant to close, accepted as a dev-preview limitation.
+  LLM credentials in its environment. Accepted as a dev-preview limitation.
+  (Amended 2026-10-13: the OpenShell privacy router that was to close this
+  was deleted upstream. See the Update above — the exposure now has no
+  planned remediation.)
 - **The Gateway controller verifies connectivity** by running a Job that
   probes `<endpoint>/v1/models` with the resolved credential, surfacing the
   result as `status.connectionVerified`. Providers reached through a cloud
@@ -164,9 +214,12 @@ injection somewhere. The CRD is the simpler interim shape.
 ## Consequences
 
 - **LLM credentials reach the agent environment today.** No privacy router
-  exists in the interim design. This is a known dev-preview limitation that
-  OpenShell adoption is expected to close; hardening it further before then
-  is out of scope for this ADR.
+  exists in this design. Originally recorded as a dev-preview limitation that
+  OpenShell adoption was expected to close, with further hardening out of
+  scope. **Amended 2026-10-13: that remediation no longer exists** — the
+  `openshell-router` crate was deleted in OpenShell v0.1.0 and nothing
+  replaced it. The exposure is unmitigated and unscheduled, and needs a
+  hardening decision of its own rather than a pointer to OpenShell.
 - **Gateway hardening is live work, not throwaway.** Because the Gateway CRD
   is the accepted interim interface, issues against it (e.g. verification
   Job egress/SSRF #102, 401/403 handling #101, watching credential Secrets
