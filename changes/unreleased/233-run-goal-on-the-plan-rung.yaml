@@ -1,0 +1,9 @@
+kind: enhancement
+
+description: >
+  Say what a run is about on the plan ladder even when it was given no stage
+  instructions. The rung now falls back to a `summary` parameter declared by the
+  Agent or the workflow, and failing that to the workflow's guide, rather than
+  saying only that the agent is working. A written task still wins over both,
+  and a declared goal is quoted as one ("agent is working on: …") so it is not
+  mistaken for an instruction this stage was handed.

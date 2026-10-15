@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -174,12 +175,12 @@ func TestFullLifecycle(t *testing.T) {
 		t.Error("expected commit hash")
 	}
 
-	pushed, err := Push(ctx, cred, repo, cred.Branch, baseSHA)
+	outcome, err := Push(ctx, cred, repo, cred.Branch, baseSHA)
 	if err != nil {
 		t.Fatalf("Push: %v", err)
 	}
-	if !pushed {
-		t.Error("Push reported skipped despite new commits")
+	if outcome != PushAdvanced {
+		t.Errorf("Push outcome = %s, want advanced: new commits move the remote", outcome)
 	}
 
 	// Verify the branch exists on the remote
@@ -324,12 +325,12 @@ func TestPushSkipsWhenNoNewCommits(t *testing.T) {
 
 	// No commits beyond the checkout point: the push must be skipped so
 	// no-op runs do not create empty branches on the remote.
-	pushed, err := Push(ctx, cred, repo, cred.Branch, baseSHA)
+	outcome, err := Push(ctx, cred, repo, cred.Branch, baseSHA)
 	if err != nil {
 		t.Fatalf("Push: %v", err)
 	}
-	if pushed {
-		t.Error("Push reported pushed despite no new commits")
+	if outcome != PushSkipped {
+		t.Errorf("Push outcome = %s, want skipped: no new commits means nothing is sent", outcome)
 	}
 
 	remoteRepo, err := gogit.PlainOpen(remoteDir)
@@ -376,12 +377,12 @@ func TestPushWithNewCommitsPushes(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	pushed, err := Push(ctx, cred, repo, cred.Branch, baseSHA)
+	outcome, err := Push(ctx, cred, repo, cred.Branch, baseSHA)
 	if err != nil {
 		t.Fatalf("Push: %v", err)
 	}
-	if !pushed {
-		t.Error("Push reported skipped despite new commits")
+	if outcome != PushAdvanced {
+		t.Errorf("Push outcome = %s, want advanced: new commits move the remote", outcome)
 	}
 
 	remoteRepo, err := gogit.PlainOpen(remoteDir)
@@ -431,12 +432,12 @@ func TestPushSkipsWhenStageAddsNoNewCommits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stage 1 commit: %v", err)
 	}
-	pushed1, err := Push(ctx, cred, repo1, cred.Branch, base1)
+	outcome1, err := Push(ctx, cred, repo1, cred.Branch, base1)
 	if err != nil {
 		t.Fatalf("stage 1 Push: %v", err)
 	}
-	if !pushed1 {
-		t.Error("stage 1 Push reported skipped despite new commits")
+	if outcome1 != PushAdvanced {
+		t.Errorf("stage 1 Push outcome = %s, want advanced: new commits move the remote", outcome1)
 	}
 
 	// Stage 2: fresh clone, checkout resolves the branch stage 1 pushed,
@@ -456,12 +457,12 @@ func TestPushSkipsWhenStageAddsNoNewCommits(t *testing.T) {
 	if base2 != hash.String() {
 		t.Fatalf("stage 2 base = %s, want stage 1 tip %s", base2, hash)
 	}
-	pushed2, err := Push(ctx, cred, repo2, cred.Branch, base2)
+	outcome2, err := Push(ctx, cred, repo2, cred.Branch, base2)
 	if err != nil {
 		t.Fatalf("stage 2 Push: %v", err)
 	}
-	if pushed2 {
-		t.Error("stage 2 Push reported pushed despite no new commits")
+	if outcome2 != PushSkipped {
+		t.Errorf("stage 2 Push outcome = %s, want skipped: no new commits means nothing is sent", outcome2)
 	}
 
 	remoteRepo, err := gogit.PlainOpen(remoteDir)
@@ -546,5 +547,182 @@ func TestFileChangedSince(t *testing.T) {
 	// A base that does not resolve is an error, not a guess.
 	if _, err := FileChangedSince(repo, "0123456789abcdef0123456789abcdef01234567", path); err == nil {
 		t.Error("unresolvable base: expected an error")
+	}
+}
+
+// TestCommitsSince counts what a run produced, which is what the plan
+// ladder's closing rung reports to viewers.
+// TestPushRepeatedIsUpToDateNotAdvanced is the watcher's normal day: it
+// fires on file activity, not on commits, so once the agent has
+// committed once every later push reaches the remote and finds nothing
+// new. Those must not read as the remote having moved — the plan
+// ladder counts advances, and counting these reported tens of "pushes"
+// for a single commit.
+func TestPushRepeatedIsUpToDateNotAdvanced(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+
+	cred := &Credentials{
+		Username: "test",
+		Token:    "token",
+		RepoURL:  remoteDir,
+		Branch:   "migration-work",
+	}
+	ctx := context.Background()
+	cloneDir := filepath.Join(t.TempDir(), "work")
+	repo, err := Clone(ctx, cred, cloneDir)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if err := CheckoutBranch(repo, cred.Branch); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+	baseSHA, err := HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+
+	wt, _ := repo.Worktree()
+	os.WriteFile(filepath.Join(cloneDir, "migrated.java"), []byte("class Foo {}\n"), 0644)
+	wt.Add("migrated.java")
+	if _, err := wt.Commit("migrate", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+	}); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	// The watcher's first push after that commit really does move the
+	// remote.
+	if outcome, err := Push(ctx, cred, repo, cred.Branch, baseSHA); err != nil || outcome != PushAdvanced {
+		t.Fatalf("first Push = %s, %v; want advanced, nil", outcome, err)
+	}
+
+	// Every quiet period after it does not. HEAD is past baseSHA now, so
+	// the skip guard no longer fires and a real push goes out each time.
+	for i := 0; i < 3; i++ {
+		outcome, err := Push(ctx, cred, repo, cred.Branch, baseSHA)
+		if err != nil {
+			t.Fatalf("repeat Push %d: %v", i, err)
+		}
+		if outcome != PushUpToDate {
+			t.Errorf("repeat Push %d = %s, want already up to date", i, outcome)
+		}
+	}
+}
+
+func TestCommitsSince(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+
+	cred := &Credentials{
+		Username: "test",
+		Token:    "token",
+		RepoURL:  remoteDir,
+		Branch:   "migration-work",
+	}
+	cloneDir := filepath.Join(t.TempDir(), "work")
+	repo, err := Clone(context.Background(), cred, cloneDir)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if err := CheckoutBranch(repo, cred.Branch); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+	baseSHA, err := HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+
+	if n, err := CommitsSince(repo, baseSHA); err != nil || n != 0 {
+		t.Fatalf("CommitsSince before any work = %d, %v; want 0, nil", n, err)
+	}
+
+	wt, _ := repo.Worktree()
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("migrated%d.java", i)
+		os.WriteFile(filepath.Join(cloneDir, name), []byte("class Foo {}\n"), 0644)
+		wt.Add(name)
+		if _, err := wt.Commit("migrate: "+name, &gogit.CommitOptions{
+			Author: &object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+		}); err != nil {
+			t.Fatalf("commit %d: %v", i, err)
+		}
+	}
+
+	if n, err := CommitsSince(repo, baseSHA); err != nil || n != 3 {
+		t.Errorf("CommitsSince after 3 commits = %d, %v; want 3, nil", n, err)
+	}
+
+	// Unknown starting point and an unrelated base are both "cannot
+	// tell", never a count the rung would state as fact.
+	if n, err := CommitsSince(repo, ""); err != nil || n != -1 {
+		t.Errorf("CommitsSince with no base = %d, %v; want -1, nil", n, err)
+	}
+	stranger := plumbing.NewHash("0123456789012345678901234567890123456789").String()
+	if n, err := CommitsSince(repo, stranger); err != nil || n != -1 {
+		t.Errorf("CommitsSince with a base not in history = %d, %v; want -1, nil", n, err)
+	}
+}
+
+// TestCommitsSinceStopsAtTheWalkBound: a base the agent took off the
+// first-parent chain — by rebasing, resetting, or merging from the
+// other side — is not found, and without a bound the walk reads the
+// whole repository back to its root to discover that. The bound gives
+// the same "unknown" without the reading. The clone is full depth and
+// the repositories this runs against are decade-old applications, so
+// the unbounded walk is tens of thousands of objects on the exit path.
+func TestCommitsSinceStopsAtTheWalkBound(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+
+	cred := &Credentials{
+		Username: "test",
+		Token:    "token",
+		RepoURL:  remoteDir,
+		Branch:   "migration-work",
+	}
+	cloneDir := filepath.Join(t.TempDir(), "work")
+	repo, err := Clone(context.Background(), cred, cloneDir)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if err := CheckoutBranch(repo, cred.Branch); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+	baseSHA, err := HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+
+	wt, _ := repo.Worktree()
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("migrated%d.java", i)
+		os.WriteFile(filepath.Join(cloneDir, name), []byte("class Foo {}\n"), 0644)
+		wt.Add(name)
+		if _, err := wt.Commit("migrate: "+name, &gogit.CommitOptions{
+			Author: &object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+		}); err != nil {
+			t.Fatalf("commit %d: %v", i, err)
+		}
+	}
+
+	// A bound the run's own commits fit inside changes nothing: the
+	// base is found before the walk is anywhere near it.
+	if n, err := commitsSince(repo, baseSHA, 5000); err != nil || n != 5 {
+		t.Errorf("commitsSince within the bound = %d, %v; want 5, nil", n, err)
+	}
+
+	// A base further back than the bound allows is reported unknown
+	// rather than walked to. Shrinking the bound to 2 stands in for the
+	// real case: a base that is not on the chain at all, with a
+	// repository far longer than the bound behind it.
+	if n, err := commitsSince(repo, baseSHA, 2); err != nil || n != -1 {
+		t.Errorf("commitsSince past the bound = %d, %v; want -1, nil", n, err)
+	}
+
+	// The bound is a ceiling on the walk, not on the count: a base
+	// exactly at it is still found and counted.
+	if n, err := commitsSince(repo, baseSHA, 5); err != nil || n != 5 {
+		t.Errorf("commitsSince with the base exactly at the bound = %d, %v; want 5, nil", n, err)
 	}
 }
