@@ -97,6 +97,10 @@ agentic-controller/
 - Kubernetes 1.33+ (ImageVolume GA)
 - OpenShift 4.20+
 - Agent Sandbox v1.0.x
+- containerd 2.x or CRI-O — image volumes are mounted by the kubelet
+  through the CRI, and `cri-dockerd` does not implement them
+- amd64, for the published controller and skill-bundle images; an arm64
+  cluster needs those built locally (see `images/README.md`)
 
 ## Related projects
 
