@@ -1951,7 +1951,7 @@ func (r *AgentRunReconciler) reconcileTTL(
 	}
 
 	log.FromContext(ctx).Info("Deleting finished AgentRun (TTL elapsed)",
-		"agentRun", run.Name, "ttl", ttl.String(), "completionTime", run.Status.CompletionTime)
+		"agentRun", run.Name, "ttl", ttl.String(), "completionTime", run.Status.CompletionTime.Time)
 	if err := r.Delete(ctx, run); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
