@@ -75,8 +75,13 @@ if helm status agent-sandbox --namespace agent-sandbox-system &>/dev/null; then
     # first — recreate the Kind cluster instead.)
     echo "Agent Sandbox already installed; applying CRDs then upgrading to ${AGENT_SANDBOX_TAG}..."
     kubectl apply -f "${SANDBOX_DIR}/helm/crds/"
+    # namespace.create=false for the same reason as the install path below:
+    # the namespace was created out-of-band by --create-namespace, so it
+    # carries no Helm ownership metadata and the chart's own Namespace
+    # resource cannot adopt it ("invalid ownership metadata").
     helm upgrade agent-sandbox "${SANDBOX_DIR}/helm/" \
         --namespace agent-sandbox-system \
+        --set namespace.create=false \
         --set image.tag="${AGENT_SANDBOX_TAG}"
 else
     # Let Helm create the namespace (--create-namespace) and disable the
