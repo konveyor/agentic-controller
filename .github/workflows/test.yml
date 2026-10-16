@@ -3,6 +3,7 @@ name: Tests
 on:
   push:
   pull_request:
+  merge_group:
 
 permissions: {}
 
@@ -93,3 +94,33 @@ jobs:
       - name: Running Tests
         working-directory: harness
         run: go test ./...
+
+  tests:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    name: tests
+    needs:
+      - test
+      - api-test
+      - harness-test
+    steps:
+      - name: Check test results
+        env:
+          RESULT_TEST: ${{ needs.test.result }}
+          RESULT_API_TEST: ${{ needs.api-test.result }}
+          RESULT_HARNESS_TEST: ${{ needs.harness-test.result }}
+        run: |
+          FAILED=false
+          for result_var in RESULT_TEST RESULT_API_TEST RESULT_HARNESS_TEST; do
+            result="${!result_var}"
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "::error::${result_var} = ${result}"
+              FAILED=true
+            fi
+          done
+
+          if [[ "$FAILED" == "true" ]]; then
+            exit 1
+          fi
+
+          echo "All checks passed"

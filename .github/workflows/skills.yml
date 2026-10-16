@@ -5,6 +5,7 @@ name: Validate and Build Skills
 
 on:
   pull_request:
+  merge_group:
   workflow_dispatch: {}
 
 permissions: {}
@@ -34,3 +35,29 @@ jobs:
 
       - name: Build skill bundle
         run: make skill-build
+
+  skills:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    name: skills
+    needs:
+      - validate-and-build
+    steps:
+      - name: Check results
+        env:
+          RESULT_VALIDATE_AND_BUILD: ${{ needs.validate-and-build.result }}
+        run: |
+          FAILED=false
+          for result_var in RESULT_VALIDATE_AND_BUILD; do
+            result="${!result_var}"
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "::error::${result_var} = ${result}"
+              FAILED=true
+            fi
+          done
+
+          if [[ "$FAILED" == "true" ]]; then
+            exit 1
+          fi
+
+          echo "All checks passed"
