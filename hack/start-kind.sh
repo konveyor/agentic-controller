@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
-# Start a Kind cluster and install Agent Sandbox for e2e testing.
+# Start a cluster and install Agent Sandbox for e2e testing. Kind by default;
+# against a cluster that already exists, only the Agent Sandbox and llemulator
+# steps run.
 #
 # Environment variables:
 #   KIND_CLUSTER        Cluster name (default: agentic-controller-e2e)
 #   KIND_IMAGE          Node image (default: Kind's default for the installed version)
+#   CLUSTER_TOOL        kind (default), minikube, or none — how images reach
+#                       the node, and whether this script can create a cluster;
+#                       see hack/lib/cluster.sh
+#   CLUSTER_NAME        Cluster/profile name (default: $KIND_CLUSTER)
+#   LOAD_IMAGE_HOOK     Script taking image refs, for any other cluster
 #   AGENT_SANDBOX_TAG   Agent Sandbox version (default: the version pinned in go.mod)
 #   CONTAINER_TOOL      Container runtime: docker or podman (default: auto-detect)
 
 set -euo pipefail
+
+# shellcheck source=hack/lib/cluster.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cluster.sh"
 
 KIND_CLUSTER="${KIND_CLUSTER:-agentic-controller-e2e}"
 # Default the Agent Sandbox git tag from the version pinned in go.mod so the
@@ -41,15 +51,21 @@ if [ "${CONTAINER_TOOL}" = "podman" ]; then
 fi
 
 # Check if cluster already exists.
-if kind get clusters 2>/dev/null | grep -qx "${KIND_CLUSTER}"; then
-    echo "Kind cluster '${KIND_CLUSTER}' already exists. Skipping creation."
-else
+if cluster_exists; then
+    echo "Cluster '$(cluster_name)' already exists. Skipping creation."
+elif [ "$(cluster_tool)" = kind ]; then
     echo "Creating Kind cluster '${KIND_CLUSTER}'..."
     kind_args=(create cluster --name "${KIND_CLUSTER}" --wait 5m)
     if [ -n "${KIND_IMAGE:-}" ]; then
         kind_args+=(--image "${KIND_IMAGE}")
     fi
     kind "${kind_args[@]}"
+else
+    # Only Kind is created here. Anything else is expected to exist already —
+    # the flags a cluster needs (CNI, container runtime, resources) are the
+    # user's call, not this script's.
+    echo "ERROR: cluster '$(cluster_name)' not found, and CLUSTER_TOOL=$(cluster_tool) does not create one" >&2
+    exit 1
 fi
 
 echo ""
@@ -75,8 +91,13 @@ if helm status agent-sandbox --namespace agent-sandbox-system &>/dev/null; then
     # first — recreate the Kind cluster instead.)
     echo "Agent Sandbox already installed; applying CRDs then upgrading to ${AGENT_SANDBOX_TAG}..."
     kubectl apply -f "${SANDBOX_DIR}/helm/crds/"
+    # namespace.create=false for the same reason as the install path below:
+    # the namespace was created out-of-band by --create-namespace, so it
+    # carries no Helm ownership metadata and the chart's own Namespace
+    # resource cannot adopt it ("invalid ownership metadata").
     helm upgrade agent-sandbox "${SANDBOX_DIR}/helm/" \
         --namespace agent-sandbox-system \
+        --set namespace.create=false \
         --set image.tag="${AGENT_SANDBOX_TAG}"
 else
     # Let Helm create the namespace (--create-namespace) and disable the
@@ -109,17 +130,10 @@ git -C "${LLEMULATOR_DIR}" remote add origin https://github.com/fabianvf/llemula
 git -C "${LLEMULATOR_DIR}" fetch -q --depth 1 origin "${LLEMULATOR_REF}"
 git -C "${LLEMULATOR_DIR}" checkout -q FETCH_HEAD
 
-# Build the llemulator image and load into Kind.
+# Build the llemulator image and load it into the cluster.
 LLEM_IMG="docker.io/library/openai-emulator:e2e"
 ${CONTAINER_TOOL} build -t "${LLEM_IMG}" "${LLEMULATOR_DIR}"
-if [ "${CONTAINER_TOOL}" = "podman" ]; then
-    LLEM_TMP=$(mktemp -d)
-    ${CONTAINER_TOOL} save "${LLEM_IMG}" -o "${LLEM_TMP}/llemulator.tar"
-    kind load image-archive "${LLEM_TMP}/llemulator.tar" --name "${KIND_CLUSTER}"
-    rm -rf "${LLEM_TMP}"
-else
-    kind load docker-image "${LLEM_IMG}" --name "${KIND_CLUSTER}"
-fi
+cluster_load_images "${LLEM_IMG}"
 
 # Deploy llemulator using our own manifest (imagePullPolicy: Never).
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -137,5 +151,7 @@ kubectl get nodes
 echo ""
 kubectl get pods -A
 echo ""
-echo "Kind cluster '${KIND_CLUSTER}' is ready with Agent Sandbox ${AGENT_SANDBOX_TAG}."
-echo "To use: export KUBECONFIG=\$(kind get kubeconfig --name ${KIND_CLUSTER})"
+echo "Cluster '$(cluster_name)' is ready with Agent Sandbox ${AGENT_SANDBOX_TAG}."
+if [ "$(cluster_tool)" = kind ]; then
+    echo "To use: export KUBECONFIG=\$(kind get kubeconfig --name ${KIND_CLUSTER})"
+fi
