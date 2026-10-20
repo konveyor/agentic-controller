@@ -1,16 +1,16 @@
 ---
 adr: "0016"
 title: "Gateway CRD as Interim Execution Interface"
-description: "Defines the current Gateway CRD and direct Agent Sandbox path while OpenShell remains the deferred execution target."
+description: "Defines the Gateway CRD and direct Agent Sandbox path as the accepted default while OpenShell adoption remains deferred."
 status: accepted
-status_note: "Supersedes two clauses of ADR 0004; ADR 0004's OpenShell end-state remains deferred."
+status_note: "Supersedes two clauses of ADR 0004. OpenShell remains under evaluation; its provider-access model does not imply removal of the Gateway CRD."
 date: "2026-08-17"
-last_updated: "2026-09-01"
+last_updated: "2026-10-20"
 authors:
   - "David Zager"
-last_reviewed: "2026-08-31"
+last_reviewed: "2026-10-20"
 implementation_status: amended
-review_note: "Accepted current state: Gateway CRD, direct Agent Sandbox creation, verification Jobs, and provider-specific credential injection. OpenShell remains deferred."
+review_note: "Gateway CRD, direct Agent Sandbox creation, verification Jobs, and credential injection remain the default. OpenShell v0.1.3 retains credential isolation through provider attachment; managed model routing was removed. Adoption and credential-hardening integration remain unimplemented."
 ---
 
 # ADR 0016: Gateway CRD as Interim Execution Interface
@@ -33,6 +33,54 @@ domain-agnostic and lets curated default Agents ship without knowing a
 customer's Gateway name at build time. `AgentRun.spec.gateway` and the
 `Agent.spec.gateways` / `AgentRun.spec.gateway` stable seam are otherwise
 unchanged; AgentWorkflow needs no change. Implementation tracked in #209.
+
+**Update (2026-10-20): correction of an earlier proposed amendment — OpenShell still
+offers credential isolation; Gateway's lifetime is a Konveyor decision.**
+
+An earlier proposed amendment ([closed PR #271](https://github.com/konveyor/agentic-controller/pull/271)) incorrectly inferred that removal of `openshell-router`
+left no credential isolation mechanism and made Gateway permanent. OpenShell
+removed the managed route in [#3195][os-3195], but its [v0.1.3 inference
+documentation][os-inference] describes native requests through a sandbox proxy
+that resolves placeholder credentials after policy and endpoint checks. The
+OpenShell gateway still manages sandboxes, providers, and policy. ADR 0004's
+amendment records the pinned evidence and corrects the historical design.
+
+Three factual distinctions correct the earlier amendment:
+
+1. **Model selection and credential isolation are separate.** Konveyor's
+   Gateway selects a provider/model pair. An OpenShell provider attachment
+   grants service access without selecting or rewriting a model. Upstream's
+   lack of managed model routing does not establish that our CRD must be
+   permanent. Whether to keep, adapt, or replace it remains for discussion.
+2. **Our credential exposure remains; an upstream mitigation exists.** The
+   current controller still injects real LLM credentials into the Sandbox.
+   Using OpenShell could replace that with placeholders, but only after the
+   harness, provider profiles, and credential lifecycle are integrated and
+   tested. Installing OpenShell alongside our current Sandbox path does not
+   provide that protection. The prior claim that no remediation exists on any
+   roadmap is withdrawn; an implemented Konveyor mitigation is still absent.
+3. **Provider configuration remains necessary.** The workload owns native
+   endpoint/model configuration, so adopting OpenShell does not automatically
+   remove `Gateway.spec.provider`. One provider/model per Gateway remains our
+   selection rule, not an OpenShell gateway cardinality requirement.
+
+The default and the `Agent.spec.gateways` / `AgentRun.spec.gateway` selection
+contract are unchanged. The existing permission for a default-off OpenShell
+evaluation remains. Closed upstream tickets alone do not satisfy our adoption
+bar: [#1795][os-1795] was closed as `not_planned`; SDK availability is not proof
+of GA or validation on our target clusters. Changing the default still needs
+the separate decision described below. The historical text about removing
+Gateway and replacing its references with Services relies on upstream
+assumptions that have changed. This amendment does not choose a replacement
+design or change the existing adoption decision.
+
+[os-3195]: https://github.com/NVIDIA/OpenShell/pull/3195
+[os-3172]: https://github.com/NVIDIA/OpenShell/issues/3172
+[os-1722]: https://github.com/NVIDIA/OpenShell/issues/1722
+[os-1795]: https://github.com/NVIDIA/OpenShell/issues/1795
+[os-1977]: https://github.com/NVIDIA/OpenShell/issues/1977
+[os-2270]: https://github.com/NVIDIA/OpenShell/issues/2270
+[os-inference]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/docs/how-it-works/inference.mdx
 
 > Numbering note: an earlier PR proposed 0016 (harness git-backend
 > migration) and 0017 (goose credential isolation). Both were nacked and
@@ -82,8 +130,9 @@ It is a Konveyor custom resource, not an OpenShell Gateway Service.
 - **The controller injects LLM credentials into the sandbox** via
   `KONVEYOR_LLM_*` env vars (and `envFrom` for keyless multi-var
   credentials). There is no privacy router; the agent process can read the
-  LLM credentials in its environment. This is the exposure OpenShell's
-  privacy router is meant to close, accepted as a dev-preview limitation.
+  LLM credentials in its environment. Accepted as a dev-preview limitation.
+  (Amended 2026-10-20: OpenShell provider attachment offers credential
+  isolation, but Konveyor has not integrated it. See the Update above.)
 - **The Gateway controller verifies connectivity** by running a Job that
   probes `<endpoint>/v1/models` with the resolved credential, surfacing the
   result as `status.connectionVerified`. Providers reached through a cloud
@@ -164,9 +213,12 @@ injection somewhere. The CRD is the simpler interim shape.
 ## Consequences
 
 - **LLM credentials reach the agent environment today.** No privacy router
-  exists in the interim design. This is a known dev-preview limitation that
-  OpenShell adoption is expected to close; hardening it further before then
-  is out of scope for this ADR.
+  exists in this design. Originally recorded as a dev-preview limitation that
+  OpenShell adoption was expected to close, with further hardening out of
+  scope. **Amended 2026-10-20:** OpenShell still provides credential isolation
+  through its sandbox proxy and attached providers. This is a candidate
+  mitigation that requires Konveyor integration, not protection delivered by
+  our current implementation. See the Update above.
 - **Gateway hardening is live work, not throwaway.** Because the Gateway CRD
   is the accepted interim interface, issues against it (e.g. verification
   Job egress/SSRF #102, 401/403 handling #101, watching credential Secrets

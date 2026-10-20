@@ -4,13 +4,13 @@ title: "Agentic Platform CRD Architecture"
 description: "Defines the platform's CRDs and the boundaries between the controller, Hub, Agent Sandbox, and harness."
 status: accepted
 date: "2026-06-01"
-last_updated: "2026-09-02"
+last_updated: "2026-10-20"
 authors:
   - "David Zager"
   - "Dylan Murray"
-last_reviewed: "2026-08-31"
+last_reviewed: "2026-10-20"
 implementation_status: amended
-review_note: "Core CRD, workflow, git-persistence, and Agent/AgentRun decisions remain useful. The CRD list, Gateway name, params delivery, skill delivery, Hub API, and commit-authorship details are amended in the ADR or superseded by ADRs 0006, 0007, 0009, 0015, and 0016."
+review_note: "Core decisions remain useful with amendments in ADRs 0006, 0007, 0009, 0015, and 0016. OpenShell credential isolation survives managed-route removal; its integration and the separate harness push-credential boundary remain unvalidated."
 ---
 
 # ADR 0001: Agentic Platform CRD Architecture
@@ -28,6 +28,31 @@ still creates Agent Sandbox resources directly; OpenShell is deferred by ADR
 another code-graph generator. The earlier image description's Python runtime
 for Graphify was an unimplemented design remnant and has been removed from the
 current image contract.
+
+**Update (2026-10-20): correction of an earlier proposed amendment — distinguish
+LLM credential substitution from harness push-credential isolation.**
+
+OpenShell removed managed inference routing in [#3195][os-3195], but retained
+credential isolation through attached providers and the sandbox proxy. Its
+[v0.1.3 inference documentation][os-inference] describes that mechanism. The
+earlier proposed amendment's claim that no credential mitigation remained was wrong.
+
+Two original statements still need qualification:
+
+- **Consequences, "Dependency on Agent Sandbox":** OpenShell security
+  hardening is an adoption intent, not protection in the current controller.
+  Konveyor creates Agent Sandbox resources directly (ADR 0016).
+- **Credential isolation (Decision):** This paragraph concerns the harness's
+  git push credentials and a readable Secret mount. It did not describe the
+  LLM inference router. Provider credential non-disclosure alone does not
+  establish that only the harness can exercise push authority; an agent able
+  to use a permitted provider can make authorized requests without knowing its
+  real credential. This research has not established whether or how OpenShell
+  would enforce the harness-only push boundary in our workload.
+
+[os-3195]: https://github.com/NVIDIA/OpenShell/pull/3195
+[os-3172]: https://github.com/NVIDIA/OpenShell/issues/3172
+[os-inference]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/docs/how-it-works/inference.mdx
 
 ## Context
 

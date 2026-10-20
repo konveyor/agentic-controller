@@ -1,19 +1,76 @@
 ---
 adr: "0004"
 title: "OpenShell as Execution Interface"
-description: "Defines OpenShell as the deferred future execution interface for secure sandbox lifecycle and inference routing."
+description: "Records the deferred OpenShell execution interface, with corrections to its upstream inference-routing assumptions."
 status: accepted
-status_note: "Aspirational and deferred; ADR 0016 supersedes the no-Gateway-CRD and immediate OpenShell-client clauses."
+status_note: "OpenShell adoption remains deferred. The managed inference route was removed, but the gateway and credential isolation remain. ADR 0016 supersedes the no-Gateway-CRD and immediate OpenShell-client clauses."
 date: "2026-07-20"
-last_updated: null
+last_updated: "2026-10-20"
 authors:
   - "David Zager"
-last_reviewed: "2026-08-31"
-implementation_status: deferred
-review_note: "Remains the deferred OpenShell target. ADR 0016 records the accepted current Gateway CRD and direct Agent Sandbox implementation."
+last_reviewed: "2026-10-20"
+implementation_status: amended
+review_note: "Rechecked against OpenShell v0.1.3. Managed inference routing was removed; the gateway, sandbox lifecycle API, and provider credential isolation remain. Implications for Konveyor's adoption design remain open for discussion."
 ---
 
 # ADR 0004: OpenShell as Execution Interface
+
+**Update (2026-10-20): correction of an earlier proposed amendment — managed
+inference routing was removed; the gateway and credential isolation remain.**
+
+An earlier proposed amendment ([closed PR #271](https://github.com/konveyor/agentic-controller/pull/271)) incorrectly concluded that deleting the privacy-router
+crate deleted credential isolation, and that the OpenShell gateway no longer
+existed. This correction replaces those conclusions, preserving the original
+design below as historical context. Evidence is pinned to OpenShell v0.1.3
+(`e1f3c82caa3ed3b65de22889ae7ef32a774878ef`).
+
+[PR #3195][os-3195] merged on 2026-09-09; [v0.1.0][os-release] shipped on
+2026-09-25. It removed `inference.local`, workspace-global managed inference
+routes, and `openshell-router`. The [replacement access path][os-inference]
+uses attached providers: workloads call native APIs with placeholder
+credentials, and the sandbox proxy substitutes real values after policy and
+credential endpoint checks. It no longer selects or rewrites the model.
+
+| Original assumption | Verified upstream behavior |
+| --- | --- |
+| An OpenShell gateway serves one provider/model | The gateway manages workspaces, sandboxes, providers, and policy. A provider attachment grants access; the workload selects the model. |
+| A neutral inference route removes runtime-specific configuration | The harness/runtime still needs native endpoint, provider, model, and request configuration. OpenShell can keep the real credential out of that workload. |
+| OpenShell adoption removes Konveyor's Gateway CRD | Upstream behavior does not determine this. The future of Konveyor's provider/model selection resource remains a design question. |
+| OpenShell manages sandbox lifecycle through its API | Still supported. Its Kubernetes compute driver creates Agent Sandbox resources. Konveyor currently creates them directly and does not receive OpenShell enforcement merely by sharing that dependency. |
+
+A [provider profile][os-profiles] is a reusable service-access definition,
+not a per-sandbox instance. A provider supplies concrete credentials/config;
+attachment grants a sandbox access to it. Profiles have no first-class model
+selection, but that does not prove Gateway is the only possible home for
+model configuration or must be permanent. One provider/model per Konveyor
+Gateway remains our current selection rule, not an upstream requirement.
+
+The [gateway/supervisor architecture][os-architecture] survives. The original
+single-player and fixed-namespace limitations below need reassessment against
+current workspace support. Closed issue status alone does not prove delivery:
+[#1795][os-1795], for example, was closed as `not_planned`. The [Go SDK][os-sdk]
+exists, while the [Kubernetes Helm deployment][os-helm] is still described as
+experimental. These are distinct from our SDK-GA and team-buy-in requirements.
+
+ADR 0016's default remains Gateway CRD plus direct Agent Sandbox. Its
+permission to evaluate OpenShell behind a default-off feature flag remains
+valid. These are existing decisions. This amendment corrects upstream facts;
+any resulting change to our adoption plans remains for discussion.
+
+[os-3195]: https://github.com/NVIDIA/OpenShell/pull/3195
+[os-3172]: https://github.com/NVIDIA/OpenShell/issues/3172
+[os-1722]: https://github.com/NVIDIA/OpenShell/issues/1722
+[os-1795]: https://github.com/NVIDIA/OpenShell/issues/1795
+[os-1977]: https://github.com/NVIDIA/OpenShell/issues/1977
+[os-2270]: https://github.com/NVIDIA/OpenShell/issues/2270
+[os-release]: https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.0
+[os-inference]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/docs/how-it-works/inference.mdx
+[os-profiles]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/docs/how-it-works/providers/profiles.mdx
+[os-architecture]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/docs/about/architecture.mdx
+[os-sdk]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/sdk/go/README.md
+[os-helm]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/deploy/helm/openshell/README.md
+
+---
 
 The controller replaces its direct Agent Sandbox dependency with
 OpenShell as the execution interface. Instead of creating
