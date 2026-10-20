@@ -3,7 +3,7 @@ adr: "0016"
 title: "Gateway CRD as Interim Execution Interface"
 description: "Defines the Gateway CRD and direct Agent Sandbox path as the accepted default while OpenShell adoption remains deferred."
 status: accepted
-status_note: "Supersedes two clauses of ADR 0004. OpenShell remains under evaluation; its provider-access model does not imply removal of the Gateway CRD."
+status_note: "Supersedes two clauses of ADR 0004. OpenShell remains under evaluation; ADR 0021 supersedes its predetermined destination without changing the current Gateway/Sandbox default."
 date: "2026-08-17"
 last_updated: "2026-10-20"
 authors:
@@ -14,6 +14,15 @@ review_note: "Gateway CRD, direct Agent Sandbox creation, verification Jobs, and
 ---
 
 # ADR 0016: Gateway CRD as Interim Execution Interface
+
+**Update (2026-10-20):** [ADR 0021](./0021-shared-runtime-and-conditional-lightspeed-execution.md)
+supersedes only this ADR's deferred OpenShell destination: the "What ADR 0004
+keeps" end-state and the promise that `inference.local` will remove
+`Gateway.spec.provider`. It selects shared-runtime reuse independently of
+conditional Lightspeed operator adoption. The present Gateway selection
+contract and direct Agent Sandbox default remain unchanged. OpenShell
+integration and any actual default/backend change require separate delivery
+work; neither is approved by correcting upstream facts.
 
 **Update (2026-09-01):** `Agent.spec.gateways` becomes optional
 (`MinItems=1` → `MinItems=0`). The gateway list is reframed as a

@@ -3,7 +3,7 @@ adr: "0004"
 title: "OpenShell as Execution Interface"
 description: "Records the deferred OpenShell execution interface, with corrections to its upstream inference-routing assumptions."
 status: accepted
-status_note: "OpenShell adoption remains deferred. The managed inference route was removed, but the gateway and credential isolation remain. ADR 0016 supersedes the no-Gateway-CRD and immediate OpenShell-client clauses."
+status_note: "OpenShell adoption remains deferred. The managed inference route was removed, but the gateway and credential isolation remain. ADR 0016 supersedes the no-Gateway-CRD and immediate OpenShell-client clauses; ADR 0021 supersedes the predetermined OpenShell destination."
 date: "2026-07-20"
 last_updated: "2026-10-20"
 authors:
@@ -14,6 +14,14 @@ review_note: "Rechecked against OpenShell v0.1.3. Managed inference routing was 
 ---
 
 # ADR 0004: OpenShell as Execution Interface
+
+**Update (2026-10-20):** [ADR 0021](./0021-shared-runtime-and-conditional-lightspeed-execution.md)
+supersedes the deferred choice of OpenShell as the predetermined execution
+destination and the assumption that its adoption automatically removes Konveyor
+Gateway/provider configuration. OpenShell remains a portability target with
+integration tracked separately. The historical design below is not a new
+integration plan. ADR 0016's current Gateway and direct Agent Sandbox default
+remain in force.
 
 **Update (2026-10-20): correction of an earlier proposed amendment — managed
 inference routing was removed; the gateway and credential isolation remain.**

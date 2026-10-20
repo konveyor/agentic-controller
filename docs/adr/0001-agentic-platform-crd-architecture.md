@@ -15,6 +15,12 @@ review_note: "Core decisions remain useful with amendments in ADRs 0006, 0007, 0
 
 # ADR 0001: Agentic Platform CRD Architecture
 
+**Update (2026-10-20):** [ADR 0021](./0021-shared-runtime-and-conditional-lightspeed-execution.md)
+records the shared DeepAgents runtime target and conditional Lightspeed execution
+path. Domain-agnostic reconciliation and harness-owned Hub/Git behavior remain.
+The current controller still creates Agent Sandbox resources directly; the new
+direction is not a shipped runtime/backend change.
+
 **Update (2026-08-31):** Reconciled with the current implementation. The
 seven resources are now SkillCard, SkillCollection, Agent, AgentRun,
 AgentWorkflow, AgentWorkflowRun, and Gateway; the former LLMProvider name is
