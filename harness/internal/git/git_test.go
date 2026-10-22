@@ -550,8 +550,6 @@ func TestFileChangedSince(t *testing.T) {
 	}
 }
 
-// TestCommitsSince counts what a run produced, which is what the plan
-// ladder's closing rung reports to viewers.
 // TestPushRepeatedIsUpToDateNotAdvanced is the watcher's normal day: it
 // fires on file activity, not on commits, so once the agent has
 // committed once every later push reaches the remote and finds nothing
@@ -610,6 +608,8 @@ func TestPushRepeatedIsUpToDateNotAdvanced(t *testing.T) {
 	}
 }
 
+// TestCommitsSince counts what a run produced, which is what the plan
+// ladder's closing rung reports to viewers.
 func TestCommitsSince(t *testing.T) {
 	remoteDir, _ := setupBareRemote(t)
 	seedBareRepo(t, remoteDir)
@@ -633,7 +633,7 @@ func TestCommitsSince(t *testing.T) {
 		t.Fatalf("HeadSHA: %v", err)
 	}
 
-	if n, err := CommitsSince(repo, baseSHA); err != nil || n != 0 {
+	if n, err := CommitsSince(repo, cred.Branch, baseSHA); err != nil || n != 0 {
 		t.Fatalf("CommitsSince before any work = %d, %v; want 0, nil", n, err)
 	}
 
@@ -649,18 +649,24 @@ func TestCommitsSince(t *testing.T) {
 		}
 	}
 
-	if n, err := CommitsSince(repo, baseSHA); err != nil || n != 3 {
+	if n, err := CommitsSince(repo, cred.Branch, baseSHA); err != nil || n != 3 {
 		t.Errorf("CommitsSince after 3 commits = %d, %v; want 3, nil", n, err)
 	}
 
 	// Unknown starting point and an unrelated base are both "cannot
 	// tell", never a count the rung would state as fact.
-	if n, err := CommitsSince(repo, ""); err != nil || n != -1 {
+	if n, err := CommitsSince(repo, cred.Branch, ""); err != nil || n != -1 {
 		t.Errorf("CommitsSince with no base = %d, %v; want -1, nil", n, err)
 	}
 	stranger := plumbing.NewHash("0123456789012345678901234567890123456789").String()
-	if n, err := CommitsSince(repo, stranger); err != nil || n != -1 {
+	if n, err := CommitsSince(repo, cred.Branch, stranger); err != nil || n != -1 {
 		t.Errorf("CommitsSince with a base not in history = %d, %v; want -1, nil", n, err)
+	}
+
+	// A branch that does not exist is an error, not a count. The rung
+	// omits the number rather than inventing one.
+	if n, err := CommitsSince(repo, "no-such-branch", baseSHA); err == nil || n != -1 {
+		t.Errorf("CommitsSince on an unknown branch = %d, %v; want -1 and an error", n, err)
 	}
 }
 
@@ -708,7 +714,7 @@ func TestCommitsSinceStopsAtTheWalkBound(t *testing.T) {
 
 	// A bound the run's own commits fit inside changes nothing: the
 	// base is found before the walk is anywhere near it.
-	if n, err := commitsSince(repo, baseSHA, 5000); err != nil || n != 5 {
+	if n, err := commitsSince(repo, cred.Branch, baseSHA, 5000); err != nil || n != 5 {
 		t.Errorf("commitsSince within the bound = %d, %v; want 5, nil", n, err)
 	}
 
@@ -716,13 +722,101 @@ func TestCommitsSinceStopsAtTheWalkBound(t *testing.T) {
 	// rather than walked to. Shrinking the bound to 2 stands in for the
 	// real case: a base that is not on the chain at all, with a
 	// repository far longer than the bound behind it.
-	if n, err := commitsSince(repo, baseSHA, 2); err != nil || n != -1 {
+	if n, err := commitsSince(repo, cred.Branch, baseSHA, 2); err != nil || n != -1 {
 		t.Errorf("commitsSince past the bound = %d, %v; want -1, nil", n, err)
 	}
 
 	// The bound is a ceiling on the walk, not on the count: a base
 	// exactly at it is still found and counted.
-	if n, err := commitsSince(repo, baseSHA, 5); err != nil || n != 5 {
+	if n, err := commitsSince(repo, cred.Branch, baseSHA, 5); err != nil || n != 5 {
 		t.Errorf("commitsSince with the base exactly at the bound = %d, %v; want 5, nil", n, err)
+	}
+}
+
+// commitFile commits one new file on whatever the worktree currently
+// has checked out, so a test can build a history a branch at a time.
+func commitFile(t *testing.T, repo *gogit.Repository, dir, name string) {
+	t.Helper()
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("class Foo {}\n"), 0644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	if _, err := wt.Add(name); err != nil {
+		t.Fatalf("add %s: %v", name, err)
+	}
+	if _, err := wt.Commit("migrate: "+name, &gogit.CommitOptions{
+		Author: &object.Signature{Name: "test", Email: "test@test.com", When: time.Now()},
+	}); err != nil {
+		t.Fatalf("commit %s: %v", name, err)
+	}
+}
+
+// TestCommitsSinceCountsTheBranchNotHEAD is #281. The agent may change
+// branches mid-run — park an experiment on a scratch branch, try a
+// second approach — and commits made over there never reach the remote,
+// because Push sends refs/heads/<branch>. Counting from HEAD reported
+// them anyway, so the closing rung claimed commits nobody could find on
+// the branch.
+func TestCommitsSinceCountsTheBranchNotHEAD(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+
+	cred := &Credentials{
+		Username: "test",
+		Token:    "token",
+		RepoURL:  remoteDir,
+		Branch:   "migration-work",
+	}
+	ctx := context.Background()
+	cloneDir := filepath.Join(t.TempDir(), "work")
+	repo, err := Clone(ctx, cred, cloneDir)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if err := CheckoutBranch(repo, cred.Branch); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+	baseSHA, err := HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+
+	// One commit on the branch the run was told to push.
+	commitFile(t, repo, cloneDir, "migrated.java")
+
+	// Then the agent wanders off and commits twice more somewhere else.
+	if err := CheckoutBranch(repo, "agent-scratch"); err != nil {
+		t.Fatalf("CheckoutBranch scratch: %v", err)
+	}
+	commitFile(t, repo, cloneDir, "scratch1.java")
+	commitFile(t, repo, cloneDir, "scratch2.java")
+
+	if outcome, err := Push(ctx, cred, repo, cred.Branch, baseSHA); err != nil || outcome != PushAdvanced {
+		t.Fatalf("Push = %s, %v; want advanced, nil", outcome, err)
+	}
+
+	// The remote got one commit, so the rung says one commit.
+	if n, err := CommitsSince(repo, cred.Branch, baseSHA); err != nil || n != 1 {
+		t.Errorf("CommitsSince on the pushed branch = %d, %v; want 1, nil", n, err)
+	}
+
+	// And the count matches what is actually on the remote branch.
+	remote, err := gogit.PlainOpen(remoteDir)
+	if err != nil {
+		t.Fatalf("open remote: %v", err)
+	}
+	ref, err := remote.Reference(plumbing.NewBranchReferenceName(cred.Branch), true)
+	if err != nil {
+		t.Fatalf("resolve remote branch: %v", err)
+	}
+	commit, err := remote.CommitObject(ref.Hash())
+	if err != nil {
+		t.Fatalf("read remote tip: %v", err)
+	}
+	if got := commit.ParentHashes[0].String(); got != baseSHA {
+		t.Errorf("remote tip's parent = %s; want the base %s — the remote holds more than one new commit", got, baseSHA)
 	}
 }

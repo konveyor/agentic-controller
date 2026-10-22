@@ -1,0 +1,10 @@
+kind: bugfix
+
+description: >
+  Count the plan ladder's commits on the branch that was pushed. The closing
+  rung reports how many commits a run produced, and it counted them by walking
+  back from HEAD. The harness pushes refs/heads/<branch>, which is not the same
+  history: an agent that commits to the branch and then moves off it — to park
+  an experiment on a scratch branch, say — leaves HEAD on commits the remote
+  never receives, and the rung reported those too. It now walks the branch it
+  pushed, so the number it states is the number on the branch.

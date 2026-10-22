@@ -206,8 +206,9 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	logging.Ok("cloned to %s, branch %s", cloneDir, creds.Branch)
 
 	// Base of this stage run: everything past this commit is work the run
-	// produced. Push compares HEAD against it so runs that produce no
-	// commits do not create empty remote branches.
+	// produced. Taken after the checkout, so it is also the tip of the
+	// branch that will be pushed. Push compares HEAD against it so runs
+	// that produce no commits do not create empty remote branches.
 	baseSHA, err := git.HeadSHA(repo)
 	if err != nil {
 		// Fail open — an unknown base must never block a push of real work.
@@ -685,8 +686,10 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	}
 	// What the run produced, counted once now that the last commit is in:
 	// the closing rung says "pushed 7 commits to branch x" rather than
-	// repeating the instruction it was given at the start.
-	if n, err := git.CommitsSince(repo, baseSHA); err != nil {
+	// repeating the instruction it was given at the start. Counted on the
+	// branch that was just pushed, which is the only history the remote
+	// received — HEAD may be somewhere else entirely by now.
+	if n, err := git.CommitsSince(repo, creds.Branch, baseSHA); err != nil {
 		logging.Warn("count commits for the plan ladder: %v — the rung omits the count", err)
 	} else {
 		commitsPushed.Store(int64(n))

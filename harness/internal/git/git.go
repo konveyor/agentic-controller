@@ -147,6 +147,19 @@ func HeadSHA(repo *gogit.Repository) (string, error) {
 	return head.Hash().String(), nil
 }
 
+// branchTip resolves refs/heads/<branch>, the ref Push sends to the
+// remote. That is not the same thing as HEAD. The agent is free to
+// change branches during a run — to park an experiment on a scratch
+// branch, say — and when it does, HEAD's history is not the history
+// that reaches the remote.
+func branchTip(repo *gogit.Repository, branch string) (plumbing.Hash, error) {
+	ref, err := repo.Reference(plumbing.NewBranchReferenceName(branch), true)
+	if err != nil {
+		return plumbing.ZeroHash, fmt.Errorf("resolve branch %s: %w", branch, err)
+	}
+	return ref.Hash(), nil
+}
+
 // FileChangedSince reports whether the worktree file at relPath differs
 // from its content at baseSHA — created since the base, or different
 // bytes, committed or not. A file absent from the worktree is not a
@@ -189,47 +202,53 @@ func FileChangedSince(repo *gogit.Repository, baseSHA, relPath string) (bool, er
 
 // commitsSinceMaxWalk bounds the history walk. A run produces tens of
 // commits — the turn ceiling puts a couple of hundred at the very
-// outside — so a base this far back is not on HEAD's first-parent
-// chain at all and the walk is on its way to the repository's root.
-// The clone is full depth and these are decade-old applications, so
-// that is tens of thousands of objects decoded to answer "unknown"
-// anyway, on the exit path, for one word of rung text.
+// outside — so a base this far back is not on the branch's
+// first-parent chain at all and the walk is on its way to the
+// repository's root. The clone is full depth and these are decade-old
+// applications, so that is tens of thousands of objects decoded to
+// answer "unknown" anyway, on the exit path, for one word of rung text.
 const commitsSinceMaxWalk = 5000
 
 // CommitsSince counts the commits between baseSHA — the commit the run
-// started from — and HEAD, i.e. how much work this run actually
-// produced. It walks first-parent history from HEAD and stops at
-// baseSHA; a merge brought in from elsewhere therefore counts as one
-// commit, which is what a viewer reading "pushed 7 commits" means.
+// started from — and the tip of branch, i.e. how much work this run
+// put on the branch it pushes. It walks first-parent history from the
+// branch tip and stops at baseSHA; a merge brought in from elsewhere
+// therefore counts as one commit, which is what a viewer reading
+// "pushed 7 commits" means.
+//
+// It counts from the branch rather than from HEAD because the branch
+// is what Push sends. An agent that commits to the branch and then
+// moves off it leaves HEAD on a history the remote never receives, and
+// counting that history reports commits nobody pushed (#281).
 //
 // An empty baseSHA means the starting point was never recorded, so
 // nothing can be counted and the result is -1, not 0 — the difference
 // between "no work" and "unknown" matters to the caller rendering it.
-// A baseSHA that is not an ancestor of HEAD (the agent rebased, reset,
-// or merged from the other side, all of which it is free to do) also
-// yields -1 rather than the whole branch's length, whether that is
-// discovered at the root or at commitsSinceMaxWalk.
-func CommitsSince(repo *gogit.Repository, baseSHA string) (int, error) {
-	return commitsSince(repo, baseSHA, commitsSinceMaxWalk)
+// A baseSHA that is not an ancestor of the branch tip (the agent
+// rebased, reset, or merged from the other side, all of which it is
+// free to do) also yields -1 rather than the whole branch's length,
+// whether that is discovered at the root or at commitsSinceMaxWalk.
+func CommitsSince(repo *gogit.Repository, branch, baseSHA string) (int, error) {
+	return commitsSince(repo, branch, baseSHA, commitsSinceMaxWalk)
 }
 
 // commitsSince is CommitsSince with the walk bound injected, so a test
 // can reach the cap without building commitsSinceMaxWalk commits.
-func commitsSince(repo *gogit.Repository, baseSHA string, maxWalk int) (int, error) {
+func commitsSince(repo *gogit.Repository, branch, baseSHA string, maxWalk int) (int, error) {
 	if baseSHA == "" {
 		return -1, nil
 	}
-	head, err := repo.Head()
+	tip, err := branchTip(repo, branch)
 	if err != nil {
-		return -1, fmt.Errorf("resolve HEAD: %w", err)
+		return -1, err
 	}
 	base := plumbing.NewHash(baseSHA)
 	n := 0
-	for hash := head.Hash(); hash != base; {
+	for hash := tip; hash != base; {
 		if n == maxWalk {
 			// Same answer the root would give, reached without reading
 			// the rest of the repository to get there.
-			logging.Info("commit count: base %s not within %d commits of HEAD; not counting", baseSHA, maxWalk)
+			logging.Info("commit count: base %s not within %d commits of branch %s; not counting", baseSHA, maxWalk, branch)
 			return -1, nil
 		}
 		commit, err := repo.CommitObject(hash)
