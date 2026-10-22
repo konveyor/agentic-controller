@@ -820,3 +820,63 @@ func TestCommitsSinceCountsTheBranchNotHEAD(t *testing.T) {
 		t.Errorf("remote tip's parent = %s; want the base %s — the remote holds more than one new commit", got, baseSHA)
 	}
 }
+
+// TestPushAsksTheBranchNotHEAD is the other half of #281: the skip
+// guard read HEAD too. An agent that commits to the branch and then
+// checks the base back out left HEAD equal to baseSHA, and the guard
+// then skipped a push that had real work to send — the run's commits
+// never left the pod.
+func TestPushAsksTheBranchNotHEAD(t *testing.T) {
+	remoteDir, _ := setupBareRemote(t)
+	seedBareRepo(t, remoteDir)
+
+	cred := &Credentials{
+		Username: "test",
+		Token:    "token",
+		RepoURL:  remoteDir,
+		Branch:   "migration-work",
+	}
+	ctx := context.Background()
+	cloneDir := filepath.Join(t.TempDir(), "work")
+	repo, err := Clone(ctx, cred, cloneDir)
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	if err := CheckoutBranch(repo, cred.Branch); err != nil {
+		t.Fatalf("CheckoutBranch: %v", err)
+	}
+	baseSHA, err := HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+
+	commitFile(t, repo, cloneDir, "migrated.java")
+
+	// The agent moves HEAD back to the base, leaving the branch ahead.
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if err := wt.Checkout(&gogit.CheckoutOptions{Hash: plumbing.NewHash(baseSHA)}); err != nil {
+		t.Fatalf("checkout base: %v", err)
+	}
+
+	if outcome, err := Push(ctx, cred, repo, cred.Branch, baseSHA); err != nil || outcome != PushAdvanced {
+		t.Fatalf("Push with HEAD back at the base = %s, %v; want advanced, nil", outcome, err)
+	}
+
+	// The converse still holds, and HEAD cannot stand in for it either:
+	// a branch still sitting at the base is a skip even while HEAD is
+	// well past it, so no-op runs do not create empty remote branches.
+	if err := CheckoutBranch(repo, "still-at-base"); err != nil {
+		t.Fatalf("CheckoutBranch still-at-base: %v", err)
+	}
+	if err := wt.Checkout(&gogit.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName(cred.Branch),
+	}); err != nil {
+		t.Fatalf("checkout %s: %v", cred.Branch, err)
+	}
+	if outcome, err := Push(ctx, cred, repo, "still-at-base", baseSHA); err != nil || outcome != PushSkipped {
+		t.Errorf("Push of a branch still at the base = %s, %v; want skipped, nil", outcome, err)
+	}
+}

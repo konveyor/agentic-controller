@@ -151,7 +151,8 @@ func HeadSHA(repo *gogit.Repository) (string, error) {
 // remote. That is not the same thing as HEAD. The agent is free to
 // change branches during a run — to park an experiment on a scratch
 // branch, say — and when it does, HEAD's history is not the history
-// that reaches the remote.
+// that reaches the remote. Anything deciding or reporting on the push
+// has to ask the branch.
 func branchTip(repo *gogit.Repository, branch string) (plumbing.Hash, error) {
 	ref, err := repo.Reference(plumbing.NewBranchReferenceName(branch), true)
 	if err != nil {
@@ -299,11 +300,11 @@ func (o PushOutcome) String() string {
 }
 
 // Push updates refs/heads/<branch> on origin. baseSHA is the commit the
-// run started from (HEAD after clone/checkout): when HEAD still equals
-// it the run produced no commits and the push is skipped, so no-op runs
-// do not litter the remote with empty branches. An empty baseSHA
-// disables the check — an unknown base must never block a push of real
-// work.
+// run started from (the branch tip after clone/checkout): when the
+// branch still points at it the run produced nothing for the branch and
+// the push is skipped, so no-op runs do not litter the remote with empty
+// branches. An empty baseSHA disables the check — an unknown base must
+// never block a push of real work.
 //
 // See PushOutcome for what the three results mean. Callers reporting
 // whether results reached the branch want "not PushSkipped"; callers
@@ -311,10 +312,18 @@ func (o PushOutcome) String() string {
 func Push(ctx context.Context, cred *Credentials, repo *gogit.Repository, branch, baseSHA string) (PushOutcome, error) {
 	// Not redundant with the NoErrAlreadyUpToDate swallow below: when the
 	// remote branch does not exist yet, PushContext sends a create command
-	// (ZeroHash → local HEAD) instead of reporting already-up-to-date, so
-	// this guard is the only thing preventing empty branch creation.
+	// (ZeroHash → local branch tip) instead of reporting
+	// already-up-to-date, so this guard is the only thing preventing empty
+	// branch creation.
 	if baseSHA != "" {
-		if head, err := repo.Head(); err == nil && head.Hash().String() == baseSHA {
+		// The question is about the branch, not about HEAD. An agent that
+		// commits to the branch and then checks something else out leaves
+		// HEAD saying nothing about what this run put on the branch, and
+		// reading HEAD here gets it wrong both ways: it skips a push that
+		// had real commits to send, and it sends one that had none. A
+		// branch that will not resolve falls through to PushContext, which
+		// reports the real problem (#281).
+		if tip, err := branchTip(repo, branch); err == nil && tip.String() == baseSHA {
 			logging.Info("no commits produced; skipping push of %s", branch)
 			return PushSkipped, nil
 		}

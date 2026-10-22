@@ -206,9 +206,10 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	logging.Ok("cloned to %s, branch %s", cloneDir, creds.Branch)
 
 	// Base of this stage run: everything past this commit is work the run
-	// produced. Taken after the checkout, so it is also the tip of the
-	// branch that will be pushed. Push compares HEAD against it so runs
-	// that produce no commits do not create empty remote branches.
+	// produced. Taken after the checkout, so it is the tip of the branch
+	// that will be pushed. Push compares the branch against it so runs
+	// that produce no commits do not create empty remote branches, and
+	// the closing rung counts from it.
 	baseSHA, err := git.HeadSHA(repo)
 	if err != nil {
 		// Fail open — an unknown base must never block a push of real work.

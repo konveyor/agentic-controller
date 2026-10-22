@@ -1,10 +1,12 @@
 kind: bugfix
 
 description: >
-  Count the plan ladder's commits on the branch that was pushed. The closing
-  rung reports how many commits a run produced, and it counted them by walking
-  back from HEAD. The harness pushes refs/heads/<branch>, which is not the same
-  history: an agent that commits to the branch and then moves off it — to park
-  an experiment on a scratch branch, say — leaves HEAD on commits the remote
-  never receives, and the rung reported those too. It now walks the branch it
-  pushed, so the number it states is the number on the branch.
+  Ask the branch, not HEAD, about the push. The harness pushes
+  refs/heads/<branch>, but it decided whether to push at all and counted the
+  commits for the plan ladder's closing rung by reading HEAD. Those are the
+  same history only while the agent stays on the branch, and it need not: an
+  agent that commits to the branch and then moves off it leaves HEAD on
+  commits the remote never receives, and the rung reported those too. Worse,
+  one that lands back on the starting commit made the guard read "no commits
+  produced", so a push with real work to send was skipped. Both now resolve
+  the branch being pushed and compare it against the recorded base.
