@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
-# Build images, load into Kind, and deploy the controller for e2e testing.
+# Build images, load them into the cluster, and deploy the controller for e2e.
 #
-# Prerequisites: Kind cluster running (see hack/start-kind.sh)
+# Prerequisites: a cluster running (see hack/start-kind.sh)
 #
 # Environment variables:
 #   KIND_CLUSTER            Cluster name (default: agentic-controller-e2e)
+#   CLUSTER_TOOL            kind (default), minikube, or none — how images
+#                           reach the node; see hack/lib/cluster.sh
+#   CLUSTER_NAME            Cluster/profile name (default: $KIND_CLUSTER)
+#   LOAD_IMAGE_HOOK         Script taking image refs, for any other cluster
 #   CONTAINER_TOOL          docker or podman (default: auto-detect)
 #   IMG                     Controller image (default: quay.io/konveyor/agentic-controller:e2e)
 #   CONTROLLER_AGENT_IMG    Agent image (default: quay.io/konveyor/agentic-controller-agent:e2e)
 #   E2E_AGENT_STUB_IMG      Workflow-test image (default: quay.io/konveyor/agentic-controller-agent:e2e-stub)
 
 set -euo pipefail
+
+# shellcheck source=hack/lib/cluster.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cluster.sh"
 
 KIND_CLUSTER="${KIND_CLUSTER:-agentic-controller-e2e}"
 IMG="${IMG:-quay.io/konveyor/agentic-controller:e2e}"
@@ -53,27 +60,14 @@ ${CONTAINER_TOOL} build \
     test/e2e/agent-stub/
 
 echo ""
-echo "=== Loading images into Kind cluster '${KIND_CLUSTER}' ==="
-if [ "${CONTAINER_TOOL}" = "podman" ]; then
-    # Podman stores images in its VM; Kind can't access them directly.
-    # Save to tarball and load via Kind.
-    TMPDIR=$(mktemp -d)
-    trap "rm -rf ${TMPDIR}" EXIT
-
-    echo "Saving ${IMG} to tarball..."
-    ${CONTAINER_TOOL} save "${IMG}" -o "${TMPDIR}/controller.tar"
-    kind load image-archive "${TMPDIR}/controller.tar" --name "${KIND_CLUSTER}"
-
-    echo "Saving agent images to tarball..."
-    ${CONTAINER_TOOL} save "${CONTROLLER_AGENT_IMG}" "quay.io/konveyor/agentic-controller-agent:latest" "${E2E_AGENT_STUB_IMG}" -o "${TMPDIR}/agent.tar"
-    kind load image-archive "${TMPDIR}/agent.tar" --name "${KIND_CLUSTER}"
-else
-    kind load docker-image "${IMG}" --name "${KIND_CLUSTER}"
-    kind load docker-image "${CONTROLLER_AGENT_IMG}" --name "${KIND_CLUSTER}"
-    ${CONTAINER_TOOL} tag "${CONTROLLER_AGENT_IMG}" "quay.io/konveyor/agentic-controller-agent:latest"
-    kind load docker-image "quay.io/konveyor/agentic-controller-agent:latest" --name "${KIND_CLUSTER}"
-    kind load docker-image "${E2E_AGENT_STUB_IMG}" --name "${KIND_CLUSTER}"
-fi
+echo "=== Loading images into cluster '$(cluster_name)' ==="
+# The :latest alias is tagged before loading either way, so both tool paths
+# put the same set of refs on the node.
+${CONTAINER_TOOL} tag "${CONTROLLER_AGENT_IMG}" "quay.io/konveyor/agentic-controller-agent:latest"
+cluster_load_images "${IMG}"
+cluster_load_images "${CONTROLLER_AGENT_IMG}" \
+    "quay.io/konveyor/agentic-controller-agent:latest" \
+    "${E2E_AGENT_STUB_IMG}"
 
 echo ""
 echo "=== Building and loading skill images ==="
@@ -103,27 +97,13 @@ SKILLEOF
     rm -rf "${tmp_ctx}"
 done
 
-# Load skill images into Kind.
-if [ "${CONTAINER_TOOL}" = "podman" ]; then
-    SKILL_TMP=$(mktemp -d)
-    echo "Saving ${SKILL_BUNDLE_IMG} to tarball..."
-    ${CONTAINER_TOOL} save "${SKILL_BUNDLE_IMG}" -o "${SKILL_TMP}/bundle.tar"
-    kind load image-archive "${SKILL_TMP}/bundle.tar" --name "${KIND_CLUSTER}"
-    for dir in catalog/examples/*/; do
-        name=$(basename "${dir}")
-        skill_img="quay.io/konveyor/skills:${name}"
-        echo "Saving ${skill_img} to tarball..."
-        ${CONTAINER_TOOL} save "${skill_img}" -o "${SKILL_TMP}/${name}.tar"
-        kind load image-archive "${SKILL_TMP}/${name}.tar" --name "${KIND_CLUSTER}"
-    done
-    rm -rf "${SKILL_TMP}"
-else
-    kind load docker-image "${SKILL_BUNDLE_IMG}" --name "${KIND_CLUSTER}"
-    for dir in catalog/examples/*/; do
-        name=$(basename "${dir}")
-        kind load docker-image "quay.io/konveyor/skills:${name}" --name "${KIND_CLUSTER}"
-    done
-fi
+# Load the skill images. One call per image, matching the per-image archives
+# the podman path used before.
+cluster_load_images "${SKILL_BUNDLE_IMG}"
+for dir in catalog/examples/*/; do
+    name=$(basename "${dir}")
+    cluster_load_images "quay.io/konveyor/skills:${name}"
+done
 
 echo ""
 echo "=== Deploying controller ==="
