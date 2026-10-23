@@ -38,12 +38,9 @@ combination. Each Gateway declares a provider type (e.g. `anthropic`,
 `openai`, `gcp-vertex-ai`), an endpoint, credentials, and a single model
 with context window size and optional tier label. The provider type is
 injected as `KONVEYOR_LLM_PROVIDER` so the harness can map credentials
-to provider-specific env vars (e.g. `ANTHROPIC_API_KEY`). This is a
-pre-OpenShell shim — when OpenShell is integrated, `inference.local`
-eliminates provider-specific credential mapping and the field is removed.
-The controller verifies connectivity on create/update. When OpenShell
-lands, the Gateway CRD is replaced by OpenShell Gateway Services — the
-field names and interaction model are designed to make this swap seamless.
+to provider-specific env vars (e.g. `ANTHROPIC_API_KEY`). The controller
+verifies connectivity on create/update. Gateway is Konveyor's model-selection
+resource; an OpenShell gateway is a separate control-plane concept (ADR 0016).
 
 **Agent** — A capability definition declaring what is available for
 execution. References zero or more SkillCards and SkillCollections,
@@ -62,8 +59,7 @@ empty list means to a user (not yet runnable, or free choice) is a
 Hub/UI concern, not the controller's. An Agent with no gateways is
 still a valid, Ready template. The Agent controller validates that any
 referenced Gateway CRs exist in the namespace and are Ready, and that
-SkillCards/SkillCollections are ready. When OpenShell is integrated,
-Gateway CRs will be replaced by OpenShell Gateway Services.
+SkillCards/SkillCollections are ready.
 Subagent delegation is a runtime concern — the agent runtime may
 spawn subagents internally but this is not modeled in the CRD.
 _Avoid_: conflating Agent with AgentRun — Agent is a template,
@@ -110,10 +106,9 @@ Succeeded, Failed).
 ## Personas
 
 **Platform Admin** — Creates and manages SkillCards, SkillCollections,
-and OpenShell gateways. Deploys gateways via Helm, configures
-providers and inference routing on each gateway via the OpenShell CLI.
-Responsible for what capabilities and infrastructure are available to
-agents.
+and Gateways. Registers each provider/model combination as a Gateway CR
+with its endpoint and credential Secret. Responsible for what
+capabilities and infrastructure are available to agents.
 
 **Architect / PM** — Creates Agents and AgentWorkflows. Defines the
 workflow for how migrations (or other agentic work) should be
@@ -141,27 +136,29 @@ without adopting its packaging. See ADR 0015.
 agent workloads: Sandbox, SandboxTemplate, SandboxClaim, and
 SandboxWarmPool. Single-container design. Handles pod lifecycle,
 stable identity, network isolation, and warm pool pre-allocation.
-In the current implementation, the controller creates and watches Sandbox
-CRs directly. OpenShell is the deferred execution backend described by ADR
-0004; ADR 0016 records the accepted interim path.
+The controller currently creates and watches Sandbox CRs directly;
+OpenShell adoption remains deferred (ADR 0004, ADR 0016).
 
-**OpenShell** — NVIDIA's secure-by-design runtime for autonomous
-agents. It is the intended future execution backend and runs on top of
-Agent Sandbox. It is not the current controller execution interface:
-today, the controller creates Sandbox CRs directly and uses the Gateway
-CRD as the pre-OpenShell provider/model configuration shim (ADR 0016).
-The intended OpenShell end state adds the gateway supervisor, policy
-enforcement, privacy-proxy credential injection, and `inference.local`.
-_Avoid_: describing that deferred end state as the current implementation.
+**OpenShell** — A secure runtime for agent workloads, with a control-plane
+gateway and a per-sandbox supervisor that enforces policy and mediates
+credential use. Its Kubernetes backend uses Agent Sandbox; Konveyor adoption
+remains deferred (ADR 0016).
+_Avoid_: equating removal of managed inference routing with removal of
+credential isolation or the OpenShell gateway.
 
-**OpenShell Gateway** — An instance of the OpenShell control plane
-deployed as a Kubernetes Service in the deferred OpenShell design. Each
-OpenShell Gateway serves one provider/model combination via
-`inference.local`. The current implementation instead uses the namespaced
-Gateway CRD, which the controller verifies with a Job and whose
-provider-specific credentials are injected into the Sandbox environment.
-_Avoid_: gateway (lowercase) when referring to Kubernetes Gateway API
-resources — always capitalize when referring to an OpenShell Gateway.
+**OpenShell gateway** — The OpenShell control plane that manages sandboxes,
+workspaces, providers, and policy. It is distinct from a Konveyor Gateway
+and is not a one-provider/one-model resource.
+
+**OpenShell provider profile** — A reusable definition of credentials,
+authorized endpoints, and policy for accessing a service. It is not a model
+selection or a per-sandbox provider instance.
+
+**OpenShell provider** — A named instance of a provider profile with its
+credential bindings and configuration. Providers are attached to sandboxes
+to authorize service access; the workload selects the model for inference.
+_Avoid_: using provider profile, provider, OpenShell gateway, and Konveyor
+Gateway interchangeably.
 
 **Hub** — The Konveyor application inventory and analysis engine. In
 the agentic platform Hub serves two roles: (1) a CRUD gateway for
@@ -255,20 +252,6 @@ consumption, making it unsuitable as a budget metric.
 _Avoid_: encoding limits in skills as LLM instructions (e.g.
 `MAX_FIX_ITERATIONS`) — limits are harness concerns, not skill
 concerns.
-
-**Handoff** — The file stages hand work to each other through:
-`.konveyor/handoff.md` on the target branch (ADR 0001). Each stage
-appends a `## <Stage>` section; the catalog skills open it with a
-`- Status:` line, the stage's own verdict on its work. The harness
-reads that one line at stage end, when the stage wrote or changed the
-file: `failed` ends the run `Refused` (harness exit 3,
-`Succeeded=False`) and stops the workflow. The agent ends its turn
-normally either way, so the ACP result alone cannot tell a refusal
-from success. The limit-reached wind-down writes to the same file
-(see Execution Limits).
-_Avoid_: reading anything else in the handoff from the harness — the
-section body is knowledge for the next stage, not execution control;
-`Refused` for what the machinery broke — that is `Failed`.
 
 **Skill Content Boundary** — A skill contains knowledge and judgment
 criteria. It never contains execution control. Allowed: domain
