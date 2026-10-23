@@ -241,6 +241,22 @@ _Avoid_: treating it as part of `approve` — approval gates the agent's
 tool calls, asking is the agent's own initiative, and a run may want
 either without the other.
 
+**Interrogation** — A workflow stage, run before planning, in which the
+agent puts to a human the decisions about the application that the
+code, the parameters, and the grounding cannot settle, one at a time
+and each with a recommendation, and records the answers as the
+Interrogation Record. It is an ordinary stage with Ask User set, not a
+stage type: the controller knows nothing about questions. Which
+decisions a migration forces is domain-skill knowledge (a decision
+catalog); how to interrogate is the stage skill's method; the harness
+only carries the questions and answers. A run nobody answers fails at
+its first question with the open decisions already on the branch. See
+ADR 0021.
+_Avoid_: calling the agent's opportunistic mid-plan `ask_user` calls an
+interrogation — that is Ask User without the stage; "questionnaire" for
+this — Hub's questionnaires are a risk-assessment instrument whose
+answers are grounding for an interrogation, not its question set.
+
 **Execution Limits** — Optional budget constraints on an agent
 execution: `maxTurns` (tool-call turns) and `maxCost` (cumulative
 USD). Set on Agent as defaults, overrideable per stage and per run.
@@ -269,6 +285,29 @@ from success. The limit-reached wind-down writes to the same file
 _Avoid_: reading anything else in the handoff from the harness — the
 section body is knowledge for the next stage, not execution control;
 `Refused` for what the machinery broke — that is `Failed`.
+
+**Interrogation Record** — The committed file an Interrogation
+produces, `.konveyor/interrogation.md`: one block per decision carrying
+the evidence, the options, the recommendation, the decision, and its
+source — `human`, `parameter`, `assessment`, `code`, or `assumed` — so
+the plan can cite who decided what and a human can amend it in git
+before planning runs. The agent writes and commits it, the harness
+never does; the plan stage lists every decision in it under its key
+decisions. Each block is shaped to become one decision record in the
+target repository if that is where decisions end up. See ADR 0021.
+_Avoid_: JSON for it — its first reader is a person; `needs-confirmation`
+as a state — a decision is decided, known, assumed, or open.
+
+**Grounding** — The read-only facts about the application that the
+harness fetches from Hub and writes into `.konveyor/` before the agent
+starts: analysis results today, and the application's tags and
+assessment answers for an Interrogation. Grounding is uncommitted,
+optional (every skill treats it as "if present"), and never interpreted
+by the harness — delivering it is deterministic work; reading it is the
+agent's. A different platform's harness supplies its own grounding, or
+none.
+_Avoid_: the harness acting on grounding content, or composing
+questions from it — it delivers, the skills judge.
 
 **Skill Content Boundary** — A skill contains knowledge and judgment
 criteria. It never contains execution control. Allowed: domain
