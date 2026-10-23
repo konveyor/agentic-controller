@@ -19,17 +19,9 @@ on:
       - '.github/actions/**'
       - '.github/workflows/images.yml'
   pull_request:
-    paths:
-      - 'images/**'
-      - 'harness/**'
-      - 'Dockerfile'
-      - 'cmd/**'
-      - 'internal/**'
-      - 'api/**'
-      - 'go.mod'
-      - 'go.sum'
-      - '.github/actions/**'
-      - '.github/workflows/images.yml'
+    # Always report the required images check, including docs-only PRs.
+    # check-changes skips the image builds when no relevant paths changed.
+  merge_group:
   workflow_dispatch: {}
 
 concurrency:
@@ -39,7 +31,74 @@ concurrency:
 permissions: {}
 
 jobs:
+  check-changes:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outputs:
+      should-build: ${{ steps.check-changes.outputs.should-build }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Did only non-code files change?
+        id: code-changes
+        uses: tj-actions/changed-files@22103cc46bda19c2b464ffe86db46df6922fd323 # v46
+        with:
+          files: |
+            images/**
+            harness/**
+            Dockerfile
+            cmd/**
+            internal/**
+            api/**
+            go.mod
+            go.sum
+            .github/actions/**
+            .github/workflows/images.yml
+
+      - name: Check what types of changes have been made
+        id: check-changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ANY_CODE_CHANGED: ${{ steps.code-changes.outputs.any_modified }}
+        run: |
+          # should-build: Skip image builds for pull_request and merge_group events
+          # with no code path changes. For push and workflow_dispatch, always build.
+          SHOULD_BUILD=$(
+            if [[ $EVENT_NAME == "pull_request" || $EVENT_NAME == "merge_group" ]] && [[ $ANY_CODE_CHANGED != true ]]; then
+              echo "false"
+            else
+              echo "true"
+            fi
+          )
+
+          echo "should-build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize findings
+        env:
+          ANY_CODE_CHANGED: ${{ steps.code-changes.outputs.any_modified }}
+          MODIFIED_CODE: ${{ steps.code-changes.outputs.all_modified_files }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Change Detection Findings
+            - Code paths changed? \`$ANY_CODE_CHANGED\`
+            - Should build? \`${{ steps.check-changes.outputs.should-build }}\`
+          EOF
+
+          if [[ $ANY_CODE_CHANGED == true ]] && [[ -n "$MODIFIED_CODE" ]]; then
+            echo "## Modified code files" >> "$GITHUB_STEP_SUMMARY"
+            for file in ${MODIFIED_CODE}; do
+              echo "  - \`$file\`" >> "$GITHUB_STEP_SUMMARY"
+            done
+          fi
+
   controller-agent:
+    needs: check-changes
+    if: needs.check-changes.outputs.should-build == 'true'
     permissions:
       contents: read
     name: Build controller agent image
@@ -54,7 +113,7 @@ jobs:
         run: make controller-agent-build
 
       - name: Log in to Quay.io
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: quay.io
@@ -62,7 +121,7 @@ jobs:
           password: ${{ secrets.QUAY_PASSWORD }}
 
       - name: Push image
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: make controller-agent-push
 
   # PR-time only: build agent-base + all four language images natively for
@@ -73,7 +132,8 @@ jobs:
   # The real multi-arch build+push lives in image-build-push.yml
   # (filter-free so tag pushes fire reliably).
   agent-base-artifact:
-    if: github.event_name == 'pull_request'
+    needs: check-changes
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.check-changes.outputs.should-build == 'true'
     permissions:
       contents: read
     name: Build agent-base artifact (${{ matrix.arch }})
@@ -112,8 +172,10 @@ jobs:
           cache-key-file: harness/go.sum
 
   agent-lang-images-artifact:
-    needs: agent-base-artifact
-    if: github.event_name == 'pull_request'
+    needs:
+      - check-changes
+      - agent-base-artifact
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.check-changes.outputs.should-build == 'true'
     permissions:
       contents: read
     name: Build ${{ matrix.image.name }} artifact (${{ matrix.arch_info.arch }})
@@ -156,7 +218,8 @@ jobs:
   # PR-time build check only. The versioned build+push of the controller
   # image lives in image-build-push.yml (filter-free so tag pushes fire).
   controller:
-    if: github.event_name == 'pull_request'
+    needs: check-changes
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.check-changes.outputs.should-build == 'true'
     permissions:
       contents: read
     name: Build controller image
@@ -169,3 +232,51 @@ jobs:
 
       - name: Build image
         run: make docker-build
+
+  images:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    name: images
+    needs:
+      - check-changes
+      - controller-agent
+      - agent-base-artifact
+      - agent-lang-images-artifact
+      - controller
+    steps:
+      - name: Check results
+        env:
+          SHOULD_BUILD: ${{ needs.check-changes.outputs.should-build }}
+          RESULT_CHECK: ${{ needs.check-changes.result }}
+          RESULT_CONTROLLER_AGENT: ${{ needs.controller-agent.result }}
+          RESULT_AGENT_BASE: ${{ needs.agent-base-artifact.result }}
+          RESULT_AGENT_LANGS: ${{ needs.agent-lang-images-artifact.result }}
+          RESULT_CONTROLLER: ${{ needs.controller.result }}
+        run: |
+          # check-changes must always succeed
+          if [[ "$RESULT_CHECK" != "success" ]]; then
+            echo "::error::check-changes result: $RESULT_CHECK"
+            exit 1
+          fi
+
+          # When should-build is false, remaining jobs are expected to be skipped
+          if [[ "$SHOULD_BUILD" == "false" ]]; then
+            echo "Build skipped (no code changes)"
+            exit 0
+          fi
+
+          # When should-build is true, downstream jobs must succeed (or be skipped for PR-only jobs on push)
+          FAILED=false
+          for result_var in RESULT_CONTROLLER_AGENT RESULT_AGENT_BASE RESULT_AGENT_LANGS RESULT_CONTROLLER; do
+            result="${!result_var}"
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "::error::${result_var} = ${result}"
+              FAILED=true
+            fi
+          done
+
+          if [[ "$FAILED" == "true" ]]; then
+            exit 1
+          fi
+
+          echo "All image checks passed"

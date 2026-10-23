@@ -3,6 +3,7 @@ name: Lint
 on:
   push:
   pull_request:
+  merge_group:
 
 permissions: {}
 
@@ -75,3 +76,33 @@ jobs:
       - name: Run go vet
         working-directory: harness
         run: go vet ./...
+
+  lints:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    name: lints
+    needs:
+      - lint
+      - api-lint
+      - harness-lint
+    steps:
+      - name: Check lint results
+        env:
+          RESULT_LINT: ${{ needs.lint.result }}
+          RESULT_API_LINT: ${{ needs.api-lint.result }}
+          RESULT_HARNESS_LINT: ${{ needs.harness-lint.result }}
+        run: |
+          FAILED=false
+          for result_var in RESULT_LINT RESULT_API_LINT RESULT_HARNESS_LINT; do
+            result="${!result_var}"
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "::error::${result_var} = ${result}"
+              FAILED=true
+            fi
+          done
+
+          if [[ "$FAILED" == "true" ]]; then
+            exit 1
+          fi
+
+          echo "All checks passed"

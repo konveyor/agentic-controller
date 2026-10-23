@@ -3,9 +3,11 @@ name: PR Checks
 on:
   pull_request_target:
     types: [opened, edited, reopened, synchronize]
+  merge_group:
 
 jobs:
   verify:
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     name: Verify PR contents
     outputs:
@@ -49,3 +51,38 @@ jobs:
           fi
           echo "Found changelog fragments:"
           echo "$FRAGMENTS"
+
+  pr-checks:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    name: pr-checks
+    needs:
+      - verify
+      - changelog
+    steps:
+      - name: Check results
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RESULT_VERIFY: ${{ needs.verify.result }}
+          RESULT_CHANGELOG: ${{ needs.changelog.result }}
+        run: |
+          # During merge_group, verify and changelog are expected to be skipped
+          if [[ "$EVENT_NAME" == "merge_group" ]]; then
+            echo "PR checks skipped (merge queue)"
+            exit 0
+          fi
+
+          FAILED=false
+          for result_var in RESULT_VERIFY RESULT_CHANGELOG; do
+            result="${!result_var}"
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "::error::${result_var} = ${result}"
+              FAILED=true
+            fi
+          done
+
+          if [[ "$FAILED" == "true" ]]; then
+            exit 1
+          fi
+
+          echo "All PR checks passed"
