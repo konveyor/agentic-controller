@@ -251,7 +251,7 @@ decisions a migration forces is domain-skill knowledge (a decision
 catalog); how to interrogate is the stage skill's method; the harness
 only carries the questions and answers. A run nobody answers fails at
 its first question with the open decisions already on the branch. See
-ADR 0021.
+ADR 0023.
 _Avoid_: calling the agent's opportunistic mid-plan `ask_user` calls an
 interrogation — that is Ask User without the stage; "questionnaire" for
 this — Hub's questionnaires are a risk-assessment instrument whose
@@ -294,7 +294,7 @@ the plan can cite who decided what and a human can amend it in git
 before planning runs. The agent writes and commits it, the harness
 never does; the plan stage lists every decision in it under its key
 decisions. Each block is shaped to become one decision record in the
-target repository if that is where decisions end up. See ADR 0021.
+target repository if that is where decisions end up. See ADR 0023.
 _Avoid_: JSON for it — its first reader is a person; `needs-confirmation`
 as a state — a decision is decided, known, assumed, or open.
 

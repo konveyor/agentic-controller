@@ -1,5 +1,5 @@
 ---
-adr: "0021"
+adr: "0023"
 title: "Interrogation Stage: ask the human about the application before planning"
 description: "Puts human interrogation of the target application in a workflow stage of its own, driven by skills and carried by ask_user, with the answers committed as the plan's input; the controller gains nothing and the harness only delivers grounding."
 status: proposed
@@ -22,7 +22,11 @@ relates_to:
   - "konveyor/agentic-controller#253 (this spike), #254 (ADRs in the target repo), #255 (skills in the target repo), #128 (continuation runs)"
 ---
 
-# ADR 0021: Interrogation Stage — ask the human about the application before planning
+# ADR 0023: Interrogation Stage — ask the human about the application before planning
+
+> Numbering note: 0021 and 0022 are taken by the shared-runtime ADR
+> (konveyor/agentic-controller#280) and the usage-telemetry ADR (#282), both
+> opened before this one, so this ADR uses the next available number.
 
 ## Context
 
