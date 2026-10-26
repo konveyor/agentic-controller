@@ -5,10 +5,10 @@ description: "Reuse Lightspeed's DeepAgents runtime within the Konveyor harness,
 status: accepted
 status_note: "Approves Konveyor direction only; implementation, backend qualification, and Lightspeed agreement are separate."
 date: "2026-10-20"
-last_updated: null
+last_updated: "2026-10-26"
 authors:
   - "David Zager"
-last_reviewed: "2026-10-20"
+last_reviewed: "2026-10-26"
 implementation_status: deferred
 review_note: "Runtime reuse and custom-image execution were demonstrated separately. Production runtime integration, a selectable execution backend, and OpenShell compatibility remain unimplemented."
 relates_to:
@@ -20,6 +20,13 @@ relates_to:
 ---
 
 # ADR 0021: Shared Runtime and Conditional Lightspeed Execution
+
+**Update (2026-10-26):** Clarified the adoption sequence and ownership in the
+Decision and follow-up sections. Existing use-case coverage gates runtime
+adoption; retained-session contributions are separate. Lightspeed operator
+execution is an optional backend alongside direct Agent Sandbox. Equivalent
+Lightspeed resources should replace our APIs through deprecation and removal
+over subsequent releases.
 
 ## Context
 
@@ -37,30 +44,39 @@ demonstrate lower maintenance cost, stronger isolation, or better performance.
 
 ## Decision
 
-**Target Lightspeed's DeepAgents runtime within the Konveyor harness.** Keep
-required Hub application/repository resolution, workspace and instruction
-preparation, harness-owned Git push, token cleanup, and final outcome reporting.
-The shared runtime supplies model, tool, skill, and MCP execution. Develop a
-supported reusable interface with Lightspeed rather than productizing the
-prototype's extraction of internal graph-construction code.
+**Adopt Lightspeed's DeepAgents runtime once it covers our existing use cases.**
+Adapt our harness's invocation and configuration to reuse their existing runtime
+implementation for model, tool, skill, and MCP execution. Konveyor's harness
+continues to own Hub application/repository resolution, checkout, workspace and
+instruction preparation, Git push, token cleanup, and final outcome reporting.
+Initial runtime reuse does not require Lightspeed to implement those Konveyor
+behaviors or the retained-session improvements below. Validate existing use-case
+coverage before switching; the bounded experiments establish feasibility rather
+than complete release coverage.
 
-**Treat runtime reuse and operator adoption as independent choices.** The MTA
-8.4 target can use the shared runtime under our existing controller and direct
-Agent Sandbox. Adopting the Lightspeed operator additionally requires upstream
-support for invocation-selected workload images with image-owned startup, plus
-an agreed custom-workload input, completion, and lifecycle contract. The exact
-selector field is joint design work. We will not ship a patched Lightspeed
-operator. If that upstream capability is unavailable for 8.4, defer operator
-adoption and continue the runtime path. Broader roadmap commitment is not a
-prerequisite for that release path.
+**Add the Lightspeed operator as an alternative execution backend when ready.**
+Runtime reuse proceeds independently under our existing controller and direct
+Agent Sandbox. Operator adoption requires Lightspeed to support a workload image
+per invocation with image-owned startup upstream, plus an agreed custom-workload
+input, completion, and lifecycle contract. The exact selector field is joint
+design work. Retain the direct Agent Sandbox path alongside that optional backend
+to mitigate integration and release risk. Adopt operator execution for MTA 8.4
+only if the upstream capability and our integration are ready without delaying
+the release; otherwise continue the runtime path under our controller. We will
+not ship a patched Lightspeed operator. Broader roadmap commitment is not a
+prerequisite for runtime reuse.
 
-**Preserve capabilities while allowing their implementation to converge.**
-Konveyor still needs reusable image/skill/tool capability definitions, concrete
-invocations, and independently composed workflows. Lightspeed already provides
-reusable Agent model/prompt configuration; that is useful but does not replace
-all of these capabilities. The exact Agent, AgentRun, AgentWorkflow, and
-AgentWorkflowRun names and schemas are negotiable. Retire our implementation
-only when a shared implementation actually supplies the required behavior.
+**Migrate to Lightspeed resources as they cover our required capabilities.**
+Konveyor needs reusable Agent definitions covering images, skills, tools, MCP
+servers, prompts, and model configuration, concrete invocations, and independently
+composed workflows. Lightspeed already provides reusable Agent model/prompt
+configuration; that does not yet replace all of these capabilities. As its Agent
+and workflow resources cover our use cases, adopt those resources, deprecate our
+equivalent APIs, and remove them in subsequent releases. The exact Agent,
+AgentRun, AgentWorkflow, and AgentWorkflowRun names and schemas can change through
+that migration. Resource migration is independent of initial runtime reuse and
+optional operator execution; retain our implementations until their replacements
+supply the required behavior.
 
 **Use one core workload and outcome contract across execution paths.** Direct
 Agent Sandbox, Lightspeed, and OpenShell are portability targets. Backend
@@ -82,9 +98,13 @@ implementation choice, subject to these behavioral boundaries.
 A prompt finishing must be distinguishable from workload finalization so the
 same live session can accept a follow-up. A server, local stdio, or embedded
 session interface could provide this; no transport or native Lightspeed ACP
-implementation is selected here. Same-session continuation is distinct from a
-later workflow stage consuming committed handoff files. Reconnect to a live
-session is also distinct from recovery after process loss.
+implementation is selected here. Contribute the needed session-lifecycle changes
+to Lightspeed's DeepAgents implementation and adapt our integration. A supported
+session interface should replace the prototype's extraction of internal
+graph-construction code for this work. These contributions are follow-up work,
+not prerequisites for the initial use cases. Same-session continuation is
+distinct from a later workflow stage consuming committed handoff files.
+Reconnect to a live session is also distinct from recovery after process loss.
 
 Primary use cases are the preview priority. A one-hour budget per step and
 restarting rare interrupted work from a fresh session are acceptable. Retained
@@ -143,12 +163,15 @@ operator probe. Full historical reports and operational records remain local. Th
   amendments in ADRs 0004 and 0016.
 
 Review and merge this decision internally in `konveyor/agentic-controller`.
-Then approach Lightspeed separately with concrete follow-up work: a supported
-runtime boundary and retained-session contribution, and the upstream
-per-invocation image capability for conditional operator adoption. Intended
-MTA/OpenShift deployment, namespace/credential ownership, completion mapping,
-and product ACP routing need delivery design. OpenShell integration follows its
-own issue. An enhancements-repository proposal is not part of this step.
+Then validate existing use-case coverage while integrating the existing runtime
+with our harness. Collaborate with Lightspeed on retained-session support as
+separate runtime work and on the upstream per-invocation image capability needed
+for optional operator execution. Migrate and deprecate our APIs as equivalent
+Agent and workflow resources become available and cover our requirements.
+Intended MTA/OpenShift deployment, namespace/credential ownership, completion
+mapping, and product ACP routing need delivery design. OpenShell integration
+follows its own issue. An enhancements-repository proposal is not part of this
+step.
 
 - [Convergence investigation](https://redhat.atlassian.net/browse/MTA-7977)
 - [Sprint convergence proposal](https://redhat.atlassian.net/browse/MTA-8048)
