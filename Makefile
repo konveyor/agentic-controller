@@ -153,6 +153,11 @@ build: manifests generate fmt vet ## Build manager binary.
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 
+.PHONY: kubectl-kai-build
+kubectl-kai-build: $(LOCALBIN) ## Build the kubectl-kai plugin binary (put bin/kubectl-kai on PATH to run "kubectl kai").
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o "$(LOCALBIN)/kubectl-kai" ./cmd/kubectl-kai
+	if [ "$(GOOS)" = "windows" ]; then mv "$(LOCALBIN)/kubectl-kai" "$(LOCALBIN)/kubectl-kai.exe"; fi
+
 .PHONY: harness-build
 harness-build: ## Build the migration-harness binary for local use (GOOS/GOARCH override to cross-compile; the agent images always build it for linux inside their Containerfile).
 	mkdir -p harness/bin

@@ -69,6 +69,8 @@ agentic-controller/
   api/skill/              Agent Skills frontmatter parsing and validation
   internal/controller/    Controller implementations
   internal/skills/        Skill assembly, and SkillCard materialization
+  pkg/kai/                The kai CLI command tree (reusable cobra package)
+  cmd/kubectl-kai/        The kubectl-kai plugin binary (see docs/kubectl-kai.md)
   cmd/skill-loader/       The init container and enumeration Job binary
   config/defaults/        Curated content the operator installs on enable
                             (skill catalog, stage Agents, AgentWorkflow) —
