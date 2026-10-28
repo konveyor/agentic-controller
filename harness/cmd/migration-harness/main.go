@@ -172,13 +172,18 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		return 1, fmt.Errorf("hub resolution: %w", err)
 	}
 	// Model text is logged at stage end; whatever it says, the
-	// credentials goose inherits from this environment must not be in it.
+	// credentials goose can read must not be in it. Maven setup adds the
+	// secrets from the effective settings file before goose starts.
 	red := newRedactor(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
 
 	if cfg.TargetBranch == creds.Branch {
 		return 1, fmt.Errorf("TARGET_BRANCH %q must differ from source branch", cfg.TargetBranch)
 	}
 	creds.Branch = cfg.TargetBranch
+
+	if err := prepareMavenSettings(hubClient, cfg.AppID, red); err != nil {
+		return 1, fmt.Errorf("Maven settings: %w", err)
+	}
 
 	// 3. Clone, strip creds, checkout branch
 	logging.Header("Git Setup")
@@ -513,7 +518,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			{Type: "text", Text: handoffPromptText},
 		}, cfg.MaxCost)
 		if handoffErr != nil {
-			logging.Warn("handoff prompt: %v — continuing, the limit-reached outcome stands", handoffErr)
+			logging.Warn("handoff prompt: %s — continuing, the limit-reached outcome stands", red.redact(handoffErr.Error()))
 		}
 		if handoffResult != nil {
 			logAgentClosingMessage(handoffResult, red)
@@ -547,7 +552,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			ExitCode:     stageOutcome.exitCode(),
 			Outcome:      stageOutcome.String(),
 			LimitReached: string(limit),
-			StopReason:   primaryResult.StopReason,
+			StopReason:   red.redact(primaryResult.StopReason),
 			Usage:        &u,
 		}
 		if providerRejected {
