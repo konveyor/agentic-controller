@@ -1,0 +1,6 @@
+kind: enhancement
+description: >
+  Make agentic controller CPU and memory resources configurable through the
+  Tackle CR, raise the default memory limit to 400Mi, enable authenticated
+  controller metrics, capture periodic memory samples in logs, and support
+  opt-in loopback heap profiling.
