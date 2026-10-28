@@ -5,10 +5,10 @@ description: "Reuse Lightspeed's DeepAgents runtime within the Konveyor harness,
 status: accepted
 status_note: "Approves Konveyor direction only; implementation, backend qualification, and Lightspeed agreement are separate."
 date: "2026-10-20"
-last_updated: "2026-10-26"
+last_updated: "2026-10-28"
 authors:
   - "David Zager"
-last_reviewed: "2026-10-26"
+last_reviewed: "2026-10-28"
 implementation_status: deferred
 review_note: "Runtime reuse and custom-image execution were demonstrated separately. Production runtime integration, a selectable execution backend, and OpenShell compatibility remain unimplemented."
 relates_to:
@@ -20,6 +20,12 @@ relates_to:
 ---
 
 # ADR 0021: Shared Runtime and Conditional Lightspeed Execution
+
+**Update (2026-10-28):** Made execution in Konveyor's Hub namespace an explicit
+operator-adoption requirement alongside a workload image per invocation. The
+earlier Decision named image selection but left namespace and credential
+ownership to follow-up design. Both capabilities, including their combined
+lifecycle and Hub connectivity, must be supported and validated before adoption.
 
 **Update (2026-10-26):** Clarified the adoption sequence and ownership in the
 Decision and follow-up sections. Existing use-case coverage gates runtime
@@ -56,15 +62,25 @@ than complete release coverage.
 
 **Add the Lightspeed operator as an alternative execution backend when ready.**
 Runtime reuse proceeds independently under our existing controller and direct
-Agent Sandbox. Operator adoption requires Lightspeed to support a workload image
-per invocation with image-owned startup upstream, plus an agreed custom-workload
-input, completion, and lifecycle contract. The exact selector field is joint
-design work. Retain the direct Agent Sandbox path alongside that optional backend
-to mitigate integration and release risk. Adopt operator execution for MTA 8.4
-only if the upstream capability and our integration are ready without delaying
-the release; otherwise continue the runtime path under our controller. We will
-not ship a patched Lightspeed operator. Broader roadmap commitment is not a
-prerequisite for runtime reuse.
+Agent Sandbox. Operator adoption requires upstream support for both:
+
+- **A workload image per AgenticRun, with image-owned startup.** Our selected
+  image runs its harness entrypoint and carries the runtime and toolchains.
+- **Execution in the requesting Konveyor installation's Hub namespace.** The
+  AgenticRun and workload must operate there with namespace-local inputs and
+  Secret references, working Hub access, and a namespace-consistent approval,
+  Result, ownership, and cleanup lifecycle. Watching runs across namespaces is
+  insufficient while execution remains fixed to the Lightspeed namespace.
+
+The exact API fields are joint design work; using the AgenticRun's own namespace
+could satisfy execution placement without a separate override field. Agree the
+custom-workload input, completion, and lifecycle contract and validate both
+capabilities together in the intended MTA/OpenShift deployment. Retain the direct
+Agent Sandbox path alongside that optional backend to mitigate integration and
+release risk. Adopt operator execution for MTA 8.4 only if both capabilities and
+our integration are ready without delaying the release; otherwise continue the
+runtime path under our controller. We will not ship a patched Lightspeed
+operator. Broader roadmap commitment is not a prerequisite for runtime reuse.
 
 **Migrate to Lightspeed resources as they cover our required capabilities.**
 Konveyor needs reusable Agent definitions covering images, skills, tools, MCP
@@ -123,6 +139,14 @@ such as platform integration/support. That ownership transfer is a goal to
 negotiate, not a demonstrated benefit or an upstream commitment. Organizational
 alignment can justify near-term work without claiming immediate code removal.
 
+Hub currently creates and reads agentic resources and their credential Secrets
+in its own namespace. Namespace-local execution preserves that integration and
+the existing namespace network boundary. Copying credentials into Lightspeed's
+namespace or disabling Konveyor's namespace isolation is not the adoption path
+selected here. Qualify Hub application/credential resolution, normal token
+revocation, ACP connectivity, Result publication, and cleanup with the intended
+network policies enabled.
+
 The common workload contract must avoid a separate Lightspeed-only mechanism
 for publishing core results. Each backend may require additional integration;
 none of the three paths is qualified merely by naming it as a portability goal,
@@ -145,6 +169,11 @@ operator probe. Full historical reports and operational records remain local. Th
 - Operator `e195a026588c6db674e573a6bd4cff2b47e0e55d` ran the real harness,
   Hub/Git, and Goose using a **global** image override. Per-invocation selection
   and heterogeneous-image concurrency were not demonstrated.
+- That real-harness experiment used a Hub fixture in a separate namespace with
+  namespace isolation disabled. A separate namespace probe reproduced invalid
+  approval ownership for a run outside the operator namespace at that revision;
+  it did not attempt workload execution or completion. These experiments do
+  not qualify namespace-local execution or normal Konveyor network policies.
 - Sandbox runtime `325121ba39db810b1e98f38e5a1ca8dc02fecdef` was reused under
   direct Agent Sandbox with skills/MCP and verified Git output. The October 19
   passive ACP demo retained three attempts: an observer-startup failure, an
@@ -166,12 +195,14 @@ Review and merge this decision internally in `konveyor/agentic-controller`.
 Then validate existing use-case coverage while integrating the existing runtime
 with our harness. Collaborate with Lightspeed on retained-session support as
 separate runtime work and on the upstream per-invocation image capability needed
-for optional operator execution. Migrate and deprecate our APIs as equivalent
-Agent and workflow resources become available and cover our requirements.
-Intended MTA/OpenShift deployment, namespace/credential ownership, completion
-mapping, and product ACP routing need delivery design. OpenShell integration
-follows its own issue. An enhancements-repository proposal is not part of this
-step.
+alongside execution in Konveyor's Hub namespace for optional operator adoption.
+Validate their combined input, credential, approval, Result, and cleanup
+lifecycle with Hub/ACP connectivity under the intended network policies. Migrate
+and deprecate our APIs as equivalent Agent and workflow resources become
+available and cover our requirements. Completion mapping and product ACP routing
+still need delivery design within that required namespace placement. OpenShell
+integration follows its own issue. An enhancements-repository proposal is not
+part of this step.
 
 - [Convergence investigation](https://redhat.atlassian.net/browse/MTA-7977)
 - [Sprint convergence proposal](https://redhat.atlassian.net/browse/MTA-8048)
