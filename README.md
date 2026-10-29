@@ -56,11 +56,6 @@ See [docs/getting-started.md](docs/getting-started.md) for a
 step-by-step guide to deploying the controller, configuring a Gateway
 with LLM credentials, and creating your first AgentRun.
 
-## End-to-end testing
-
-See [test/e2e/README.md](test/e2e/README.md) for Kind setup and commands for
-the full pipeline, skill delivery, workflow reconciliation, and Go E2E suites.
-
 ## Project structure
 
 ```
@@ -107,7 +102,7 @@ agentic-controller/
 | [konveyor/tackle2-ui](https://github.com/konveyor/tackle2-ui) | Web UI |
 | [kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) | Sandbox CRDs for agent workloads |
 | [agentskills.io](https://agentskills.io) | The skill format our skills are written in |
-| [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Secure runtime for autonomous agents |
+| [NVIDIA/OpenShell](https://github.com/NVIDIA/OpenShell) | Secure runtime under evaluation; adoption deferred |
 
 ## Contributing
 
