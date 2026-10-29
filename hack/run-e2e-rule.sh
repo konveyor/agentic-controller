@@ -117,30 +117,28 @@ hub_get() {
       wget -q -O- "${HUB_BASE_URL}$1"
 }
 
-# One always-matching, unlimited rule. Every model call succeeds, so the run
-# completes normally and the phase stays a precondition rather than becoming
-# the assertion. times: -1 is load-bearing: a rule that omits it is treated as
-# exhausted and skipped, and every request would 500.
-# The first rule stands in for a model that obeys the rule: it answers with the
-# shell call the rule demands, but only when the rule's marker is actually in
-# the prompt. With the rule detached the marker is absent, nothing matches it,
-# and the catch-all answers instead. So the tool call is caused by the rule
-# having arrived, which is the claim.
+# One always-matching, unlimited rule. Every model call gets the same text
+# answer, so both runs complete normally and the phase stays a precondition
+# rather than becoming the assertion. times: -1 is load-bearing: a rule that
+# omits it is treated as exhausted and skipped, and every request would 500.
 #
-# It is keyed on <turn-context> as well, because goose separately asks the
-# model to name the session and that request embeds the user message. A
-# tool-call rule fires once, so the title request would otherwise consume it.
-#
-# times: -1 on the catch-all is load-bearing: a rule that omits times is
-# treated as exhausted and skipped, and every later request would 500.
+# This script once carried a second, higher-priority rule that returned a shell
+# tool call when the rule's marker appeared in the prompt, so the test could
+# follow the marker back out through goose and ACP into the harness. goose
+# v1.55 moved its <turn-context> block out of the user turn: where v1.45
+# prepended it into the latest user message (alongside the ## Rules section and
+# its marker), v1.55 sends it as a separate, agent-appended user message that
+# lands last. The emulator keys a pattern on the *last* user message only (see
+# ExtractUserMessage in the pinned llemulator), and that message is now the
+# turn-context block -- byte-identical whether the rule is attached or not, and
+# never carrying the marker. So no pattern over it can tell the two runs apart,
+# and the tool call can no longer be made to fire on the rule alone. The claim
+# that the rule's text reaches the model is still proven one layer earlier,
+# against the exact request bytes goose sent (assert_marker, below).
 script_json() {
     cat <<JSON
 {"reset": true, "models": ["gpt-4o"],
  "rules": [
-   {"pattern": "(?s)<turn-context>.*${MARKER}",
-    "tool_calls": [{"id": "call_rule_1", "type": "function",
-                    "function": {"name": "shell",
-                                 "arguments": "{\"command\": \"echo ${MARKER}\"}"}}]},
    {"response": "Acknowledged. Nothing to change.", "times": -1}]}
 JSON
 }
@@ -366,23 +364,6 @@ if kc logs "$(run_pod rule-on)" -c agent 2>/dev/null | grep -q "always-loaded ru
     pass "the harness reported the rule as always-loaded"
 else
     fail "the harness never reported the rule, so it did not read it back from the manifest"
-fi
-
-# The rule asked for a command. Did one actually get called? The harness logs
-# each tool call's title, which for a shell call is the command, so this is the
-# marker arriving back out through goose and ACP rather than only going in.
-tool_call_logged() { kc logs "$(run_pod "$1")" -c agent 2>/dev/null | grep -q "tool:.*${MARKER}"; }
-
-if tool_call_logged rule-on; then
-    pass "with the rule: the agent was asked to run the command the rule demanded"
-else
-    fail "with the rule: no tool call carrying the marker reached the harness"
-    kc logs "$(run_pod rule-on)" -c agent 2>/dev/null | grep -E "tool:|error" | tail -5 | sed 's/^/    /' || true
-fi
-if tool_call_logged rule-off; then
-    fail "control is invalid: a tool call carrying the marker happened without the rule"
-else
-    pass "without the rule: no tool call, so the rule caused it"
 fi
 
 # Informational, not an assertion: which tools goose offered the model. The

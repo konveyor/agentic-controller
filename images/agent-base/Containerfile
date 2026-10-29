@@ -9,8 +9,8 @@
 # goose-dist target, and the stage that consumes it is an overridable ARG,
 # so CI can build the binary once and hand it back in:
 #
-#   podman build --target goose-dist -t goose:v1.45.0 -f images/agent-base/Containerfile .
-#   podman build --build-arg GOOSE_IMAGE=goose:v1.45.0 -f images/agent-base/Containerfile .
+#   podman build --target goose-dist -t goose:v1.55.0 -f images/agent-base/Containerfile .
+#   podman build --build-arg GOOSE_IMAGE=goose:v1.55.0 -f images/agent-base/Containerfile .
 #
 # With GOOSE_IMAGE set, the goose-builder and goose-dist stages are
 # unreferenced and the builder skips them. Left unset it defaults to
@@ -42,7 +42,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Build goose from source (BUILDING_LINUX.md)
-ARG GOOSE_VERSION=v1.45.0
+ARG GOOSE_VERSION=v1.55.0
 WORKDIR /src/goose
 RUN git clone https://github.com/aaif-goose/goose.git . \
     && git checkout ${GOOSE_VERSION} \
