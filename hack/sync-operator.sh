@@ -11,17 +11,17 @@
 #
 # What it renders:
 #   CRDs       config/crd/bases/konveyor.io_*.yaml -> helm/templates/crds/ (verbatim)
-#   RBAC       config/rbac/{role,leader_election_role}.yaml -> helm/templates/rbac/
-#                agentic_{cluster_role,leader_election_role}.yaml, with metadata.name
+#   RBAC       config/rbac/{role,leader_election_role,metrics_reader_role}.yaml -> helm/templates/rbac/
+#                agentic_{cluster_role,leader_election_role,metrics_reader_role}.yaml; metadata.name
 #                renamed to avoid colliding with the operator's own roles
-#   deployment config/operator/deployment.yaml.j2 -> roles/tackle/templates/agentic/ (verbatim)
+#   operands   config/operator/*.yaml.j2 -> roles/tackle/templates/agentic/ (verbatim)
 #   defaults   config/defaults/*.yaml -> roles/tackle/templates/agentic/defaults/ (verbatim)
 #
 # It does NOT run `make bundle`; the workflow does that in the operator checkout
 # so the ClusterServiceVersion reflects any CRD/RBAC change. The RBAC binding and
 # ServiceAccount files are operator-authored (they reference the operator's
-# release namespace and SA name) and are intentionally left alone -- only the two
-# role files, whose rules are generated from the controller, are re-rendered.
+# release namespace and SA name) and are intentionally left alone. The controller
+# roles and metrics-reader role are re-rendered.
 #
 # Usage: hack/sync-operator.sh <path-to-operator-checkout>
 
@@ -107,12 +107,27 @@ render_role \
 # (leader-election-role), renamed to avoid collisions. Permits the controller's
 # leader election. Do not hand-edit -- update by re-syncing."
 
-# Controller Deployment template -- verbatim copy. It carries operator-specific
+# Keep this install-scoped role name aligned with the operator-authored reader
+# ServiceAccount and binding. agentic_component_name is a per-Tackle Ansible
+# variable, not a Helm/OLM RBAC resource name.
+render_role \
+  "${REPO_ROOT}/config/rbac/metrics_reader_role.yaml" \
+  "${rbac_dir}/agentic_metrics_reader_role.yaml" \
+  "metrics-reader" \
+  "agentic-controller-metrics-reader" \
+  "# Synced from konveyor/agentic-controller config/rbac/metrics_reader_role.yaml.
+# Renamed to avoid colliding with another metrics-reader role."
+
+# Copying templates does not install their resources. When this adds variables
+# or operands, the resulting operator PR must also add role defaults and lifecycle
+# tasks. In particular, reconcile the metrics Service/credentials before applying
+# the Deployment that requires the service-serving certificate Secret.
+# Controller operand templates -- verbatim copies. They carry operator-specific
 # Jinja ({{ agentic_fqin }}, namespace, labels, SA) that a reserialization would
 # reformat, so we maintain it as a first-class artifact here and copy it as-is.
 echo "==> deployment -> ${agentic_dir}"
 mkdir -p "${agentic_dir}"
-cp "${REPO_ROOT}/config/operator/deployment.yaml.j2" "${agentic_dir}/deployment.yaml.j2"
+cp "${REPO_ROOT}"/config/operator/*.yaml.j2 "${agentic_dir}/"
 
 # Default content -- verbatim copy, minus the kustomization (the operator applies
 # these through its Ansible role, not kustomize). The directory is ours alone, so

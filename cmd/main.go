@@ -20,6 +20,7 @@ import (
 	"cmp"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"time"
 
@@ -42,6 +43,7 @@ import (
 
 	konveyoriov1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 	"github.com/konveyor/agentic-controller/internal/controller"
+	"github.com/konveyor/agentic-controller/internal/diagnostics"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -57,9 +59,16 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
+// Include metrics authentication in the manager role because sync-operator.sh
+// exports role.yaml, not Kustomize's separate metrics_auth_role.yaml.
+// +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
+
 // nolint:gocyclo
 func main() {
 	var metricsAddr string
+	var pprofAddr string
+	var memoryLogInterval time.Duration
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
 	var enableLeaderElection bool
@@ -71,6 +80,10 @@ func main() {
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
+	flag.StringVar(&pprofAddr, "pprof-bind-address", "0",
+		"Loopback IP and port for runtime profiling, e.g. 127.0.0.1:6060. 0 disables profiling.")
+	flag.DurationVar(&memoryLogInterval, "memory-log-interval", 30*time.Second,
+		"Interval between controller memory samples in logs. 0 disables sampling.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
@@ -105,6 +118,14 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	if err := diagnostics.ValidatePprofAddress(pprofAddr); err != nil {
+		setupLog.Error(err, "Invalid profiling configuration")
+		os.Exit(1)
+	}
+	if memoryLogInterval < 0 {
+		setupLog.Error(fmt.Errorf("interval must not be negative"), "Invalid memory log interval")
+		os.Exit(1)
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -177,6 +198,7 @@ func main() {
 		Scheme:                 scheme,
 		Cache:                  cache.Options{ByObject: controller.SandboxPodCacheOptions()},
 		Metrics:                metricsServerOptions,
+		PprofBindAddress:       pprofAddr,
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
@@ -281,6 +303,16 @@ func main() {
 	if err := workflowRunReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "AgentWorkflowRun")
 		os.Exit(1)
+	}
+	if memoryLogInterval > 0 {
+		sampler := diagnostics.MemorySampler{Interval: memoryLogInterval, Log: ctrl.Log.WithName("diagnostics")}
+		// Non-leader runnables start after cache synchronization; capture the
+		// baseline now so a startup OOM still leaves a memory sample.
+		sampler.Capture()
+		if err := mgr.Add(sampler); err != nil {
+			setupLog.Error(err, "Failed to set up memory sampling")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 
