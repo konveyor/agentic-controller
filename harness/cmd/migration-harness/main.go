@@ -387,6 +387,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// Harness lifecycle → viewer status frames, in standard ACP
 	// vocabulary. Everything is a no-op without a live tee.
 	prepRung := planPrepRung(creds.RepoURL, creds.Branch, insightCount, red)
+	prepMeta := planPrepMeta(creds.RepoURL, creds.Branch, insightCount, red)
 	// turnsSeen is the run's turn count so far across the primary prompt
 	// and the handoff; the task rung re-renders with it on every turn.
 	var turnsSeen atomic.Int64
@@ -405,15 +406,18 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		if teeSrv == nil {
 			return
 		}
-		entry := func(content, status string) map[string]any {
-			return map[string]any{"content": content, "priority": "medium", "status": status}
-		}
+		// Read each counter once and hand the same value to both
+		// renderings of its rung: re-reading for the sentence and again
+		// for the fields would let a turn land between the two and
+		// publish a frame that contradicts itself.
+		turns := int(turnsSeen.Load())
+		pushes, commits := int(pushesLanded.Load()), int(commitsPushed.Load())
 		teeSrv.EmitRunUpdate(map[string]any{
 			"sessionUpdate": "plan",
 			"entries": []map[string]any{
-				entry(prepRung, prep),
-				entry(planTaskRung(cfg, red, int(turnsSeen.Load())), agentRun),
-				entry(planPushRung(creds.Branch, int(pushesLanded.Load()), int(commitsPushed.Load()), finish == "completed"), finish),
+				planEntry(prepRung, prep, prepMeta),
+				planEntry(planTaskRung(cfg, red, turns), agentRun, planTaskMeta(cfg, red, turns)),
+				planEntry(planPushRung(creds.Branch, pushes, commits, finish == "completed"), finish, planPushMeta(creds.Branch, pushes, commits)),
 			},
 		})
 	}
@@ -985,6 +989,105 @@ func planPushRung(branch string, pushes, commits int, done bool) string {
 	}
 }
 
+// planMetaKey namespaces the harness's structured rung data inside an
+// ACP plan entry's `_meta`. The numbers cannot sit beside content,
+// priority and status however convenient that would be: ACP reserves
+// every root field name on the types it specifies ("Implementations
+// MUST NOT add any custom fields at the root of a type that's part of
+// the specification. All possible names are reserved for future
+// protocol versions"). `_meta` is the sanctioned slot, and PlanEntry
+// carries one. The reverse-DNS key keeps us out of the way of other
+// implementations extending the same entry.
+const planMetaKey = "konveyor.io/plan"
+
+// The plan*Meta builders publish each rung's facts as data beside the
+// sentence, so a console can localize the rung and draw a meter out of
+// it instead of parsing English (#233 item 1). `content` stays exactly
+// as it was: a client that knows nothing of `_meta` is unaffected, and
+// one that does falls back to the sentence whenever a field is absent.
+//
+// Each builder shares the helper that composes its sentence, so the two
+// renderings of a rung cannot drift apart.
+//
+// A key the run cannot answer for is left out rather than sent as a
+// zero: "no analysis insights" and "the analysis was never fetched" are
+// different facts, and a reader that cannot tell them apart will report
+// the wrong one. Absent means unknown; present means measured.
+
+// planEntry builds one ACP plan entry: the sentence at the root, where
+// the protocol allows it, and this rung's facts under _meta. Keeping
+// the construction in one place is what makes the root-field rule
+// above testable, and keeps the next rung from being added by hand.
+func planEntry(content, status string, meta map[string]any) map[string]any {
+	return map[string]any{
+		"content":  content,
+		"priority": "medium",
+		"status":   status,
+		"_meta":    map[string]any{planMetaKey: meta},
+	}
+}
+
+// planPrepMeta is the prep rung as data: what the workspace holds by
+// the time viewers can attach.
+func planPrepMeta(repoURL, branch string, insightCount int, red *redactor) map[string]any {
+	m := map[string]any{"rung": "prep"}
+	if repo := repoDisplayName(repoURL); repo != "" {
+		m["repo"] = red.redact(repo)
+	}
+	if branch != "" {
+		m["branch"] = branch
+	}
+	if insightCount >= 0 {
+		m["insights"] = insightCount
+	}
+	return m
+}
+
+// planTaskMeta is the task rung as data: which stage this is, what it
+// was asked to do, and the model and turn budget it runs under.
+//
+// turnsUsed is always present — zero turns is a measurement, not a gap.
+// The task excerpt is the cut, redacted one that the sentence quotes,
+// not the whole instruction: this is a ladder rung in both renderings.
+func planTaskMeta(cfg *config.Config, red *redactor, turnsUsed int) map[string]any {
+	m := map[string]any{"rung": "task", "turnsUsed": turnsUsed}
+	excerpt, goal := taskAndGoal(cfg, red)
+	if excerpt != "" {
+		m["task"] = excerpt
+	}
+	if goal != "" {
+		m["goal"] = goal
+	}
+	if stage, count, ok := workflowStagePosition(cfg); ok {
+		m["stage"] = stage
+		m["stageCount"] = count
+	}
+	if model := modelDisplayName(cfg.Model); model != "" {
+		m["model"] = model
+	}
+	if ceiling := turnCeiling(cfg, turnsUsed); ceiling > 0 {
+		m["maxTurns"] = ceiling
+	}
+	return m
+}
+
+// planPushMeta is the push rung as data: where the run's work goes and
+// how much of it got there.
+//
+// pushes is always present — none yet is a measurement. commits is not:
+// it stays -1 until the final push counts it, and a premature 0 would
+// read as "this run produced nothing".
+func planPushMeta(branch string, pushes, commits int) map[string]any {
+	m := map[string]any{"rung": "push", "pushes": pushes}
+	if branch != "" {
+		m["branch"] = branch
+	}
+	if commits >= 0 {
+		m["commits"] = commits
+	}
+	return m
+}
+
 // repoDisplayName reduces a clone URL to host and path for a viewer:
 // scheme, embedded credentials and a trailing .git dropped. Empty when
 // the URL is empty or does not parse.
@@ -1080,57 +1183,39 @@ func modelDisplayName(model string) string {
 	return name
 }
 
-// planTaskRung is the middle rung of the plan ladder the harness shows
-// viewers: which stage this is, what the task asks, and the model and turn
-// budget it runs under. Before this the rung read "Agent works the stage
-// task" for every run, which told a viewer nothing the other two rungs did
-// not. The excerpt is the first line of the stage instructions, rendered
-// with parameter values substituted, so it passes through the redactor
-// like every other text the harness publishes — in full, before the cut.
+// taskAndGoal is what the task rung says the run is working on: the
+// excerpt of the stage instructions, and — only when nobody typed any —
+// the run's declared goal instead. Quoted with different words on
+// purpose: a goal is the shape of the whole job, not the instruction
+// this stage was handed.
 //
-// turnsUsed is the run's turn count so far: zero before the prompt is
-// sent ("up to N turns"), then "turn 12 of N" as the ladder is re-emitted
-// per turn. N is the runtime's native ceiling — ReserveFraction of the
-// configured budget — because that is where the prompt actually stops;
-// the configured budget only becomes the denominator once the wind-down
-// handoff starts spending the reserve.
-func planTaskRung(cfg *config.Config, red *redactor, turnsUsed int) string {
-	var b strings.Builder
-	// Redact the whole text BEFORE the excerpt is cut: exact-match
-	// redaction cannot recognise a token the cutoff has split, and the
-	// leaked head would sit in the replay ring for every late viewer.
-	// Only the stage instructions are quoted — what a person typed for
-	// this run. The agent prompt opens with a persona ("You are a senior
-	// Java engineer…"), which cut to a line says nothing about the work.
-	excerpt := taskSummary(red.redact(cfg.StageInstructions))
-	// Nothing was typed for this run, so fall back to what it was
-	// declared to be about. Quoted with different words on purpose: a
-	// goal is the shape of the whole job, not the instruction this stage
-	// was handed.
-	goal := ""
+// Redact the whole text BEFORE the excerpt is cut: exact-match
+// redaction cannot recognise a token the cutoff has split, and the
+// leaked head would sit in the replay ring for every late viewer. Only
+// the stage instructions are quoted — what a person typed for this run.
+// The agent prompt opens with a persona ("You are a senior Java
+// engineer…"), which cut to a line says nothing about the work.
+func taskAndGoal(cfg *config.Config, red *redactor) (excerpt, goal string) {
+	excerpt = taskSummary(red.redact(cfg.StageInstructions))
 	if excerpt == "" {
 		goal = taskSummary(red.redact(runGoal(cfg)))
 	}
-	stage, count, staged := workflowStagePosition(cfg)
-	switch {
-	case staged && excerpt != "":
-		fmt.Fprintf(&b, "Stage %d of %d — agent works the task: \u201c%s\u201d", stage, count, excerpt)
-	case staged && goal != "":
-		fmt.Fprintf(&b, "Stage %d of %d — agent is working on: \u201c%s\u201d", stage, count, goal)
-	case staged:
-		fmt.Fprintf(&b, "Stage %d of %d — agent is working", stage, count)
-	case excerpt != "":
-		fmt.Fprintf(&b, "Agent works the task: \u201c%s\u201d", excerpt)
-	case goal != "":
-		fmt.Fprintf(&b, "Agent is working on: \u201c%s\u201d", goal)
-	default:
-		b.WriteString("Agent is working")
-	}
-	// The ceiling shown is the runtime's native per-prompt limit, not the
-	// configured budget: the prompt stops at NativeTurnLimit(maxTurns) and
-	// the remainder is reserved for the wind-down handoff (ADR 0011). At
-	// the default 200 the rung used to read "turn 170 of 200" as the run
-	// ended, promising 30 turns it was never going to take.
+	return excerpt, goal
+}
+
+// turnCeiling is the denominator the task rung reports turns against —
+// "turn 12 of N" — and the maxTurns the same rung publishes as data.
+// One function because the sentence and the field must never disagree.
+//
+// The ceiling is the runtime's native per-prompt limit, not the
+// configured budget: the prompt stops at NativeTurnLimit(maxTurns) and
+// the remainder is reserved for the wind-down handoff (ADR 0011). At the
+// default 200 the rung used to read "turn 170 of 200" as the run ended,
+// promising 30 turns it was never going to take.
+//
+// Zero means the run has no declared budget, so there is no denominator
+// to show and no maxTurns to publish.
+func turnCeiling(cfg *config.Config, turnsUsed int) int {
 	ceiling := params.NativeTurnLimit(cfg.MaxTurns)
 	if turnsUsed > ceiling {
 		// Past the native ceiling the handoff prompt is spending the
@@ -1150,6 +1235,42 @@ func planTaskRung(cfg *config.Config, red *redactor, turnsUsed int) string {
 	if ceiling > 0 {
 		ceiling = max(ceiling, turnsUsed)
 	}
+	return ceiling
+}
+
+// planTaskRung is the middle rung of the plan ladder the harness shows
+// viewers: which stage this is, what the task asks, and the model and turn
+// budget it runs under. Before this the rung read "Agent works the stage
+// task" for every run, which told a viewer nothing the other two rungs did
+// not. The excerpt is the first line of the stage instructions, rendered
+// with parameter values substituted, so it passes through the redactor
+// like every other text the harness publishes — in full, before the cut.
+//
+// turnsUsed is the run's turn count so far: zero before the prompt is
+// sent ("up to N turns"), then "turn 12 of N" as the ladder is re-emitted
+// per turn. N is the runtime's native ceiling — ReserveFraction of the
+// configured budget — because that is where the prompt actually stops;
+// the configured budget only becomes the denominator once the wind-down
+// handoff starts spending the reserve.
+func planTaskRung(cfg *config.Config, red *redactor, turnsUsed int) string {
+	var b strings.Builder
+	excerpt, goal := taskAndGoal(cfg, red)
+	stage, count, staged := workflowStagePosition(cfg)
+	switch {
+	case staged && excerpt != "":
+		fmt.Fprintf(&b, "Stage %d of %d — agent works the task: \u201c%s\u201d", stage, count, excerpt)
+	case staged && goal != "":
+		fmt.Fprintf(&b, "Stage %d of %d — agent is working on: \u201c%s\u201d", stage, count, goal)
+	case staged:
+		fmt.Fprintf(&b, "Stage %d of %d — agent is working", stage, count)
+	case excerpt != "":
+		fmt.Fprintf(&b, "Agent works the task: \u201c%s\u201d", excerpt)
+	case goal != "":
+		fmt.Fprintf(&b, "Agent is working on: \u201c%s\u201d", goal)
+	default:
+		b.WriteString("Agent is working")
+	}
+	ceiling := turnCeiling(cfg, turnsUsed)
 	var budget string
 	switch {
 	case turnsUsed > 0 && ceiling > 0:
