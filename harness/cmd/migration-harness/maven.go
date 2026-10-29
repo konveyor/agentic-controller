@@ -11,13 +11,14 @@ import (
 
 	"github.com/konveyor/migration-harness/internal/hub"
 	"github.com/konveyor/migration-harness/internal/logging"
+	"github.com/konveyor/migration-harness/internal/proxy"
 )
 
 // prepareMavenSettings runs in every invocation, independently of skills or
 // workflow stage. An existing user settings file (including a Secret mount)
 // takes precedence over Hub's assigned or default Maven credential. Broken
 // symlinks fail setup instead of falling back to a Hub credential.
-func prepareMavenSettings(client *hub.Client, appID string, red *redactor) error {
+func prepareMavenSettings(client *hub.Client, appID string, red *redactor, proxies ...proxy.Config) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home directory: %w", err)
@@ -54,13 +55,21 @@ func prepareMavenSettings(client *hub.Client, appID string, red *redactor) error
 	if err != nil {
 		return fmt.Errorf("fetch Maven credential: %w", err)
 	}
-	if identity == nil {
+	if identity == nil && len(proxies) == 0 {
 		return nil
 	}
-	if strings.TrimSpace(identity.Settings) == "" {
-		return fmt.Errorf("Maven credential %d has empty settings", identity.ID)
+	settings := ""
+	if identity != nil {
+		if strings.TrimSpace(identity.Settings) == "" {
+			return fmt.Errorf("Maven credential %d has empty settings", identity.ID)
+		}
+		settings = identity.Settings
 	}
-	if err := red.addMavenSettings(identity.Settings); err != nil {
+	settings, err = withMavenProxies(settings, proxies)
+	if err != nil {
+		return err
+	}
+	if err := red.addMavenSettings(settings); err != nil {
 		return err
 	}
 
@@ -73,7 +82,7 @@ func prepareMavenSettings(client *hub.Client, appID string, red *redactor) error
 	if err != nil {
 		return fmt.Errorf("create Maven user settings: %w", err)
 	}
-	if err := writeMavenSettings(f, path, identity.Settings); err != nil {
+	if err := writeMavenSettings(f, path, settings); err != nil {
 		return err
 	}
 	logging.Ok("Maven settings prepared at %s", path)

@@ -54,6 +54,7 @@ The controller delivers resolved parameters to `/run/konveyor/params.json` (ADR 
 
 - **Clone & Author Identity** — Clones the repository and configures commit author (`user.name`, `user.email`).
 - **Credential Isolation** — Push credentials remain in the entry point and are stripped from the working tree remote before launching the runtime.
+- **Proxy Inheritance** — The reference harness resolves enabled Hub proxies before Git setup and runtime startup. Explicit Git proxy environment settings take precedence. It adds proxies only to generated Maven settings; existing user files and mounts are authoritative. `HARNESS_HUB_PROXY=off` bypasses inheritance for both tools. See [precedence, exclusions and workarounds](../harness/README.md#hub-proxy-inheritance).
 - **Agent-Authored Commits** — The agent creates all commits locally. The entry point **never creates commits of its own**.
 - **Push on Exit** — A debounced watcher pushes agent commits incrementally; a final push runs on stage exit. If no new commits were authored (`HEAD == baseSHA`), push is skipped to avoid creating empty branches.
 
