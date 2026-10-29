@@ -5,7 +5,7 @@ description: "Promotes a small usage object into the harness contract, gives Age
 status: proposed
 status_note: "Amends ADR 0011 (usage reporting: opaque terminationData, standard-ACP-only usage) and ADR 0018 (terminationData unchanged from 0011). Tracks MTA-8049."
 date: "2026-10-20"
-last_updated: null
+last_updated: "2026-10-29"
 authors:
   - "Dylan Murray"
 last_reviewed: "2026-10-20"
@@ -35,8 +35,10 @@ and give a rough cost for a run (MTA-8049).
 
 - **The harness already reads usage.** It consumes goose's
   `_goose/unstable/session/update` stream and keeps the last `usage_update`
-  snapshot of context `used`/`size` and cumulative `cost.amount`, plus a
-  turn count (`harness/internal/acp/session.go`, `trackUsage`). It writes
+  snapshot of context `used`/`size`, plus a turn count
+  (`harness/internal/acp/session.go`, `trackUsage`). It also tries to read
+  `cost.amount` from that stream, but the custom channel does not carry it
+  (it sends `accumulatedCost`), so cost is missed today — see §2. It writes
   `usage{turnsUsed, contextUsed, contextSize, cost}` into the termination
   blob (`harness/cmd/migration-harness/outcome.go`).
 - **The harness discards token counts.** The same goose frames carry
@@ -108,7 +110,7 @@ conforming; the platform shows that data as not reported.
 | `contextUsed` | Occupancy at the end of the stage (the existing field). |
 | `contextSize` | Context window size the runtime reported. |
 | `turnsUsed` | Existing field, unchanged. |
-| `cost`, `currency` | Cumulative cost **as reported by the runtime**, and its currency. Not computed by the platform. |
+| `cost`, `currency` | Cumulative cost **as reported by the runtime** (a JSON number), and its currency. Not computed by the platform. `currency` is optional even when `cost` is present (see §2). |
 | `model` | Model the stage ran against. |
 
 The rest of the termination blob (`outcome`, `limitReached`,
@@ -118,40 +120,71 @@ The object evolves additively: new optional fields may be added; existing
 fields are never renamed or re-typed. Readers ignore unknown fields. There
 is no version field.
 
-The object is under 400 bytes, well within the 4 KiB cap. It is never
-dropped by `writeTerminationLog`'s overflow trimming before `stopReason`
-is cut; the minimal fallback blob keeps `usage` alongside `exitCode`,
-`outcome` and `limitReached`.
+`model` is bounded (the harness caps it to a short length) and `currency`
+is an ISO 4217 code, so with its handful of integer counts the object
+stays small — on the order of a few hundred bytes — well within the 4 KiB
+cap. `writeTerminationLog` must preserve `usage` through its overflow
+trimming: it trims `stopReason` first, and its minimal fallback blob keeps
+the bounded `usage` alongside `exitCode`, `outcome` and `limitReached`.
+(Today that fallback drops everything but those three; the implementation
+changes it to retain the bounded `usage`.) A boundary test asserts the
+serialized blob is valid JSON, at most 4096 bytes, and still carries
+`usage`.
 
 ### 2. The harness reports goose token counts as a stopgap
 
-This amends ADR 0011's "standard ACP only" rule for token counts. The
-harness reads `accumulatedInputTokens` and `accumulatedOutputTokens` from
-goose's `usage_update` frames, and `cost.currency` alongside
-`cost.amount`. These are goose-specific. When ACP standardizes per-turn
-usage (the end-turn token-usage RFD), the harness switches to the standard
-source and the contract fields stay the same.
+This amends ADR 0011's "standard ACP only" rule for token counts. goose
+reports the same cumulative usage snapshot on two channels, and the
+implementation must reconcile them (verified against the pinned goose
+v1.45.0):
+
+- the custom `_goose/unstable/session/update` frame — the channel the
+  harness enables today — carries `accumulatedInputTokens`,
+  `accumulatedOutputTokens` and `accumulatedCost`;
+- the standard `session/update` frame carries `cost.amount` and
+  `cost.currency`.
+
+The harness today listens only on the custom channel yet reads
+`cost.amount`, which that channel does not send — so cost is currently
+missed. The implementation normalizes `accumulatedCost` (and takes
+`currency` from the standard frame) rather than adding the two snapshots
+together: they are the same cumulative value, not two increments. A fixture
+captured from the pinned runtime verifies the mapping. These fields are
+goose-specific; when ACP standardizes per-turn usage (the end-turn
+token-usage RFD), the harness switches to the standard source and the
+contract fields stay the same.
 
 The harness also:
 
-- tracks `peakContextUsed` as the maximum `used` across every
-  `usage_update` frame, across both the primary and limit-handoff prompts;
-- counts `compactions`. If goose sends an explicit compaction notice, the
-  harness counts those. Otherwise it counts a compaction whenever `used`
-  falls below half of the previous frame's `used`. Occupancy only shrinks
-  that much when context is discarded. The 50% figure is a starting point
-  and should be tuned against real runs. Counts from the primary and
-  limit-handoff prompts are added together;
+- tracks `peakContextUsed` from goose's per-message `message_usage`
+  notifications, which arrive *during* the prompt — the maximum `used`
+  across them, over both the primary and limit-handoff prompts. The
+  `usage_update` frame fires only after the prompt stream finishes, so its
+  snapshots capture final occupancy, not the peak: a stage that compacted
+  and refilled within a prompt would look healthy if peak were taken from
+  `usage_update` alone. Where `message_usage` is unavailable,
+  `peakContextUsed` is left unreported rather than reported as the final
+  occupancy;
+- counts `compactions` from goose's explicit `usage.isCompaction` flag on
+  `message_usage`, summed over the primary and limit-handoff prompts. This
+  replaces an earlier occupancy-drop heuristic, which could neither see a
+  compaction that refilled within one prompt nor tell a real compaction
+  from any other large drop. Where no compaction signal is available,
+  `compactions` is left unreported;
 - combines the two prompts' token counts like cost — goose's counters are
   session-cumulative, so the later non-zero value wins and nothing is
   summed;
 - fills `model` from its resolved model configuration
   (`KONVEYOR_LLM_MODEL`);
 - writes `currency: "USD"` when goose reports `cost` without a currency.
-  This makes explicit an assumption the platform already holds: `maxCost`
-  is USD-only (ADR 0018), and the console's live chip defaults to USD.
-  The controller can therefore assume `cost` always comes with a
-  `currency`.
+  This USD default is applied **only in the goose adapter**, where
+  `maxCost` is already USD-only (ADR 0018) and the console's live chip
+  defaults to USD. It is not a contract guarantee: a conforming harness may
+  report `cost` with no `currency`, so the controller treats `currency` as
+  optional like every other field. A currency-less cost still contributes
+  to a stage's displayed cost, but the rollup can only add costs whose
+  currencies agree (§3); a cost with no currency is treated as its own
+  unknown currency and is shown without a currency symbol.
 
 ### 3. The controller reads only `usage`, into typed status
 
@@ -184,10 +217,20 @@ changes its outcome.
 | `contextUsed`, `contextSize`, `model` | Unset — not meaningful across stages. |
 
 The total covers finished stages only, so it grows as a run progresses.
+Whether a summed total is **partial** — whether some finished stage did not
+report that measurement — is derivable from the per-stage usage the console
+already has, and applies to the token totals as much as to cost: a
+100k-token total over two stages, one of which reported no tokens, is not a
+measured 100k. A stage that reported a value of zero counts as reported,
+not omitted.
 
 `RunUsage` is one Go type shared by all three, with every field optional:
 `*int64` for counts, and `cost` as a decimal string like
-`ExecutionSpec.maxCost` (CRDs avoid floats).
+`ExecutionSpec.maxCost` (CRDs avoid floats). The wire `cost` is a JSON
+number; the controller formats it into that decimal string when it parses
+`terminationData.usage`, mirroring how `maxCost` is already carried as a
+string. A `cost` that fails to parse leaves `RunUsage.Cost` empty, like any
+other missing field, and never fails the run.
 
 ### 4. The console shows per-stage usage on the run detail page
 
@@ -213,8 +256,9 @@ On the **workflow run detail page** (tackle2-ui
   tile say "Reported cost", with a tooltip explaining it is the runtime's
   estimate at list price and may be missing or differ from actual billing.
   Cost is formatted in the reported currency. A blank cost is blank, not
-  `$0`. When some stages reported cost and others did not, the total
-  carries a "partial" marker.
+  `$0`. When some finished stages reported a measurement and others did
+  not, the affected total — tokens as well as cost — carries a "partial"
+  marker, so an incomplete total is never shown as a full measurement.
 - Built from PatternFly `Card`/`Table`/`Progress` components; no Victory
   charts.
 
@@ -265,10 +309,11 @@ Hub needs no change: it already proxies full CRs to the console.
   standardizes usage. A goose upgrade that renames them silently empties
   the token columns; the harness should log once when a `usage_update`
   arrives without token fields.
-- Unless goose sends an explicit notice, the compaction count comes from a
-  heuristic. A large drop in occupancy for any other reason would be
-  counted as a compaction, and a compaction that frees little context
-  would be missed.
+- The compaction count and context peak depend on goose's `message_usage`
+  notifications (the `usage.isCompaction` flag and per-message `used`). A
+  goose version that stops sending them, or renames the flag, leaves
+  `compactions` and `peakContextUsed` unreported rather than wrong; the
+  harness should log once when it expected them and saw none.
 - Cost is only as good as goose's price list: blank for unknown models and
   wrong for negotiated or self-hosted pricing. The UI labels it so.
 - `AgentRunStatus`, `AgentWorkflowRunStageStatus` and
@@ -310,5 +355,11 @@ runtime-reported cost is enough for a first cut. Natural follow-up if
 reported cost proves too often blank or wrong.
 
 **Metrics backend (Prometheus/OpenTelemetry).** Good for fleet dashboards
-and time series; would carry the within-stage curve. Out of scope here,
-and a candidate home for that follow-up.
+and time series; would carry the within-stage curve, and could retain
+per-run usage independently of CR cleanup — the direction of a separate
+[Agent Usage Accounting draft](https://github.com/djzager/konveyor-enhancements/blob/agent-usage-accounting/enhancements/agent-usage-accounting/README.md).
+The compact CR summary this ADR defines is complementary: it serves the
+console directly and does not require that backend, and investigating usage
+after an AgentRun or workflow run is deleted is exactly what that broader,
+separate work would add. Out of scope here, and a candidate home for that
+follow-up.
