@@ -362,7 +362,9 @@ echo "--- The claim ---"
 assert_marker "${RUN_ON}"  present "with the rule"
 assert_marker "${RUN_OFF}" absent  "without the rule"
 
-if kc logs "$(run_pod rule-on)" -c agent 2>/dev/null | grep -q "always-loaded rules:.*rule-e2e-house-rules"; then
+# Consume the full log stream in these assertions: grep -q can close the pipe
+# early, making kubectl fail with SIGPIPE and pipefail report a false negative.
+if kc logs "$(run_pod rule-on)" -c agent 2>/dev/null | grep "always-loaded rules:.*rule-e2e-house-rules" >/dev/null; then
     pass "the harness reported the rule as always-loaded"
 else
     fail "the harness never reported the rule, so it did not read it back from the manifest"
@@ -371,7 +373,7 @@ fi
 # The rule asked for a command. Did one actually get called? The harness logs
 # each tool call's title, which for a shell call is the command, so this is the
 # marker arriving back out through goose and ACP rather than only going in.
-tool_call_logged() { kc logs "$(run_pod "$1")" -c agent 2>/dev/null | grep -q "tool:.*${MARKER}"; }
+tool_call_logged() { kc logs "$(run_pod "$1")" -c agent 2>/dev/null | grep "tool:.*${MARKER}" >/dev/null; }
 
 if tool_call_logged rule-on; then
     pass "with the rule: the agent was asked to run the command the rule demanded"
