@@ -4,12 +4,12 @@ title: "Harness as Thin Single-Stage Runner with SkillCard-Based Skills"
 description: "Defines the harness as a thin, single-stage runner responsible for git lifecycle, skill delivery, and agent runtime lifecycle."
 status: accepted
 date: "2026-07-21"
-last_updated: "2026-09-02"
+last_updated: "2026-10-28"
 authors:
   - "Savitha Raghunathan"
-last_reviewed: "2026-08-31"
+last_reviewed: "2026-10-28"
 implementation_status: amended
-review_note: "Accepted and implemented as the minimal entry point contract. The 2026-08-27 amendment records that it does not create .gitignore or grounding-data commits."
+review_note: "Harness setup resolves shared Hub proxies for Git and generated Maven settings; explicit configuration and the inheritance opt-out preserve workarounds. Deployed MTA 8.3 token scopes and image verification remain a release check."
 ---
 
 # ADR 0007: Harness as Thin Single-Stage Runner with SkillCard-Based Skills
@@ -20,6 +20,31 @@ review_note: "Accepted and implemented as the minimal entry point contract. The 
 base image no longer installs `graphifyy`. The stage and image descriptions
 below are retained as historical context where applicable; current planning
 uses repository files and optional Hub analysis results.
+
+**Update (2026-10-28):** Runtime setup resolves enabled Hub HTTP/HTTPS proxies
+and decrypted identities once per invocation for
+[Git proxy inheritance](https://redhat.atlassian.net/browse/MTA-8193) and
+[Maven proxy inheritance](https://redhat.atlassian.net/browse/MTA-8206).
+The controller remains domain-agnostic. Git uses an in-memory HTTP transport
+policy for clone/fetch, write-access discovery and all pushes. Push credentials
+stay in the harness; adopting Hub's complete SCM backend is not required.
+
+Explicit Git proxy environment settings take precedence per scheme. Existing
+Maven user settings and Secret mounts are complete overrides. Proxies are added
+only to generated settings when the Hub Maven credential has no explicit
+proxies section. Keeping the normal user-settings path avoids changing
+Maven/wrapper argument precedence or rewriting supplied files. Generated
+settings are private (`0600`) and outside Git; proxy secrets are redacted from
+diagnostics. A shared hostname/IP/wildcard bypass list prevents Maven's HTTP
+fallback from defeating an HTTPS exclusion. Unsupported inherited exclusion
+forms fail startup instead of being silently ignored.
+
+`HARNESS_HUB_PROXY=off` skips proxy lookup and injection for both tools, retaining
+supplied configuration as an operational workaround. Otherwise proxy lookup or
+credential resolution failures stop startup with an actionable error. These
+rules apply to standalone runs and every workflow stage. See the
+[harness proxy contract](../../harness/README.md#hub-proxy-inheritance) for
+matching semantics, validation and compatibility limits.
 
 ## Context
 

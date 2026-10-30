@@ -26,6 +26,10 @@ func TestRunStagePreparesMavenSettings(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/proxies" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		if r.URL.Path == "/applications/42" {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": 42, "name": "maven-app",

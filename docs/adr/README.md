@@ -18,7 +18,7 @@ generated block by hand.
 | [0003](./0003-hub-curated-api-for-agent-resources.md) | Hub Curated API for Agent Resources | superseded | superseded | 2026-08-31 |
 | [0004](./0004-openshell-as-execution-interface.md) | OpenShell as Execution Interface | accepted | deferred | 2026-08-31 |
 | [0006](./0006-hub-addon-pattern-for-agent-resources.md) | Hub follows the addon pattern for agent resources | proposed | amended | 2026-08-31 |
-| [0007](./0007-harness-thin-runner-and-skillcard-skills.md) | Harness as Thin Single-Stage Runner with SkillCard-Based Skills | accepted | amended | 2026-08-31 |
+| [0007](./0007-harness-thin-runner-and-skillcard-skills.md) | Harness as Thin Single-Stage Runner with SkillCard-Based Skills | accepted | amended | 2026-10-28 |
 | [0008](./0008-harness-owns-pod-acp-port.md) | Harness Owns the Pod ACP Port (Tee Topology) | proposed | in-sync | 2026-08-31 |
 | [0009](./0009-parameter-delivery-via-params-json.md) | Parameter Delivery via params.json | proposed | amended | 2026-08-31 |
 | [0010](./0010-skill-content-boundary.md) | Skill Content Boundary — Knowledge vs Execution Control | proposed | deferred | 2026-08-31 |

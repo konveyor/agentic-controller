@@ -81,6 +81,10 @@ type Config struct {
 	// deliberately run against a repository they never push to.
 	GitWriteCheck bool
 
+	// HubProxy inherits Hub proxies for Git and generated Maven settings.
+	// HARNESS_HUB_PROXY=off skips lookup and leaves supplied settings in control.
+	HubProxy bool
+
 	// Prompt context layers, composed by internal/prompt.
 	AgentPrompt       string
 	WorkflowGuide     string
@@ -205,6 +209,7 @@ func LoadFromEnv() (*Config, error) {
 	cfg.HITLAsk = (cfg.Params.Execution.AskUser || envSwitchedOn("HARNESS_HITL_ASK")) &&
 		!envSwitchedOff("HARNESS_HITL_ASK")
 	cfg.GitWriteCheck = !envSwitchedOff("HARNESS_GIT_WRITE_CHECK")
+	cfg.HubProxy = !envSwitchedOff("HARNESS_HUB_PROXY")
 	if n, err := strconv.Atoi(os.Getenv("HARNESS_HITL_TIMEOUT_SECONDS")); err == nil && n > 0 {
 		// Ceiling: a single ask parking the run for hours isn't HITL,
 		// it's abandonment — the pod deadline should not be spent inside

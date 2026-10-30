@@ -119,8 +119,9 @@ to the default Maven credential if none is assigned. A broken settings symlink
 stops setup before any credential lookup and is left unchanged.
 
 The harness creates the file with mode `0600` outside the repository. It logs
-the file's location, never its contents. If no credential applies, Maven keeps
-its normal defaults. Credential lookup and file setup failures stop the run
+the file's location, never its contents. If neither a Maven credential nor an
+enabled inherited proxy applies, Maven keeps its normal defaults.
+Credential lookup and file setup failures stop the run
 with an error; an assigned credential with empty settings is also an error.
 If a write fails, the harness removes the incomplete settings file. Failure to
 remove it is reported alongside the write or close error.
@@ -137,6 +138,95 @@ This setup runs for standalone AgentRuns and separately in every workflow
 stage's fresh Sandbox, independently of the selected skills. The settings
 file is not carried between stages through Git. Hub API credentials remain
 in the harness and are cleared from the agent runtime's environment.
+
+---
+
+## Hub Proxy Inheritance
+
+Every standalone AgentRun and every fresh workflow stage resolves enabled Hub
+HTTP/HTTPS proxies and decrypted identities before cloning or launching the
+runtime. The Hub token needs read access to `/proxies` and referenced decrypted
+identities. Disabled proxies are ignored. Lookup and configuration errors stop
+startup; an empty proxy list preserves direct access unless the run supplies
+its own Git proxy environment.
+
+Set `HARNESS_HUB_PROXY=off` to skip automatic Hub proxy lookup and injection for
+both Git and Maven. Supplied environment variables and Maven settings remain
+effective; the existing Hub Maven-credential lookup still runs. Supply the
+switch in either AgentRun or AgentWorkflowRun:
+
+```yaml
+spec:
+  env:
+    - name: HARNESS_HUB_PROXY
+      value: "off"
+```
+
+Git resolves precedence independently for HTTP and HTTPS. `HTTP_PROXY` and
+`HTTPS_PROXY` override the respective Hub proxy; lowercase spellings apply
+when uppercase is absent. A supplied empty value selects direct access for
+that scheme. `NO_PROXY` (or `no_proxy`) replaces inherited exclusions using
+Go's native matching, including CIDRs and host/port entries. An explicitly
+empty bypass list removes inherited exclusions. With an explicit proxy
+environment variable, only explicit `NO_PROXY` applies. This covers
+clone/fetch, push-access discovery, watcher pushes and the final push.
+SSH, `git://` and local repositories retain their existing behavior.
+
+Maven precedence uses settings files without translating Git proxy environment
+variables or changing Maven launch arguments:
+
+1. Existing `$HOME/.m2/settings.xml` files, including Secret or ConfigMap mounts,
+   are complete overrides and remain unchanged, even without proxies.
+2. Otherwise, the assigned/default Hub Maven credential is loaded. An explicit
+   `<proxies>` section wins, even when empty or inactive.
+3. Without that section, enabled Hub proxies are added while preserving the
+   supplied XML. Without a Maven credential, proxy-only settings are created.
+
+Generated settings use the normal Maven user-settings path outside Git, with
+mode `0600`. Native settings selection (`-s`, wrapper or project configuration)
+remains available. Maven retains its native fallback from HTTPS destinations
+to an enabled HTTP proxy when no HTTPS proxy applies.
+
+Inherited exclusions form one shared bypass list from all enabled Hub proxies.
+They support case-insensitive hostnames, IP addresses and `*` wildcards;
+surrounding whitespace is trimmed. Matches bypass all inherited proxies for
+both tools, including Maven's HTTP fallback. CIDRs, URLs and port-specific
+exclusions in Hub configuration fail startup with an error naming the opt-out.
+Explicit Git `NO_PROXY` retains its native syntax independently.
+
+Hub proxy values are private to go-git's HTTP transport and generated Maven
+settings; they are not exported to the runtime environment or written to Git
+config. Maven can read its proxy credentials from its private settings file.
+Proxy passwords and encoded URL/XML forms are registered with the harness
+redactor. Proxy lookup errors omit response bodies. Git push credentials stay
+in the harness. Hub connectivity, Gateway verification and skill loading
+retain their existing proxy behavior.
+
+### Verification
+
+Run `go test -race ./...` from `harness/`. Regressions exercise real Git
+clone/fetch and pushes through authenticated HTTP and HTTPS CONNECT proxies,
+direct access, exclusions, and startup for standalone and workflow runs.
+The optional real Maven compile uses a fresh repository, locally served cached
+plugins, an authenticated proxy-only repository and excluded HTTP/HTTPS hosts:
+
+```bash
+cd harness
+HARNESS_PROXY_E2E=on go test -race ./cmd/migration-harness -run '^TestMavenProxyBuild$' -v
+```
+
+It requires Maven, a JDK with `keytool`, and cached `maven-resources-plugin:3.3.1`
+and `maven-compiler-plugin:3.13.0` with their dependencies. The fixture reads
+`$HOME/.m2/repository` without modifying it; set
+`HARNESS_MAVEN_FIXTURE_REPOSITORY` to use another cache. No external repository
+is used. Downloads are serial to avoid the authentication-cache race in older
+Maven Resolver versions
+([upstream issue](https://github.com/apache/maven-resolver/issues/1768)); production
+concurrency is unchanged. For that upstream bug, use
+`-Dmaven.artifact.threads=1` with Maven or upgrade Maven.
+
+Validation against the deployed MTA 8.3 Hub, its scoped run token and the shipped
+agent image remains a release/QE check.
 
 ---
 
