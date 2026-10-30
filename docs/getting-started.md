@@ -10,6 +10,23 @@ AgentRun to trigger execution.
   the ImageVolume feature — a beta gate that is **off by default** on
   Kubernetes 1.33–1.34, so enable `ImageVolume` there; it is on by
   default from 1.35 and GA in 1.36)
+- A container runtime that implements image volumes — containerd 2.x or
+  CRI-O. The gate above governs the API server; the mount itself is the
+  kubelet's, through the CRI, and `cri-dockerd` does not implement it.
+  A minikube cluster therefore needs `--container-runtime=containerd`
+  (or `crio`); on the default `docker` runtime every run fails at
+  `Init:CreateContainerError` — *invalid mount config for type "bind":
+  field Source must not be empty* — whatever the Kubernetes version
+- An amd64 cluster, or images you build yourself. The published
+  controller and skill-bundle images are amd64-only by design (see
+  [`images/README.md`](../images/README.md)), and `config/defaults/`
+  points every image-backed SkillCard at
+  `quay.io/konveyor/skills:latest` — so applying the shipped defaults on
+  arm64 leaves every `skill-loader` init container at *no match for
+  platform in manifest*. On an arm64 host, build the bundle
+  (`make skill-build SKILL_IMAGE=quay.io/konveyor/skills:dev`) and point
+  the cards at it; `hack/setup-e2e.sh` already does this for the Kind
+  path
 - [Agent Sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
   v1.0.x installed in the cluster
 - [Konveyor Hub](https://github.com/konveyor/tackle2-hub) installed in
