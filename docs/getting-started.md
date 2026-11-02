@@ -278,9 +278,10 @@ the `skill-loader` init container follows your controller build with no
 extra step.
 
 Gateway verification (step 4) is the one image you cannot redirect: the
-controller holds it as a constant with no env var or flag to override it.
-The Job runs `imagePullPolicy: IfNotPresent`, so the way through is to
-put an arm64 build on every node under that exact tag:
+controller holds it as a constant with no env var or flag to override it
+([#305](https://github.com/konveyor/agentic-controller/issues/305)). The
+Job runs `imagePullPolicy: IfNotPresent`, so the way through is to put an
+arm64 build on every node under that exact tag:
 
 ```bash
 make controller-agent-build \
