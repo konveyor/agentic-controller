@@ -14,9 +14,11 @@ name: Build and Push Images (Versioned)
 # We publish tags only; the operator converts a tag to a @sha256 digest at
 # bundle time.
 #
-# The controller and skill-bundle images are amd64-only: the agentic stack
-# targets amd64 Sandbox clusters (see images/README.md). agent-base and the
-# language images are multi-arch (amd64 + arm64).
+# The controller image is amd64-only: the agentic stack targets amd64
+# Sandbox clusters (see images/README.md). agent-base and the language
+# images are multi-arch (amd64 + arm64), and so is the skill bundle —
+# it is FROM scratch with nothing in it but text, and it has to pull on
+# whatever architecture a developer's cluster runs on.
 
 on:
   push:
@@ -124,14 +126,14 @@ jobs:
     needs: skills-validate
     permissions:
       contents: read
-    name: Build and push skill bundle
+    name: Build and push skill bundle (multi-arch)
     uses: konveyor/release-tools/.github/workflows/build-push-images.yaml@4cf4ec7e8a15336b88c3e5ba2ee126f4082f53f2 # main
     with:
       registry: "quay.io/konveyor"
       image_name: skills
       containerfile: catalog/Containerfile
       context: .
-      architectures: '["amd64"]'
+      architectures: '["amd64", "arm64"]'
     secrets:
       registry_username: ${{ vars.QUAY_USERNAME }}
       registry_password: ${{ secrets.QUAY_PASSWORD }}
