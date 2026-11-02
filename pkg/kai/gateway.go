@@ -180,16 +180,23 @@ func runGatewayCreate(ctx context.Context, cfg *kaiConfig, name string, dryRun b
 
 	// Persist the inline credential Secret only now that creation is confirmed,
 	// so a declined wizard never leaves an orphaned Secret behind.
+	secretCreated := false
 	if pendingSecret != nil {
-		if err := createOrUpdateSecret(ctx, cl, cfg.namespace, secretName, pendingSecret); err != nil {
+		secretCreated, err = createOrUpdateSecret(ctx, cl, cfg.namespace, secretName, pendingSecret)
+		if err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintf(os.Stdout, "secret %q created\n", secretName)
+		if secretCreated {
+			_, _ = fmt.Fprintf(os.Stdout, "secret %q created\n", secretName)
+		} else {
+			_, _ = fmt.Fprintf(os.Stdout, "secret %q updated\n", secretName)
+		}
 	}
 
 	if err := cl.Create(ctx, gw); err != nil {
-		// Roll back the Secret we just created so it is not orphaned.
-		if pendingSecret != nil {
+		// Roll back only a Secret we created ourselves; never delete one that
+		// predated this command (it may belong to another Gateway).
+		if secretCreated {
 			if delErr := cl.Delete(ctx, &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: cfg.namespace},
 			}); delErr != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -13,6 +14,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// stageNameMaxLen and stageNamePattern mirror the AgentWorkflowStage.Name CRD
+// constraints (a label-style key that is unique within the workflow), so the
+// wizard rejects invalid names up front instead of after the create request.
+const stageNameMaxLen = 63
+
+var stageNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9\-\.]*[a-z0-9])?$`)
 
 func newWorkflowCommand(cfg *kaiConfig) *cobra.Command {
 	cmd := &cobra.Command{
@@ -118,7 +126,7 @@ func collectStages(agents []string) ([]agenticv1alpha1.AgentWorkflowStage, error
 			instructions string
 		)
 		if err := runForm(
-			inputField("Stage name", "analyze", &sName, requiredValidator("stage name")),
+			inputField("Stage name", "analyze", &sName, stageNameValidator(stages)),
 			selectField("Agent", agents, &agentRef),
 			huh.NewText().Title("Instructions (optional)").Value(&instructions),
 		); err != nil {
@@ -130,6 +138,65 @@ func collectStages(agents []string) ([]agenticv1alpha1.AgentWorkflowStage, error
 			Instructions: strings.TrimSpace(instructions),
 		})
 	}
+}
+
+// stageNameValidator rejects stage names the CRD would refuse (empty, too long,
+// not label-style) or that duplicate an already-collected stage, so the wizard
+// fails fast instead of after the create request.
+func stageNameValidator(existing []agenticv1alpha1.AgentWorkflowStage) func(string) error {
+	return func(s string) error {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return fmt.Errorf("stage name is required")
+		}
+		if len(s) > stageNameMaxLen {
+			return fmt.Errorf("stage name must be at most %d characters", stageNameMaxLen)
+		}
+		if !stageNamePattern.MatchString(s) {
+			return fmt.Errorf("stage name must be lowercase alphanumeric, '-' or '.', starting and ending alphanumeric")
+		}
+		for _, st := range existing {
+			if st.Name == s {
+				return fmt.Errorf("stage %q is already defined", s)
+			}
+		}
+		return nil
+	}
+}
+
+// validateWorkflowParams rejects --param keys declared by neither the workflow
+// nor any of its stage Agents, before the run is created. The controller would
+// otherwise silently drop them, so the CLI reporting success would be misleading.
+func validateWorkflowParams(
+	ctx context.Context, cl client.Client, namespace string,
+	wf *agenticv1alpha1.AgentWorkflow, provided map[string]string,
+) error {
+	declared := make(map[string]struct{}, len(wf.Spec.Params))
+	for _, p := range wf.Spec.Params {
+		declared[p.Name] = struct{}{}
+	}
+
+	seen := make(map[string]struct{}, len(wf.Spec.Stages))
+	for _, stage := range wf.Spec.Stages {
+		if _, ok := seen[stage.AgentRef]; ok {
+			continue
+		}
+		seen[stage.AgentRef] = struct{}{}
+		agent := &agenticv1alpha1.Agent{}
+		if err := cl.Get(ctx, client.ObjectKey{Namespace: namespace, Name: stage.AgentRef}, agent); err != nil {
+			return fmt.Errorf("failed to get Agent %q for workflow %q: %w", stage.AgentRef, wf.Name, err)
+		}
+		for _, p := range agent.Spec.Params {
+			declared[p.Name] = struct{}{}
+		}
+	}
+
+	for name := range provided {
+		if _, ok := declared[name]; !ok {
+			return fmt.Errorf("parameter %q is not declared by workflow %q or its stage Agents", name, wf.Name)
+		}
+	}
+	return nil
 }
 
 func newWorkflowEditCommand(cfg *kaiConfig) *cobra.Command {
@@ -246,6 +313,9 @@ func runWorkflowRun(
 
 	provided, err := parseParamFlags(paramFlags)
 	if err != nil {
+		return err
+	}
+	if err := validateWorkflowParams(ctx, cl, cfg.namespace, wf, provided); err != nil {
 		return err
 	}
 	var params []agenticv1alpha1.ParamValue

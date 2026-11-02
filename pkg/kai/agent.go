@@ -288,7 +288,8 @@ func newAgentRunCommand(cfg *kaiConfig) *cobra.Command {
 			return runAgentRun(cmd.Context(), cfg, args[0], gateway, instructions, paramFlags, wait, env, envFrom)
 		},
 	}
-	cmd.Flags().StringVar(&gateway, "gateway", "", "gateway to use (must be one of the Agent's gateways)")
+	cmd.Flags().StringVar(&gateway, "gateway", "",
+		"gateway to use (must be one of the Agent's gateways when it declares any)")
 	cmd.Flags().StringVar(&instructions, "instructions", "", "task-specific instructions (additional prompt)")
 	cmd.Flags().StringArrayVar(&paramFlags, "param", nil, "parameter value as key=value (repeatable)")
 	cmd.Flags().BoolVar(&wait, "wait", false, "wait for the run to reach a terminal phase")

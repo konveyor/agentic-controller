@@ -114,10 +114,14 @@ func generateSecretName(gateway string) string {
 }
 
 // createOrUpdateSecret creates the Opaque Secret, or updates its data when a
-// Secret of the same name already exists.
-func createOrUpdateSecret(ctx context.Context, cl client.Client, namespace, name string, data map[string]string) error {
+// Secret of the same name already exists. It reports whether it created a new
+// Secret (as opposed to updating an existing one) so callers can roll back only
+// what they created.
+func createOrUpdateSecret(
+	ctx context.Context, cl client.Client, namespace, name string, data map[string]string,
+) (created bool, err error) {
 	existing := &corev1.Secret{}
-	err := cl.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, existing)
+	err = cl.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, existing)
 	switch {
 	case apierrors.IsNotFound(err):
 		secret := &corev1.Secret{
@@ -127,16 +131,16 @@ func createOrUpdateSecret(ctx context.Context, cl client.Client, namespace, name
 			StringData: data,
 		}
 		if err := cl.Create(ctx, secret); err != nil {
-			return fmt.Errorf("failed to create Secret: %w", err)
+			return false, fmt.Errorf("failed to create Secret: %w", err)
 		}
-		return nil
+		return true, nil
 	case err != nil:
-		return fmt.Errorf("failed to check for existing Secret: %w", err)
+		return false, fmt.Errorf("failed to check for existing Secret: %w", err)
 	default:
 		existing.StringData = data
 		if err := cl.Update(ctx, existing); err != nil {
-			return fmt.Errorf("failed to update Secret: %w", err)
+			return false, fmt.Errorf("failed to update Secret: %w", err)
 		}
-		return nil
+		return false, nil
 	}
 }
