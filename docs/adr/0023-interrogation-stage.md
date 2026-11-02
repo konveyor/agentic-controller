@@ -24,9 +24,11 @@ relates_to:
 
 # ADR 0023: Interrogation Stage — ask the human about the application before planning
 
-> Numbering note: 0021 and 0022 are taken by the shared-runtime ADR
-> (konveyor/agentic-controller#280) and the usage-telemetry ADR (#282), both
-> opened before this one, so this ADR uses the next available number.
+> Numbering note: the shared-runtime ADR (konveyor/agentic-controller#280)
+> and the usage-telemetry ADR (#282) were both opened before this one and
+> both currently propose 0021, so between them they will take 0021 and
+> 0022. This ADR takes 0023 to stay clear of that collision rather than
+> join it.
 
 ## Context
 
@@ -66,7 +68,9 @@ Nothing below is new; the decision leans on all of it.
   #242). Each stage is a fresh Sandbox; the only state that crosses stages
   is what the agent commits to the target branch.
 - **A stage can refuse.** The harness reads the `- Status:` line of the
-  stage's own `## <Stage>` section in `.konveyor/handoff.md`; `failed`
+  **last** `## ` section of `.konveyor/handoff.md`, and only when this
+  stage changed the file — it matches no heading text, so the section a
+  stage appends last is its own by convention, not by name; `failed`
   exits 3, the AgentRun ends `Succeeded=False{Refused}`, and the workflow
   halts (PR #249, ADR 0020). The harness reads that one line and nothing
   else.
@@ -254,7 +258,7 @@ What has to hold, and where each is enforced:
 
 | Condition | Why | Enforced by |
 | --- | --- | --- |
-| A human is attached for the whole stage. | Each question waits at most `HARNESS_HITL_TIMEOUT_SECONDS`; after one timeout later asks fail immediately. | Decision 1: the stage is short and `askUser` is on it alone. The workflow run should raise the timeout toward its 600 s cap for this stage's reading time. |
+| A human is attached for the whole stage. | Each question waits at most `HARNESS_HITL_TIMEOUT_SECONDS`; after one timeout later asks fail immediately. | Decision 1: the stage is short and `askUser` is on it alone. Raising the timeout toward its 600 s cap for this stage's reading time is *not* available per stage today — it is a container env var, and a workflow stage carries no `env`, so `AgentWorkflowRun.spec.env` raises it for every stage of the run. Per-stage delivery is listed under *What changes*. |
 | The turn budget covers detection plus the questions. | Every `ask_user` call is a tool call, and a turn. | The stage's `execution.maxTurns`, sized for detection (tens of turns) plus the catalog's upper bound. |
 | An unanswered question must not strand the work done so far. | The HITL gate cancels the turn; the agent never gets to write a closing summary. | Decision 4: the record is written and committed **before** the first question, and updated after each answer. |
 | A declined answer is not a guess. | `ask_user` tells the model to "decide for yourself if you safely can". | The stage skill: a declined decision is recorded as `Assumed` with the recommendation, never silently applied. |
@@ -275,11 +279,13 @@ Two things the model does **not** do, and is not asked to:
   would need UI work in tackle2-ui. Deferred; not needed for the stage to
   work.
 
-One small extension to `ask_user` is worth making alongside the stage
-and is recorded as a follow-up to ADR 0017, not a condition of this one:
-an optional `recommendation` argument naming the recommended option, so a
-console can render it as the default instead of the model having to spell
-it out in the question text.
+One small extension to `ask_user` is worth making alongside the stage,
+and is proposed here as a new follow-up to ADR 0017 rather than a
+condition of this one: an optional `recommendation` argument naming the
+recommended option, so a console can render it as the default instead of
+the model having to spell it out in the question text. ADR 0017's own
+follow-up list does not yet carry it — only the longer question timeout
+— so landing it means amending 0017.
 
 ### 4. The record: `.konveyor/interrogation.md`, committed by the agent, consumed by `plan`
 
@@ -326,7 +332,11 @@ Order of operations, which is what makes the record survive a failed gate:
    Commit.
 2. Ask, one decision at a time. After each answer, update that block and
    commit.
-3. Write the handoff section and commit:
+3. Write the handoff section last and commit. Interrogation runs ahead of
+   `plan`, so it is the first stage to touch `.konveyor/handoff.md`: it
+   creates the file (and the directory) rather than appending to one the
+   execute stage made, and its section must be the file's last `## `
+   section, which is the only one the harness reads.
 
 ```markdown
 ## Interrogate
@@ -413,13 +423,21 @@ the order the dependencies suggest.
    `/applications/{id}` carries tags, `/applications/{id}/assessments` the
    assessments); report the count on the preparation rung. Nothing about
    questions.
-6. **ADR 0017 follow-ups** it already lists, now with a consumer: a
-   longer default timeout for questions than for permission asks, and the
-   optional `recommendation` argument.
-7. **Docs**: CONTEXT.md gains *Interrogation*, *Interrogation Record* and
+6. **ADR 0017 follow-ups**, now with a consumer: the longer default
+   timeout for questions than for permission asks, which 0017 already
+   lists, and the optional `recommendation` argument of Decision 3,
+   which it does not — 0017 is amended to record it.
+7. **Per-stage question timeout**: a way to give the interrogate stage a
+   longer `HARNESS_HITL_TIMEOUT_SECONDS` than the rest of the workflow.
+   The stage carries `execution` but no `env`, and the workflow
+   controller stamps `AgentWorkflowRun.spec.env` onto every stage, so
+   this needs either an `env` on `AgentWorkflowStage` or an execution
+   field the AgentRun controller turns into the variable. Not a
+   condition of the stage working — a run-wide raise is the interim.
+8. **Docs**: CONTEXT.md gains *Interrogation*, *Interrogation Record* and
    *Grounding* (done alongside this ADR); `docs/entry-point.md` and
    `harness/README.md` list the new grounding file when 5 lands.
-8. **Experiment**: delete `harness/experiments/skills/questionnaire/` with 1.
+9. **Experiment**: delete `harness/experiments/skills/questionnaire/` with 1.
 
 ## Alternatives considered
 
@@ -530,8 +548,10 @@ Planning only — modify no source files. Read, do not build.
    choices, your recommendation named in the question. Record each answer
    and commit. A declined answer is recorded as `Assumed` with your
    recommendation; never apply a guess silently.
-6. Append `## Interrogate` to `.konveyor/handoff.md` with `- Status:`,
-   the record path and the open count. Commit.
+6. Write `## Interrogate` to `.konveyor/handoff.md` with `- Status:`,
+   the record path and the open count — creating the file and the
+   `.konveyor/` directory if they do not exist, since you run before
+   every other stage. Write it last and add no heading after it. Commit.
 
 ## Rules
 - Only ask what would change the plan. If the code or the grounding
