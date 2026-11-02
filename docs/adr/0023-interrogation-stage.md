@@ -269,7 +269,7 @@ What has to hold, and where each is enforced:
 | A human is attached for the whole stage. | Each question waits at most `HARNESS_HITL_TIMEOUT_SECONDS`; after one timeout later asks fail immediately. | Decision 1: the stage is short and `askUser` is on it alone. Raising the timeout toward its 600 s cap for this stage's reading time is *not* available per stage today — it is a container env var, and a workflow stage carries no `env`, so `AgentWorkflowRun.spec.env` raises it for every stage of the run. Per-stage delivery is listed under *What changes*. |
 | The turn budget covers detection plus the questions. | Every `ask_user` call is a tool call, and a turn. | The stage's `execution.maxTurns`, sized for detection (tens of turns) plus the catalog's upper bound. |
 | An unanswered question must not strand the work done so far. | The HITL gate cancels the turn; the agent never gets to write a closing summary. | Decision 4: the record is written and committed **before** the first question, and updated after each answer. |
-| A declined answer is not a guess. | `ask_user` tells the model to "decide for yourself if you safely can". | The stage skill: a declined decision is recorded as `Assumed` with the recommendation, never silently applied. |
+| A declined answer is not a guess, and not a verdict on the workflow. | `ask_user` tells the model to "decide for yourself if you safely can", which is neither of the two things a declining human may mean. | The stage skill asks which they meant — continue on the recommendations, or stop the workflow — and records the answer per Decision 4. Nothing is applied silently either way. |
 
 Two things the model does **not** do, and is not asked to:
 
