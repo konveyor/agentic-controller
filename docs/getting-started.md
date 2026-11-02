@@ -17,16 +17,15 @@ AgentRun to trigger execution.
   (or `crio`); on the default `docker` runtime every run fails at
   `Init:CreateContainerError` — *invalid mount config for type "bind":
   field Source must not be empty* — whatever the Kubernetes version
-- An amd64 cluster, or images you build yourself. The published
-  controller and skill-bundle images are amd64-only by design (see
-  [`images/README.md`](../images/README.md)), and `config/defaults/`
-  points every image-backed SkillCard at
-  `quay.io/konveyor/skills:latest` — so applying the shipped defaults on
-  arm64 leaves every `skill-loader` init container at *no match for
-  platform in manifest*. On an arm64 host, build the bundle
-  (`make skill-build SKILL_IMAGE=quay.io/konveyor/skills:dev`) and point
-  the cards at it; `hack/setup-e2e.sh` already does this for the Kind
-  path
+- An amd64 cluster, or images you build yourself. Three published images
+  are amd64-only by design (see [`images/README.md`](../images/README.md)):
+  the controller, the skill bundle, and `agentic-controller-agent`. Each
+  fails on arm64 with *no match for platform in manifest*, in three
+  places — the manager Deployment, the `skill-loader` init container
+  (which runs the controller image *and* mounts the skill bundle as an
+  image volume, so rebuilding the bundle alone does not clear it) and the
+  Gateway verification Job. [Running on arm64](#running-on-arm64) in step
+  3 is the full recipe
 - [Agent Sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
   v1.0.x installed in the cluster
 - [Konveyor Hub](https://github.com/konveyor/tackle2-hub) installed in
@@ -242,6 +241,57 @@ from source:
 make build-installer IMG=$IMG
 kubectl apply -f dist/install.yaml
 ```
+
+### Running on arm64
+
+The controller, skill-bundle and `agentic-controller-agent` images
+published to quay are amd64-only
+([`images/README.md`](../images/README.md)), so on an arm64 cluster each
+of the steps above needs a local build. `$REG` below is any registry the
+cluster can pull from; to skip the registry, load the images onto the
+nodes instead (`minikube image load`, `kind load docker-image`) and keep
+the `:dev` tags — `:latest` defaults `imagePullPolicy` to `Always`, which
+makes the kubelet ignore a loaded image and try to pull:
+
+```bash
+export REG=quay.io/<your-org>
+make docker-build docker-push IMG=$REG/agentic-controller:dev
+make skill-push SKILL_IMAGE=$REG/skills:dev
+```
+
+Deploy with your controller image, then repoint the four image-backed
+SkillCards — `config/defaults/` hard-codes them at
+`quay.io/konveyor/skills:latest`. Leave `house-rules` alone; it is inline
+and has no image:
+
+```bash
+make deploy IMG=$REG/agentic-controller:dev
+kubectl apply -k config/defaults/ -n "$KONVEYOR_NS"
+for card in plan execute verify javaee-to-quarkus; do
+  kubectl patch skillcard "$card" -n "$KONVEYOR_NS" --type=merge \
+    -p "{\"spec\":{\"image\":\"$REG/skills:dev\"}}"
+done
+```
+
+`make deploy` keeps `SKILL_LOADER_IMAGE` equal to the manager image, so
+the `skill-loader` init container follows your controller build with no
+extra step.
+
+Gateway verification (step 4) is the one image you cannot redirect: the
+controller holds it as a constant with no env var or flag to override it.
+The Job runs `imagePullPolicy: IfNotPresent`, so the way through is to
+put an arm64 build on every node under that exact tag:
+
+```bash
+make controller-agent-build \
+  CONTROLLER_AGENT_IMG=quay.io/konveyor/agentic-controller-agent:latest
+minikube image load quay.io/konveyor/agentic-controller-agent:latest
+```
+
+`hack/setup-e2e.sh` does the same for the Kind path — it builds the agent
+image, retags it `:latest` and loads it before deploying. It is not a
+model for the SkillCard step above, though: it applies `config/defaults/`
+verbatim and never repoints the cards.
 
 ### Open the UI
 

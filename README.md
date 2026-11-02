@@ -94,13 +94,15 @@ agentic-controller/
 
 ## Platform requirements
 
-- Kubernetes 1.33+ (ImageVolume GA)
+- Kubernetes 1.33+ — the ImageVolume gate is beta and **off by default**
+  on 1.33–1.34, on by default from 1.35, GA in 1.36
 - OpenShift 4.20+
 - Agent Sandbox v1.0.x
 - containerd 2.x or CRI-O — image volumes are mounted by the kubelet
   through the CRI, and `cri-dockerd` does not implement them
-- amd64, for the published controller and skill-bundle images; an arm64
-  cluster needs those built locally (see `images/README.md`)
+- amd64, for the published controller, skill-bundle and
+  `agentic-controller-agent` images; an arm64 cluster needs all three
+  built locally (see [Running on arm64](docs/getting-started.md#running-on-arm64))
 
 ## Related projects
 
