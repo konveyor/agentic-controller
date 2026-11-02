@@ -1,0 +1,8 @@
+kind: feature
+description: >
+  Report the harness's independent verification of a run's pushed tree as a new
+  Verified condition on AgentRun.status, so a verified pass is distinguishable
+  from one the agent merely claimed. True only from a measured pass: a failed
+  verification, a run where nothing was verified, and a harness that reported
+  nothing are each visibly not a pass, and none of them changes the run's phase.
+  The per-command evidence stays in status.terminationData.
