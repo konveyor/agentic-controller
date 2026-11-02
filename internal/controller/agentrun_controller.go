@@ -1520,10 +1520,17 @@ func (r *AgentRunReconciler) updatePhaseFromSandbox(
 			})
 
 			// Capture the harness's opaque termination data (usage/cost
-			// report). Stored verbatim, never interpreted (ADR 0018).
+			// report). Stored verbatim (ADR 0018).
 			if td := terminationDataFromPod(pod); td != nil {
 				run.Status.TerminationData = td
 			}
+
+			// Derive the Verified condition from the one key of that blob
+			// the controller reads — verification.status (#300/#302). Set
+			// unconditionally on the terminal path, including when no blob
+			// arrived, so a run that reported nothing is Unknown rather
+			// than silently indistinguishable from a verified pass.
+			setRunVerified(run, run.Status.TerminationData)
 
 			// The harness may also write a human-readable failure message to
 			// the termination log (e.g. a non-git source, #143); surface it

@@ -50,6 +50,28 @@ const (
 	// forward replacement for the Ready condition as the terminal signal;
 	// Phase remains a coarse mirror during the transition.
 	AgentRunConditionSucceeded = "Succeeded"
+
+	// AgentRunConditionVerified reports whether the tree this run pushed
+	// was independently measured as building and passing its own plan's
+	// ## Verification commands — the harness re-running them after the
+	// agent's turn and before the push (#300), not the agent's account of
+	// its work. It is orthogonal to Succeeded: Succeeded is whether the
+	// run completed, Verified is whether what it produced holds up, and a
+	// run can be Succeeded=True with Verified=False.
+	//
+	// True means, and only ever means, a measured pass. Everything else
+	// is False or Unknown — silence must never render as green (#302):
+	//
+	//	True    + VerificationPassed      every command the plan named ran and exited 0
+	//	False   + VerificationFailed      at least one exited non-zero, timed out, or could not start
+	//	False   + VerificationNotRun      the harness ran nothing, and says why in the message
+	//	Unknown + VerificationNotReported the harness reported no verification at all
+	//
+	// The condition carries the verdict; the per-command evidence (label,
+	// command, exit code, duration, output tail) stays in
+	// terminationData.verification, which the controller does not
+	// interpret beyond the single status key above.
+	AgentRunConditionVerified = "Verified"
 )
 
 // AgentRun reasons on the Succeeded condition. Terminal reasons pair
@@ -81,6 +103,37 @@ const (
 	// InvalidImageName, CreateContainerConfigError) so the reason
 	// vocabulary matches what an operator sees on the pod.
 	AgentRunReasonStartupDeadlineExceeded = "StartupDeadlineExceeded"
+)
+
+// AgentRun reasons on the Verified condition (#302). The set is closed:
+// a controller that does not recognise the harness's reported status
+// treats it as NotReported rather than inventing a reason, so a client
+// may switch exhaustively over these four.
+const (
+	// AgentRunReasonVerificationPassed — every command the run's plan
+	// named in its ## Verification section ran and exited 0. Pairs with
+	// Verified=True, and is the only pairing that does.
+	AgentRunReasonVerificationPassed = "VerificationPassed"
+	// AgentRunReasonVerificationFailed — at least one of those commands
+	// exited non-zero, timed out, or could not be started. Pairs with
+	// Verified=False. It does not by itself fail the run: the phase and
+	// the Succeeded condition are unchanged by verification, so a
+	// Succeeded=True run may carry Verified=False.
+	AgentRunReasonVerificationFailed = "VerificationFailed"
+	// AgentRunReasonVerificationNotRun — the harness measured nothing:
+	// no plan, no ## Verification section, no runnable command in it,
+	// verification switched off, or a turn that did not reach success.
+	// Pairs with Verified=False, because the tree was not verified —
+	// an absent measurement is not a passing one. The harness's own
+	// reason is carried in the condition message.
+	AgentRunReasonVerificationNotRun = "VerificationNotRun"
+	// AgentRunReasonVerificationNotReported — the run ended without any
+	// verification verdict the controller could read: a harness
+	// predating #300, a termination message that was lost or trimmed, or
+	// a status value this controller does not recognise. Pairs with
+	// Verified=Unknown — the controller cannot say either way, which is
+	// distinct from the harness saying it measured nothing.
+	AgentRunReasonVerificationNotReported = "VerificationNotReported"
 )
 
 // ParamValue supplies a value for a declared Agent parameter.
@@ -293,7 +346,10 @@ type AgentRunStatus struct {
 	// connections (see AgentRunConditionACPReady). Succeeded is the
 	// terminal outcome (see AgentRunConditionSucceeded): Unknown while
 	// running, True on clean completion, False with a reason
-	// (Failed, LimitReached) otherwise.
+	// (Failed, LimitReached) otherwise. Verified reports whether the
+	// pushed tree was independently measured against the plan's own
+	// verification commands (see AgentRunConditionVerified); it is set
+	// once the run terminates and is orthogonal to Succeeded.
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -301,9 +357,12 @@ type AgentRunStatus struct {
 
 	// TerminationData is the raw JSON the harness wrote to the pod's
 	// termination message (/dev/termination-log) on exit — typically a
-	// usage/cost report. The controller copies it verbatim and never
-	// interprets it; platform-specific UIs read the harness's schema
-	// (ADR 0011/0018). Absent if the harness wrote nothing parseable.
+	// usage/cost report, plus the independent verification record (#300).
+	// The controller copies it verbatim; platform-specific UIs read the
+	// harness's schema (ADR 0011/0018). The one key the controller reads
+	// is verification.status, to derive the Verified condition (#302);
+	// everything else, including the per-command verification evidence,
+	// stays uninterpreted. Absent if the harness wrote nothing parseable.
 	// +optional
 	TerminationData *runtime.RawExtension `json:"terminationData,omitempty"`
 }
@@ -313,6 +372,7 @@ type AgentRunStatus struct {
 // +kubebuilder:resource:shortName=ar
 // +kubebuilder:printcolumn:name="Agent",type=string,JSONPath=`.spec.agentRef`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Verified",type=string,JSONPath=`.status.conditions[?(@.type=="Verified")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:printcolumn:name="Duration",type=integer,JSONPath=`.status.duration`,priority=1
 

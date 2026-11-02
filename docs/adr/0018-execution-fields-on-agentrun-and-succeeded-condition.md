@@ -5,12 +5,12 @@ description: "Defines execution-field placement, workflow-stage stamping, and th
 status: proposed
 status_note: "Amends ADRs 0011 and 0009 and supersedes their conflicting field-placement, exit-code, and guide-substitution details."
 date: "2026-08-19"
-last_updated: "2026-09-24"
+last_updated: "2026-11-02"
 authors:
   - "David Zager"
-last_reviewed: "2026-09-24"
+last_reviewed: "2026-11-02"
 implementation_status: in-sync
-review_note: "Execution fields on AgentRun, workflow-stage stamping, Succeeded terminal condition, guide scoping, and the Refused outcome (exit 3) are implemented. The ADR remains proposed pending formal acceptance."
+review_note: "Execution fields on AgentRun, workflow-stage stamping, Succeeded terminal condition, guide scoping, the Refused outcome (exit 3), and the Verified condition (#302) are implemented. The ADR remains proposed pending formal acceptance."
 ---
 
 # ADR 0018: Execution Fields on AgentRun, and a `Succeeded` Terminal Condition
@@ -27,6 +27,15 @@ harness reads the stage's own verdict — the `- Status:` line of the last
 section of `.konveyor/handoff.md`, when the stage wrote it — after the
 turn; `failed` is a refusal. The reason rides `terminationData.stopReason`,
 as the limit kind does for exit 2. `NoChanges` remains future (#129).
+
+**Update (2026-11-02):** AgentRun gains a third orthogonal condition,
+`Verified` (#302), and with it a single, named exception to
+`terminationData` opacity. This amends two clauses below: "An AgentRun
+then carries exactly two orthogonal condition facts" (now three), and
+"terminationData … uninterpreted" (now: uninterpreted but for one key).
+See *The `Verified` condition* below. Neither the exit-code contract nor
+the `Succeeded` reason set changes, and verification does not affect
+phase or workflow sequencing.
 
 ## Context
 
@@ -175,6 +184,76 @@ orthogonal condition facts, plus the coarse mirror:
   machines read `Succeeded` instead of `phase`, a future ADR supersedes
   0012's phase clause and drops `phase`.
 
+### The `Verified` condition (added 2026-11-02, #302)
+
+`Succeeded` answers *did the run complete*. It cannot answer *does what
+the run produced hold up*, because its only evidence is the harness exit
+code, and the harness exits 0 when the agent ends its turn normally —
+whatever state the tree is in. The dogfooding case in #300: a verify
+stage broke the build during a lint round, never re-ran the compiler,
+wrote `Build: passed` into its handoff and pushed a branch failing `tsc`
+with 45 errors. Exit 0, phase `Succeeded`, `Succeeded=True`. A second run
+on the same branch was genuinely green and rendered identically.
+
+#300 makes the harness re-run the plan's own `## Verification` commands
+after the turn and before the push, recording each exit code under the
+`verification` key of the termination blob. That is a measurement of the
+tree, independent of the agent's account of it. This decides where it
+surfaces.
+
+**It is a condition, not a new field and not a phase.**
+
+- *Not a phase, and not a `Succeeded` reason.* A failed verification and
+  a failed run are different facts, and a run can honestly be both
+  succeeded and unverified. Folding verification into `Succeeded` would
+  make a stage that did its work and found real breakage indistinguishable
+  from one that crashed, and would silently halt workflows on a signal
+  that was previously advisory. Conditions exist for orthogonal
+  observations; this is the third such axis, alongside `ACPReady`
+  (serving) and `Succeeded` (outcome). The condition is advisory: workflow
+  sequencing continues to key off `Succeeded=True` alone.
+- *Not a typed `status.verification` struct.* Mirroring the harness's
+  per-command records (label, command, exit code, duration, output tail)
+  into the API would make the controller own a schema it does not
+  produce and cannot validate, versioned independently of it — the
+  harness image is pinned per Agent, so a controller struct silently
+  drops fields a newer harness adds, where `RawExtension` passes them
+  through. It would also put the same outcome in a fourth place, which
+  is the drift ADR 0020 exists to stop. The verdict is small and bounded
+  and belongs in the status vocabulary; the evidence is neither, and
+  already has a home.
+- *Not "leave it in `terminationData`".* The blob is the harness's own
+  schema under a 4 KiB kubelet cap whose trim ladder sheds content under
+  pressure; it is the right place for evidence and the wrong place for a
+  verdict that `kubectl`, Hub and any non-UI consumer must be able to
+  read without parsing an explicitly opaque field.
+
+**The mapping**, from the blob's `verification.status` alone:
+
+| `verification.status` | `Verified` | Reason |
+| --- | --- | --- |
+| `passed` | `True` | `VerificationPassed` |
+| `failed` | `False` | `VerificationFailed` |
+| `notRun` | `False` | `VerificationNotRun` |
+| absent, unreadable, or unrecognised | `Unknown` | `VerificationNotReported` |
+
+`True` is reachable only from an explicit `passed`. Every other input —
+including a harness predating #300, a trimmed blob, and a status value
+this controller does not know — lands on `False` or `Unknown`. Silence
+never renders as green, which is the property the whole change exists
+for. `notRun` is `False` rather than `Unknown` because the tree was in
+fact not verified; `Unknown` is reserved for the controller being unable
+to say. The condition is set on every run whose agent container
+terminated; runs that never started carry none, their `Succeeded`
+condition already saying the agent never ran.
+
+**The opacity exception is exactly one key.** The controller reads
+`verification.status`, treats it as a closed enum, and copies the
+harness's `verification.reason` into the condition message as text. It
+does not read, validate or re-shape the commands, exit codes, durations
+or output tails. `terminationData` remains the harness's contract with
+UIs for everything else.
+
 ### The workflow guide renders from `workflow.*` only
 
 The guide is workflow-ambient text; it substitutes `$(workflow.<name>)`
@@ -195,6 +274,11 @@ the controller reads the pod's termination message (via the pod-read
 plumbing PR #160 adds) and stores it on `AgentRun.status.terminationData`
 (`RawExtension`), uninterpreted. The kubelet's 4 KiB cap applies.
 
+Amended 2026-11-02 (#302): all of it stays uninterpreted but for the
+single `verification.status` key, from which the controller derives the
+`Verified` condition above. Nothing else in the blob is read, and
+nothing is re-shaped onto the API.
+
 ## Consequences
 
 - `AgentRun.spec` gains `maxTurns`/`maxCost` (alongside `mode`). The
@@ -212,3 +296,10 @@ plumbing PR #160 adds) and stores it on `AgentRun.status.terminationData`
   reference in a guide fails the run. Stage instructions and the agent
   prompt still render from both scopes.
 - A future ADR retires `phase` once clients migrate to `Succeeded`.
+- (2026-11-02, #302) AgentRun carries a third condition, `Verified`,
+  reporting the harness's independent measurement of the pushed tree.
+  `True` only from an explicit `passed`; absence, `notRun` and
+  unrecognised values never read as a pass. It does not affect `phase`,
+  `Succeeded`, or workflow sequencing. The controller reads one key of
+  `terminationData` to set it; the per-command evidence stays in the
+  blob. konveyor/tackle2-ui#3703 is the consumer.
