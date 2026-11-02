@@ -74,6 +74,11 @@ else
     exit 1
 fi
 
+# Before anything is applied: a cluster we just created comes with its context
+# selected, but one that already existed does not, and everything below this
+# line follows the current context rather than ${CLUSTER}.
+cluster_require_context
+
 echo ""
 echo "=== Installing Agent Sandbox ${AGENT_SANDBOX_TAG} ==="
 

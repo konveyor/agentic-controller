@@ -98,6 +98,9 @@ cluster_load_images() {
 
 # cluster_exists — true if the named cluster is already there. Only Kind and
 # minikube can be asked; for anything else the current context is the answer.
+#
+# Asking the tool about a named cluster says nothing about where kubectl points
+# — see cluster_require_context, which every mutating script calls first.
 cluster_exists() {
     local name tool
     name="$(cluster_name)"
@@ -107,4 +110,38 @@ cluster_exists() {
     minikube) minikube status -p "${name}" &>/dev/null ;;
     *)        kubectl cluster-info &>/dev/null ;;
     esac
+}
+
+# cluster_context — the kubectl context the named cluster is reached through.
+# Empty when the current context is the only answer there is: a hook, or
+# CLUSTER_TOOL=none, where we have no way to name the cluster ourselves.
+cluster_context() {
+    local name tool
+    name="$(cluster_name)"
+    tool="$(cluster_tool)"
+    case "${tool}" in
+    kind)     echo "kind-${name}" ;;
+    minikube) echo "${name}" ;;
+    *)        echo "" ;;
+    esac
+}
+
+# cluster_require_context — fail unless kubectl points at the cluster the image
+# loads target. The two halves of setup address the cluster differently: loads
+# name it (`--name`, `-p`), while kubectl and Helm follow the current context.
+# `kind create` and `minikube start` set that context, so the usual path agrees
+# — but against a cluster that already exists, nothing had been checking, and
+# the failure is silent: CRDs applied and Agent Sandbox upgraded in whatever
+# cluster happened to be selected, while the images went somewhere else.
+cluster_require_context() {
+    local want current
+    want="$(cluster_context)"
+    [ -n "${want}" ] || return 0
+    current="$(kubectl config current-context 2>/dev/null || true)"
+    if [ "${current}" != "${want}" ]; then
+        echo "ERROR: images load into '$(cluster_name)' (context '${want}'), but kubectl is on '${current:-<none>}'." >&2
+        echo "       Everything else here would be applied to the wrong cluster. Select it first:" >&2
+        echo "           kubectl config use-context ${want}" >&2
+        return 1
+    fi
 }

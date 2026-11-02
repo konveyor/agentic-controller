@@ -41,6 +41,11 @@ if [ "${CONTAINER_TOOL}" = "podman" ]; then
     export KIND_EXPERIMENTAL_PROVIDER=podman
 fi
 
+# Up front, before several minutes of image builds: this script loads images
+# into ${CLUSTER_NAME} and then deploys through the current kubectl context,
+# so the two have to be the same cluster.
+cluster_require_context
+
 echo "=== Source: $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)) ==="
 echo ""
 echo "=== Building images ==="
