@@ -176,11 +176,19 @@ Making it a stage rather than a phase of `plan` buys four things:
   by an unanswered question anywhere in it; the demo's plan-stage asking
   is exactly this. A dedicated stage asks its questions and ends; the
   human is needed for minutes, not for the plan.
-- **The answers are reviewable before they are spent.** The stage commits
-  its record (Decision 4) to the target branch; a human who was not
-  watching can read and amend it in git before `plan` runs. This is the
-  stage-gate half of ADR 0017's table, obtained from stage boundaries and
-  git rather than from a new mechanism.
+- **The answers are a durable artifact, not a checkpoint.** The stage
+  commits its record (Decision 4) to the target branch, so the decisions
+  outlive the stage and `plan` reads them from git. The stage boundary is
+  not a pause: after a successful interrogation the controller starts
+  `plan` at once, and nothing holds the workflow for a second look.
+  Reviewing and amending the record asynchronously happens on the
+  failed-run path of Decision 3 — nobody answered, the run failed with
+  the questions already on the branch, a human edits the record and
+  relaunches from `plan` — or after the human stops the workflow
+  (Decision 4). This is as much of ADR 0017's stage-gate half as stage
+  boundaries and git supply: durability and answerability later, without
+  a gate. A manual review checkpoint between stages is a separate
+  decision this ADR does not make.
 - **Refusal costs nothing downstream.** Nobody there, or the human says
   stop: the workflow halts at a stage that spent a few dozen turns reading
   the repository, not after a plan was written.
@@ -342,15 +350,33 @@ Order of operations, which is what makes the record survive a failed gate:
 ## Interrogate
 - Status: completed
 - Record: .konveyor/interrogation.md
+- Assumed decisions: 1
 - Open decisions: 0
 ```
 
-`Status: failed` is reserved for the stage being unable to do its work at
-all (no repository to read, a prompt that contradicts the code and a human
-who confirmed the run is wrong); it ends the run `Refused` by the existing
-contract and stops the workflow. A record with `Open` decisions and a
-human who chose to stop is `completed` with a non-zero open count — the
-human decided, and `plan` proceeds on the recommendations.
+The human has two ways to end the questioning early, and the handoff
+must tell them apart, because the controller acts on one and not the
+other:
+
+- **Stop the workflow.** The human wants no plan written on these
+  answers: the stage writes `Status: failed` with the reason ("stopped by
+  the human: …"), keeps whatever was decided in the record, and ends. The
+  existing contract ends the run `Refused` and halts the workflow, which
+  is what "the human says stop" means everywhere in this ADR.
+- **Finish questioning and continue.** The human is content to proceed
+  on the recommendations: the remaining decisions are recorded `Assumed`
+  on their recommendation, the stage ends `Status: completed` with a
+  non-zero assumed count and an open count of zero, and the controller
+  starts `plan`, which flags those assumptions.
+
+`Status: failed` therefore covers two cases — the stage could not do its
+work at all (no repository to read; a prompt that contradicts the code,
+confirmed by the human), and the human stopped the workflow — and the
+Status line says which. A declined question never means "stop" on its
+own: when the human declines, the stage skill offers the two choices
+above explicitly, so "stop" always halts and never silently proceeds.
+`Open` decisions on a `completed` stage should not occur; they are what a
+run that failed mid-interrogation leaves on the branch (Decision 3).
 
 The **plan skill** gains one input and one rule: read
 `.konveyor/interrogation.md` if present; every decision in it appears
@@ -548,16 +574,20 @@ Planning only — modify no source files. Read, do not build.
    `Open`, its evidence, options and your recommendation. Commit.
 5. Ask the open decisions one at a time with `ask_user`: options as the
    choices, your recommendation named in the question. Record each answer
-   and commit. A declined answer is recorded as `Assumed` with your
-   recommendation; never apply a guess silently.
+   and commit. When the human declines a question, ask once which they
+   want: finish questioning and continue on your recommendations (record
+   the rest as `Assumed`), or stop the workflow (write `Status: failed`
+   with their reason in step 6 and end). Never apply a guess silently.
 6. Write `## Interrogate` to `.konveyor/handoff.md` with `- Status:`,
-   the record path and the open count — creating the file and the
-   `.konveyor/` directory if they do not exist, since you run before
+   the record path, the assumed count and the open count — creating the
+   file and the `.konveyor/` directory if they do not exist, since you run before
    every other stage. Write it last and add no heading after it. Commit.
 
 ## Rules
 - Only ask what would change the plan. If the code or the grounding
   answers it, record the source and move on.
 - One decision per question; two to four options; always a recommendation.
-- `Status: failed` only when you could not do the work at all.
+- `Status: failed` only when you could not do the work at all, or the
+  human chose to stop the workflow; "continue on your recommendations"
+  is `completed`.
 ```
