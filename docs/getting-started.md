@@ -10,13 +10,15 @@ AgentRun to trigger execution.
   the ImageVolume feature — a beta gate that is **off by default** on
   Kubernetes 1.33–1.34, so enable `ImageVolume` there; it is on by
   default from 1.35 and GA in 1.36)
-- A container runtime that implements image volumes — containerd 2.x or
-  CRI-O. The gate above governs the API server; the mount itself is the
-  kubelet's, through the CRI, and `cri-dockerd` does not implement it.
-  A minikube cluster therefore needs `--container-runtime=containerd`
-  (or `crio`); on the default `docker` runtime every run fails at
-  `Init:CreateContainerError` — *invalid mount config for type "bind":
-  field Source must not be empty* — whatever the Kubernetes version
+- A container runtime that implements image volumes — containerd 2.1+ or
+  CRI-O 1.31+. The gate above governs the API server; the mount itself is
+  the kubelet's, through the CRI. containerd added the OCI image volume
+  source in 2.1.0, so 2.0 does not qualify, and `cri-dockerd` does not
+  implement it at all. A minikube cluster therefore needs
+  `--container-runtime=containerd` (or `crio`); on the default `docker`
+  runtime every run fails at `Init:CreateContainerError` — *invalid mount
+  config for type "bind": field Source must not be empty* — whatever the
+  Kubernetes version
 - An amd64 cluster, or images you build yourself. Three published images
   are amd64-only by design (see [`images/README.md`](../images/README.md)):
   the controller, the skill bundle, and `agentic-controller-agent`. Each
