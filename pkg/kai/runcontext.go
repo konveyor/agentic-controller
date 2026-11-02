@@ -1,11 +1,18 @@
 package kai
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	agenticv1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // defaultHubBaseURL is the in-cluster address of the Tackle Hub service. Runs
@@ -118,4 +125,100 @@ func (rc *runContext) build() ([]corev1.EnvVar, []corev1.EnvFromSource, error) {
 		})
 	}
 	return env, envFrom, nil
+}
+
+// createRun persists any run-scoped credentials and then creates the run. The
+// Hub PAT is never written into the run spec: when a token is resolved it is
+// stored in a dedicated, run-owned Opaque Secret and injected as HUB_TOKEN via
+// ValueFrom.SecretKeyRef. The Secret is created before the run (so a failure
+// aborts without a dangling run) and, once the run exists, is adopted by it so
+// Kubernetes garbage-collects the Secret when the run is deleted. Access to the
+// run and the Secret is still governed by Kubernetes RBAC. run must be a
+// *AgentRun or *AgentWorkflowRun.
+func (rc *runContext) createRun(ctx context.Context, cl client.Client, run client.Object) error {
+	env, envFrom, err := rc.build()
+	if err != nil {
+		return err
+	}
+
+	// Pull any literal HUB_TOKEN out of the env (last value wins, matching
+	// Kubernetes env semantics) so the PAT goes into a Secret rather than the run
+	// spec. This covers both the app-scoped token build() injects and an explicit
+	// --env HUB_TOKEN=... supplied without --app.
+	token := ""
+	filtered := env[:0]
+	for _, e := range env {
+		if e.Name == hubTokenEnvVar && e.ValueFrom == nil {
+			token = strings.TrimSpace(e.Value)
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	env = filtered
+
+	var secret *corev1.Secret
+	if token != "" {
+		secret = &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{GenerateName: "kai-hub-token-", Namespace: run.GetNamespace()},
+			Type:       corev1.SecretTypeOpaque,
+			Data:       map[string][]byte{hubTokenEnvVar: []byte(token)},
+		}
+		if err := cl.Create(ctx, secret); err != nil {
+			return fmt.Errorf("failed to create Hub token Secret: %w", err)
+		}
+		env = append(env, corev1.EnvVar{Name: hubTokenEnvVar, ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: secret.Name},
+				Key:                  hubTokenEnvVar,
+			},
+		}})
+	}
+
+	var kind string
+	switch r := run.(type) {
+	case *agenticv1alpha1.AgentRun:
+		kind = kindAgentRun
+		r.Spec.Env, r.Spec.EnvFrom = env, envFrom
+	case *agenticv1alpha1.AgentWorkflowRun:
+		kind = kindAgentWorkflowRun
+		r.Spec.Env, r.Spec.EnvFrom = env, envFrom
+	default:
+		return fmt.Errorf("unsupported run type %T", run)
+	}
+
+	if err := cl.Create(ctx, run); err != nil {
+		createErr := fmt.Errorf("failed to create %s: %w", kind, err)
+		if secret != nil {
+			// Roll back the Secret we created. Use an uncancellable context so a
+			// cancelled command still cleans up, and a UID precondition so a
+			// replacement Secret can never be deleted by this attempt.
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			uid := secret.UID
+			delErr := cl.Delete(cleanupCtx, secret, &client.DeleteOptions{
+				Preconditions: &metav1.Preconditions{UID: &uid},
+			})
+			if delErr != nil && !apierrors.IsNotFound(delErr) {
+				return errors.Join(createErr,
+					fmt.Errorf("failed to clean up Hub token Secret %q: %w", secret.Name, delErr))
+			}
+		}
+		return createErr
+	}
+
+	if secret != nil {
+		// Adopt the Secret so it survives for the run's (and all workflow stages')
+		// lifetime and is garbage-collected when the run is deleted.
+		secret.OwnerReferences = []metav1.OwnerReference{{
+			APIVersion: agenticv1alpha1.GroupVersion.String(), Kind: kind,
+			Name: run.GetName(), UID: run.GetUID(),
+		}}
+		if err := cl.Update(ctx, secret); err != nil {
+			// The run already exists and may be executing; never remove its
+			// credential. Surface both names so the Secret can be cleaned up by hand.
+			return fmt.Errorf("%s %q created, but failed to attach ownership to Hub token Secret %q "+
+				"(delete it manually after deleting the run): %w", kind, run.GetName(), secret.Name, err)
+		}
+	}
+	return nil
 }

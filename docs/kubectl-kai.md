@@ -106,9 +106,21 @@ Use `--insecure` for a self-signed Hub Route. Because the in-cluster Hub address
 isn't reachable from a laptop, pass the external Hub URL (the OpenShift Route) to
 `--hub-url`.
 
-The saved token is injected as `HUB_TOKEN` on any `agent run` / `workflow run`
-that uses `--app`; override it per-run with `--hub-token`, or clear the saved
-token with `kubectl kai hub logout`.
+For each `agent run` / `workflow run` with `--app` and a non-blank token, kai
+stores the PAT in a dedicated Opaque Secret in the run namespace and sets
+`HUB_TOKEN` via `valueFrom.secretKeyRef`, so the run specification holds a
+reference rather than the PAT. Override the saved token per-run with
+`--hub-token`, or clear the local token with `kubectl kai hub logout`. An
+explicit `--env HUB_TOKEN=VALUE` is handled the same way (stored in a Secret).
+
+The caller therefore needs permission to create, update, and delete Secrets in
+the run namespace, alongside the permissions to read templates and create runs.
+If Secret creation fails the run is not created; if run creation fails, kai
+deletes only the Secret it created for that attempt. A successful run owns its
+token Secret: it lives through completion and all workflow stages, and
+Kubernetes garbage-collects it when the run is deleted. Access to runs and
+Secrets is still governed by RBAC — a Secret reference alone does not restrict
+access. (`hub logout` does not delete cluster Secrets.)
 
 ### Gateways
 

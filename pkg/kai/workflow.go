@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/huh"
 	agenticv1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 	"github.com/spf13/cobra"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -283,11 +282,11 @@ func newWorkflowRunCommand(cfg *kaiConfig) *cobra.Command {
 			if err := rc.resolveHubToken(); err != nil {
 				return err
 			}
-			env, envFrom, err := rc.build()
-			if err != nil {
+			// Surface --env parse errors before touching the cluster.
+			if _, _, err := rc.build(); err != nil {
 				return err
 			}
-			return runWorkflowRun(cmd.Context(), cfg, args[0], gateway, paramFlags, wait, env, envFrom)
+			return runWorkflowRun(cmd.Context(), cfg, args[0], gateway, paramFlags, wait, &rc)
 		},
 	}
 	cmd.Flags().StringVar(&gateway, "gateway", "", "gateway to use for all stages")
@@ -299,7 +298,7 @@ func newWorkflowRunCommand(cfg *kaiConfig) *cobra.Command {
 
 func runWorkflowRun(
 	ctx context.Context, cfg *kaiConfig, name, gateway string, paramFlags []string,
-	wait bool, env []corev1.EnvVar, envFrom []corev1.EnvFromSource,
+	wait bool, rc *runContext,
 ) error {
 	cl, err := cfg.newClient()
 	if err != nil {
@@ -330,18 +329,16 @@ func runWorkflowRun(
 	}
 
 	run := &agenticv1alpha1.AgentWorkflowRun{
-		TypeMeta:   metav1.TypeMeta{APIVersion: agenticv1alpha1.GroupVersion.String(), Kind: "AgentWorkflowRun"},
+		TypeMeta:   metav1.TypeMeta{APIVersion: agenticv1alpha1.GroupVersion.String(), Kind: kindAgentWorkflowRun},
 		ObjectMeta: metav1.ObjectMeta{GenerateName: name + "-", Namespace: cfg.namespace},
 		Spec: agenticv1alpha1.AgentWorkflowRunSpec{
 			WorkflowRef: name,
 			Gateway:     strings.TrimSpace(gateway),
 			Params:      params,
-			Env:         env,
-			EnvFrom:     envFrom,
 		},
 	}
-	if err := cl.Create(ctx, run); err != nil {
-		return fmt.Errorf("failed to create AgentWorkflowRun: %w", err)
+	if err := rc.createRun(ctx, cl, run); err != nil {
+		return err
 	}
 	_, _ = fmt.Fprintf(os.Stdout, "workflow run %q created\n", run.Name)
 

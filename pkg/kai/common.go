@@ -20,6 +20,12 @@ const (
 	useDescribe = "describe <name>"
 )
 
+// CRD kinds, reused in TypeMeta and ownerReferences.
+const (
+	kindAgentRun         = "AgentRun"
+	kindAgentWorkflowRun = "AgentWorkflowRun"
+)
+
 // Shared table column headers reused across listing commands.
 const (
 	colName     = "NAME"

@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/huh"
 	agenticv1alpha1 "github.com/konveyor/agentic-controller/api/v1alpha1"
 	"github.com/spf13/cobra"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
@@ -281,11 +280,11 @@ func newAgentRunCommand(cfg *kaiConfig) *cobra.Command {
 			if err := rc.resolveHubToken(); err != nil {
 				return err
 			}
-			env, envFrom, err := rc.build()
-			if err != nil {
+			// Surface --env parse errors before touching the cluster.
+			if _, _, err := rc.build(); err != nil {
 				return err
 			}
-			return runAgentRun(cmd.Context(), cfg, args[0], gateway, instructions, paramFlags, wait, env, envFrom)
+			return runAgentRun(cmd.Context(), cfg, args[0], gateway, instructions, paramFlags, wait, &rc)
 		},
 	}
 	cmd.Flags().StringVar(&gateway, "gateway", "",
@@ -299,7 +298,7 @@ func newAgentRunCommand(cfg *kaiConfig) *cobra.Command {
 
 func runAgentRun(
 	ctx context.Context, cfg *kaiConfig, name, gateway, instructions string,
-	paramFlags []string, wait bool, env []corev1.EnvVar, envFrom []corev1.EnvFromSource,
+	paramFlags []string, wait bool, rc *runContext,
 ) error {
 	cl, err := cfg.newClient()
 	if err != nil {
@@ -361,19 +360,17 @@ func runAgentRun(
 	}
 
 	run := &agenticv1alpha1.AgentRun{
-		TypeMeta:   metav1.TypeMeta{APIVersion: agenticv1alpha1.GroupVersion.String(), Kind: "AgentRun"},
+		TypeMeta:   metav1.TypeMeta{APIVersion: agenticv1alpha1.GroupVersion.String(), Kind: kindAgentRun},
 		ObjectMeta: metav1.ObjectMeta{GenerateName: name + "-", Namespace: cfg.namespace},
 		Spec: agenticv1alpha1.AgentRunSpec{
 			AgentRef:     name,
 			Gateway:      gateway,
 			Params:       runParams,
 			Instructions: strings.TrimSpace(instructions),
-			Env:          env,
-			EnvFrom:      envFrom,
 		},
 	}
-	if err := cl.Create(ctx, run); err != nil {
-		return fmt.Errorf("failed to create AgentRun: %w", err)
+	if err := rc.createRun(ctx, cl, run); err != nil {
+		return err
 	}
 	_, _ = fmt.Fprintf(os.Stdout, "agent run %q created\n", run.Name)
 
