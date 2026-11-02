@@ -10,7 +10,9 @@
 #                       the node, and whether this script can create a cluster;
 #                       see hack/lib/cluster.sh
 #   CLUSTER_NAME        Cluster/profile name (default: $KIND_CLUSTER)
-#   LOAD_IMAGE_HOOK     Script taking image refs, for any other cluster
+#   LOAD_IMAGE_HOOK     Script taking image refs, for any other cluster. Implies
+#                       CLUSTER_TOOL=none: the cluster must already exist, and
+#                       the current kubectl context is the one used.
 #   AGENT_SANDBOX_TAG   Agent Sandbox version (default: the version pinned in go.mod)
 #   CONTAINER_TOOL      Container runtime: docker or podman (default: auto-detect)
 
@@ -20,6 +22,10 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cluster.sh"
 
 KIND_CLUSTER="${KIND_CLUSTER:-agentic-controller-e2e}"
+# One name for the cluster, resolved once: CLUSTER_NAME if set, else
+# KIND_CLUSTER. Creating one name and loading images into another is the bug
+# this variable exists to make impossible.
+CLUSTER="$(cluster_name)"
 # Default the Agent Sandbox git tag from the version pinned in go.mod so the
 # deployed CRDs match the API the controller compiles against (mirrors the
 # go.mod-derived CRD path in internal/controller/suite_test.go). Override with
@@ -40,7 +46,7 @@ if [ -z "${CONTAINER_TOOL:-}" ]; then
 fi
 
 echo "=== Configuration ==="
-echo "Cluster:        ${KIND_CLUSTER}"
+echo "Cluster:        ${CLUSTER} ($(cluster_tool))"
 echo "Container tool: ${CONTAINER_TOOL}"
 echo "Sandbox tag:    ${AGENT_SANDBOX_TAG}"
 echo ""
@@ -52,10 +58,10 @@ fi
 
 # Check if cluster already exists.
 if cluster_exists; then
-    echo "Cluster '$(cluster_name)' already exists. Skipping creation."
+    echo "Cluster '${CLUSTER}' already exists. Skipping creation."
 elif [ "$(cluster_tool)" = kind ]; then
-    echo "Creating Kind cluster '${KIND_CLUSTER}'..."
-    kind_args=(create cluster --name "${KIND_CLUSTER}" --wait 5m)
+    echo "Creating Kind cluster '${CLUSTER}'..."
+    kind_args=(create cluster --name "${CLUSTER}" --wait 5m)
     if [ -n "${KIND_IMAGE:-}" ]; then
         kind_args+=(--image "${KIND_IMAGE}")
     fi
@@ -64,7 +70,7 @@ else
     # Only Kind is created here. Anything else is expected to exist already —
     # the flags a cluster needs (CNI, container runtime, resources) are the
     # user's call, not this script's.
-    echo "ERROR: cluster '$(cluster_name)' not found, and CLUSTER_TOOL=$(cluster_tool) does not create one" >&2
+    echo "ERROR: cluster '${CLUSTER}' not found, and CLUSTER_TOOL=$(cluster_tool) does not create one" >&2
     exit 1
 fi
 
@@ -151,7 +157,7 @@ kubectl get nodes
 echo ""
 kubectl get pods -A
 echo ""
-echo "Cluster '$(cluster_name)' is ready with Agent Sandbox ${AGENT_SANDBOX_TAG}."
+echo "Cluster '${CLUSTER}' is ready with Agent Sandbox ${AGENT_SANDBOX_TAG}."
 if [ "$(cluster_tool)" = kind ]; then
-    echo "To use: export KUBECONFIG=\$(kind get kubeconfig --name ${KIND_CLUSTER})"
+    echo "To use: export KUBECONFIG=\$(kind get kubeconfig --name ${CLUSTER})"
 fi

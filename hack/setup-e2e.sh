@@ -9,6 +9,7 @@
 #                           reach the node; see hack/lib/cluster.sh
 #   CLUSTER_NAME            Cluster/profile name (default: $KIND_CLUSTER)
 #   LOAD_IMAGE_HOOK         Script taking image refs, for any other cluster
+#                           (implies CLUSTER_TOOL=none)
 #   CONTAINER_TOOL          docker or podman (default: auto-detect)
 #   IMG                     Controller image (default: quay.io/konveyor/agentic-controller:e2e)
 #   CONTROLLER_AGENT_IMG    Agent image (default: quay.io/konveyor/agentic-controller-agent:e2e)
@@ -61,9 +62,8 @@ ${CONTAINER_TOOL} build \
 
 echo ""
 echo "=== Loading images into cluster '$(cluster_name)' ==="
-# The :latest alias is tagged before loading either way, so both tool paths
-# put the same set of refs on the node.
-${CONTAINER_TOOL} tag "${CONTROLLER_AGENT_IMG}" "quay.io/konveyor/agentic-controller-agent:latest"
+# The :latest alias was tagged with the build above, before either path loads
+# anything, so both put the same set of refs on the node.
 cluster_load_images "${IMG}"
 cluster_load_images "${CONTROLLER_AGENT_IMG}" \
     "quay.io/konveyor/agentic-controller-agent:latest" \
