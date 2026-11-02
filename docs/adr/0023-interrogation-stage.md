@@ -280,12 +280,12 @@ Two things the model does **not** do, and is not asked to:
   work.
 
 One small extension to `ask_user` is worth making alongside the stage,
-and is proposed here as a new follow-up to ADR 0017 rather than a
-condition of this one: an optional `recommendation` argument naming the
-recommended option, so a console can render it as the default instead of
-the model having to spell it out in the question text. ADR 0017's own
-follow-up list does not yet carry it — only the longer question timeout
-— so landing it means amending 0017.
+and is a follow-up to ADR 0017 rather than a condition of this one: an
+optional `recommendation` argument naming the recommended option, so a
+console can render it as the default instead of the model having to
+spell it out in the question text. ADR 0017 carried only the longer
+question timeout; its 2026-11-02 amendment, alongside this ADR, records
+the `recommendation` argument as its second open follow-up.
 
 ### 4. The record: `.konveyor/interrogation.md`, committed by the agent, consumed by `plan`
 
@@ -397,8 +397,9 @@ labelled by this ADR as not the direction.
 
 ## What changes
 
-None of this is in this ADR's PR. It is the follow-up issue's scope, in
-the order the dependencies suggest.
+No code, skill or default below is in this ADR's PR — it carries only
+the documentation marked as done alongside it. The rest is the follow-up
+issue's scope, in the order the dependencies suggest.
 
 1. **Catalog skill `interrogate`** (`catalog/skills/interrogate/SKILL.md`,
    shipped `type: rule`): the method of Decision 2, the record and handoff
@@ -423,10 +424,11 @@ the order the dependencies suggest.
    `/applications/{id}` carries tags, `/applications/{id}/assessments` the
    assessments); report the count on the preparation rung. Nothing about
    questions.
-6. **ADR 0017 follow-ups**, now with a consumer: the longer default
-   timeout for questions than for permission asks, which 0017 already
-   lists, and the optional `recommendation` argument of Decision 3,
-   which it does not — 0017 is amended to record it.
+6. **ADR 0017 follow-ups**, both recorded there and neither implemented,
+   now with a consumer: the longer default timeout for questions than
+   for permission asks, and the optional `recommendation` argument of
+   Decision 3, which 0017's 2026-11-02 amendment adds (done alongside
+   this ADR).
 7. **Per-stage question timeout**: a way to give the interrogate stage a
    longer `HARNESS_HITL_TIMEOUT_SECONDS` than the rest of the workflow.
    The stage carries `execution` but no `env`, and the workflow
