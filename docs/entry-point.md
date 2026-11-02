@@ -57,6 +57,7 @@ The controller delivers resolved parameters to `/run/konveyor/params.json` (ADR 
 - **Agent-Authored Commits** — The agent creates all commits locally. The entry point **never creates commits of its own**.
 - **Push on Exit** — A debounced watcher pushes agent commits incrementally; a final push runs on stage exit. If no new commits were authored (`HEAD == baseSHA`), push is skipped to avoid creating empty branches.
 - **Handoff Verdict** — After the turn, the entry point reads the `- Status:` line of the last `## ` section of `.konveyor/handoff.md`, if the stage wrote or changed that file. Fenced code blocks are skipped, so a plan excerpt a stage quotes back cannot open a section or supply a verdict it never wrote. `failed` means the stage did not do its work: the run exits `3` (refused) even though the agent ended its turn normally. `completed` / `passed` are the values the catalog skills write for a stage that did; anything else is recorded (`handoffStatus`) but not acted on. Nothing else in the handoff is read — its body is knowledge for the next stage, not execution control.
+- **Independent Verification** — The handoff verdict is a self-report. After the turn and before the final push, the entry point also runs the commands in the `## Verification` section of `docs/plan.md` itself (`- Build:` / `- Test:`, via `/bin/sh -c` in the clone directory with the entry point's own environment) and records each exit code under `verification` in the termination blob, independent of what the handoff claims (#300). `Blackbox` and other prose lines, unfilled template placeholders and explicit `none` values are recorded as `skipped` with a reason. A missing plan, a missing or command-less `## Verification` section, a disabled pass and a stage that did not reach success all record `status: "notRun"` with a reason — never an absent field, and never `passed`. Each command is bounded by a per-command timeout (`HARNESS_VERIFY_TIMEOUT_SECONDS`, default 600s) and killed as a process group; captured output is tailed. By default a non-zero exit is recorded without changing the stage's phase; `HARNESS_VERIFY_ENFORCE=on` makes it fail the stage (exit `1`).
 
 ---
 
@@ -97,8 +98,19 @@ On exit, the entry point writes a JSON blob to `/dev/termination-log` (copied to
     "contextUsed": 53000,
     "contextSize": 200000,
     "cost": { "amount": 0.045, "currency": "USD" }
+  },
+  "verification": {
+    "status": "failed",
+    "reason": "Build failed: npm run tsc -w client",
+    "commands": [
+      { "label": "Build", "command": "npm run tsc -w client", "status": "failed", "exitCode": 2, "seconds": 41.2, "output": "…45 errors" },
+      { "label": "Test", "command": "npm run test -w client", "status": "passed", "exitCode": 0, "seconds": 93.8 },
+      { "label": "Blackbox", "status": "skipped", "reason": "manual steps, not a command the harness can run or score" }
+    ]
   }
 }
 ```
+
+`handoffStatus` is what the stage said about its work; `verification` is what the entry point measured. The two disagreeing — `"handoffStatus": "passed"` next to `"verification": {"status": "failed"}` — is the case the field exists for. `verification.status` is one of `passed`, `failed` or `notRun`, and is never absent when the entry point reached the end of a turn: an unmeasured run says so, with a reason.
 
 Token credentials (e.g. Hub API token) are revoked on last stage, standalone run, or failure.
