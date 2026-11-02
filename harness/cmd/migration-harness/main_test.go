@@ -929,3 +929,114 @@ func TestModelDisplayName(t *testing.T) {
 		}
 	}
 }
+
+// TestPlanEntryKeepsCustomFieldsOutOfTheACPRoot is the ACP compliance
+// property, and the reason the numbers live under _meta at all rather
+// than beside content where they would be easier to read: "Implementations
+// MUST NOT add any custom fields at the root of a type that's part of the
+// specification. All possible names are reserved for future protocol
+// versions." A rung field promoted to the root would work today and
+// collide the day ACP names a field the same thing.
+func TestPlanEntryKeepsCustomFieldsOutOfTheACPRoot(t *testing.T) {
+	entry := planEntry("Prepare workspace", "completed", map[string]any{"rung": "prep", "insights": 3})
+
+	acpPlanEntryFields := map[string]bool{"content": true, "priority": true, "status": true, "_meta": true}
+	for k := range entry {
+		if !acpPlanEntryFields[k] {
+			t.Errorf("plan entry has root field %q; ACP reserves every root name on PlanEntry, so this belongs under _meta[%q]", k, planMetaKey)
+		}
+	}
+
+	meta, ok := entry["_meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("_meta = %#v, want map", entry["_meta"])
+	}
+	if _, ok := meta[planMetaKey]; !ok {
+		t.Errorf("_meta = %#v, want the rung data under the namespaced key %q", meta, planMetaKey)
+	}
+}
+
+// TestPlanTaskMetaAgreesWithItsSentence is the no-drift property. The
+// fields exist so a console can stop parsing English, which is only
+// worth anything if the two renderings say the same thing — a meter
+// reading "12 of 200" beside a sentence reading "turn 12 of 170" is
+// worse than the sentence alone.
+func TestPlanTaskMetaAgreesWithItsSentence(t *testing.T) {
+	red := newRedactor()
+	for _, maxTurns := range []int{0, 1, 2, 10, 40, 200, 1000} {
+		for _, turnsUsed := range []int{0, 1, 2, 9, 170, 200, 213, 340, 2500} {
+			cfg := &config.Config{Model: "m", MaxTurns: maxTurns}
+			sentence := planTaskRung(cfg, red, turnsUsed)
+			meta := planTaskMeta(cfg, red, turnsUsed)
+
+			var n, m int
+			if _, err := fmt.Sscanf(budgetFragment(sentence), "turn %d of %d", &n, &m); err != nil {
+				// No fraction in the sentence, so there is nothing to
+				// agree with — but the fields must not invent a budget.
+				if _, ok := meta["maxTurns"]; ok && maxTurns == 0 {
+					t.Errorf("maxTurns %d, turnsUsed %d: sentence %q declares no budget but meta has maxTurns=%v",
+						maxTurns, turnsUsed, sentence, meta["maxTurns"])
+				}
+				continue
+			}
+			if meta["turnsUsed"] != n {
+				t.Errorf("maxTurns %d, turnsUsed %d: sentence %q says turn %d, meta says %v",
+					maxTurns, turnsUsed, sentence, n, meta["turnsUsed"])
+			}
+			if meta["maxTurns"] != m {
+				t.Errorf("maxTurns %d, turnsUsed %d: sentence %q says of %d, meta says %v",
+					maxTurns, turnsUsed, sentence, m, meta["maxTurns"])
+			}
+		}
+	}
+}
+
+// TestPlanMetaOmitsWhatItDoesNotKnow guards the distinction the fields
+// exist to carry: absent means unknown, present means measured. Sending
+// 0 for an analysis that was never fetched, or for a commit count taken
+// before the final push, reports "this run produced nothing" — a
+// different and wrong fact.
+func TestPlanMetaOmitsWhatItDoesNotKnow(t *testing.T) {
+	t.Run("insights", func(t *testing.T) {
+		if m := planPrepMeta("https://github.com/k/r", "b", -1, newRedactor()); m["insights"] != nil {
+			t.Errorf("unfetched analysis published insights=%v, want the key absent", m["insights"])
+		}
+		if m := planPrepMeta("https://github.com/k/r", "b", 0, newRedactor()); m["insights"] != 0 {
+			t.Errorf("a measured zero published insights=%v, want 0", m["insights"])
+		}
+	})
+
+	t.Run("commits", func(t *testing.T) {
+		if m := planPushMeta("b", 3, -1); m["commits"] != nil {
+			t.Errorf("uncounted commits published commits=%v, want the key absent", m["commits"])
+		}
+		if m := planPushMeta("b", 0, 0); m["commits"] != 0 {
+			t.Errorf("a measured zero published commits=%v, want 0", m["commits"])
+		}
+		// pushes is always a measurement: none yet is a fact.
+		if m := planPushMeta("b", 0, -1); m["pushes"] != 0 {
+			t.Errorf("published pushes=%v, want 0 — no pushes yet is measured, not unknown", m["pushes"])
+		}
+	})
+
+	t.Run("standalone run has no stage position", func(t *testing.T) {
+		m := planTaskMeta(&config.Config{Model: "m", MaxTurns: 40}, newRedactor(), 1)
+		if _, ok := m["stage"]; ok {
+			t.Errorf("standalone run published stage=%v, want the key absent", m["stage"])
+		}
+		if _, ok := m["stageCount"]; ok {
+			t.Errorf("standalone run published stageCount=%v, want the key absent", m["stageCount"])
+		}
+	})
+}
+
+// TestPlanPrepMetaRedactsTheRepo: the fields travel the same replay ring
+// to the same viewers as the sentence, so they need the same redaction.
+// A credential dropped from the rung text and published as a field is
+// still published.
+func TestPlanPrepMetaRedactsTheRepo(t *testing.T) {
+	m := planPrepMeta("https://user:ghp_supersecrettoken@github.com/konveyor/coolstore", "b", 1, newRedactor())
+	if repo, _ := m["repo"].(string); strings.Contains(repo, "ghp_supersecrettoken") {
+		t.Errorf("repo field = %q, leaks the embedded credential", repo)
+	}
+}
