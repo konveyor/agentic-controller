@@ -3,8 +3,9 @@ name: verify
 description: >
   Builds the migrated project and fixes build errors until it compiles, then runs
   tests and runtime verification, and confirms that every violation listed in
-  .konveyor/analysis.json was addressed, using what the execute stage did. Appends
-  its results to .konveyor/handoff.md.
+  .konveyor/analysis.json was addressed, using what the execute stage did. Re-runs
+  the whole Verification section on the final tree before reporting. Appends its
+  results to .konveyor/handoff.md.
 ---
 
 # Verify Stage
@@ -45,6 +46,9 @@ For each build error:
 Re-run the build after each round of fixes and keep going until it compiles —
 there is no limit on the number of rounds. Only stop early if an error genuinely
 cannot be fixed without changing business logic, and record it.
+
+A green build here is provisional: Step 4 re-runs it on whatever the tree looks
+like after Steps 2 and 3, and that run is the one you report.
 
 ---
 
@@ -108,6 +112,29 @@ Stop the application and verify it shuts down without errors.
 
 ---
 
+## Step 4 — Final Check
+
+Every step above can edit the tree, and a fix made for one check can break
+another — a lint or formatting edit is as capable of breaking the build as a
+build fix is, and nothing in Steps 2 and 3 sends you back to the build.
+
+After your last edit, run every command in the `docs/plan.md` Verification
+section again, in order, on the tree as it now stands. Record each command's
+exit code.
+
+- **The build command fails**: go back to Step 1's fix loop, then start this
+  step again from the top
+- **Any other command's result differs from what you recorded earlier**:
+  replace the earlier result with this run's
+
+The results you write in the next step come from this run. A command that
+passed in an earlier round does not count, however late that round was: if you
+edited a file afterwards, that result describes a tree that no longer exists.
+If you touch a source file again after this run — including something you spot
+while writing up — run the section again first.
+
+---
+
 ## Write Output
 
 You MUST complete this step.
@@ -116,10 +143,13 @@ Append a `## Verify` section to `.konveyor/handoff.md` (the execute stage create
 the file). Do NOT overwrite the `## Execute` section or any earlier content.
 
 Record the overall status, the build/test/runtime results, and a one-sentence
-summary. Overall status is `passed` only if the build passes — test and runtime
-failures are documented but do not block the stage. The harness reads that
-line: `failed` ends the run as refused and stops the workflow, with the
-`Summary` line as the reason.
+summary. Every line describes the tree as Step 4 left it, which is the tree
+being handed on: `Build: passed` means the build command passed after your last
+edit, not that it passed at the end of Step 1's fix loop. Overall status is
+`passed` only if the build passed on that final run — test and runtime failures
+are documented but do not block the stage. The harness reads that line:
+`failed` ends the run as refused and stops the workflow, with the `Summary`
+line as the reason.
 
 ```markdown
 ## Verify
@@ -145,4 +175,8 @@ line: `failed` ends the run as refused and stops the workflow, with the
 - Fix build errors until it compiles, but never change business logic
 - Document test failures, do not fix them
 - Stop the application after runtime checks — do not leave it running
+- Re-run the whole Verification section after your last edit — every result you
+  record comes from that run, never from an earlier round
+- Do NOT write `Status: passed` unless you have seen the build pass after your
+  last edit
 - You MUST append your `## Verify` section to `.konveyor/handoff.md` before finishing
