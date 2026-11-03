@@ -8,13 +8,23 @@ import (
 
 func TestGitProxyPrecedenceAndExclusions(t *testing.T) {
 	configs := []Config{
-		{Kind: "http", Host: "hub-http", Port: 3128, Excluded: []string{"  *.INTERNAL.example  ", ".corp.example.com", "127.0.0.2", "[::1]"}},
+		{Kind: "http", Host: "hub-http", Port: 3128, Excluded: []string{"  *.INTERNAL.example  ", ".corp.example.com", "127.0.0.2", "[::1]", "10.0.0.0/8", "2001:db8::/32", "port.example:8443", "[2001:db9::1]:443", "git*.ports.example:443"}},
 		{Kind: "https", Host: "hub-https", Port: 8080, Excluded: []string{"private.example"}},
 	}
 	for _, tt := range []struct {
 		name, target, want string
 		env                map[string]string
 	}{
+		{name: "inherited CIDR shared across schemes", target: "https://10.42.1.2", want: ""},
+		{name: "outside CIDR", target: "https://11.42.1.2", want: "http://hub-https:8080"},
+		{name: "inherited IPv6 CIDR", target: "http://[2001:db8::1234]", want: ""},
+		{name: "port-specific host", target: "https://git.port.example:8443", want: ""},
+		{name: "other port", target: "https://port.example:443", want: "http://hub-https:8080"},
+		{name: "IPv6 default port", target: "https://[2001:db9::1]", want: ""},
+		{name: "IPv6 other port", target: "https://[2001:db9::1]:8443", want: "http://hub-https:8080"},
+		{name: "wildcard default port", target: "https://gitlab.ports.example", want: ""},
+		{name: "wildcard other port", target: "https://gitlab.ports.example:8443", want: "http://hub-https:8080"},
+		{name: "explicit bypass replaces inherited CIDR", target: "https://10.42.1.2", env: map[string]string{"NO_PROXY": "other.example"}, want: "http://hub-https:8080"},
 		{name: "HTTP", target: "http://repo.example", want: "http://hub-http:3128"},
 		{name: "HTTPS", target: "https://repo.example", want: "http://hub-https:8080"},
 		{name: "wildcard ignores case and port", target: "https://REPO.internal.EXAMPLE:8443", want: ""},
@@ -64,8 +74,10 @@ func TestGitProxyPrecedenceAndExclusions(t *testing.T) {
 
 func TestInvalidHubProxyConfiguration(t *testing.T) {
 	for _, c := range []Config{
-		{Kind: "http", Host: "proxy", Excluded: []string{"10.0.0.0/8"}},
-		{Kind: "http", Host: "proxy", Excluded: []string{"example.com:8080"}},
+		{Kind: "http", Host: "proxy", Excluded: []string{"10.0.0.0/999"}},
+		{Kind: "http", Host: "proxy", Excluded: []string{"example.com:invalid"}},
+		{Kind: "http", Host: "proxy", Excluded: []string{"example.com:65536"}},
+		{Kind: "http", Host: "proxy", Excluded: []string{"example.com,other.example"}},
 		{Kind: "http", Host: "proxy", Excluded: []string{"https://example.com"}},
 		{Kind: "http", Host: "proxy", Excluded: []string{"foo?bar"}},
 		{Kind: "http", Host: "user:secret@proxy"},

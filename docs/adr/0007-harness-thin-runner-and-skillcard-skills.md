@@ -59,6 +59,19 @@ an actionable error because Maven would interpolate the value before using it;
 explicit proxy settings remain authoritative. Lookup failures and unsupported
 Hub exclusion forms retain the previously agreed fail-closed policy and opt-out.
 
+**Update (2026-11-03):** Exclusion compatibility is tool-specific. Git honors
+inherited CIDRs and port-specific exclusions. Maven rejects forms it cannot
+represent only when generating proxy settings, after existing user settings,
+Secret mounts, and explicit Hub Maven proxy sections have taken precedence.
+This preserves supplied overrides without silently dropping bypass rules.
+The Hub `release-0.11` source grants `agentic.harness` the `addon` role, including
+`proxies:get`, `identities:get`, and `identities:decrypt`; see
+[service account](https://github.com/konveyor/tackle2-hub/blob/59f079ecf59bb89e4d51b2831ffaa3784ce41c9f/internal/auth/seed/serviceaccounts.yaml#L6)
+and [role](https://github.com/konveyor/tackle2-hub/blob/59f079ecf59bb89e4d51b2831ffaa3784ce41c9f/internal/auth/seed/roles.yaml#L603).
+This supports retaining strict lookup failures. Deployed MTA 8.3 token and image
+verification remain release checks.
+
+
 ## Context
 
 The migration harness was a monolithic Go binary that orchestrated five

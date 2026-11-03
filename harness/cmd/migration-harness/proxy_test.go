@@ -69,6 +69,7 @@ func TestRunStageProxyOptOutAndFailures(t *testing.T) {
 	for _, tt := range []struct {
 		name, switchValue, body string
 		status                  int
+		existingMaven           bool
 		wantFailure             bool
 	}{
 		{name: "opt-out bypasses forbidden lookup", switchValue: "off", status: http.StatusForbidden},
@@ -76,10 +77,20 @@ func TestRunStageProxyOptOutAndFailures(t *testing.T) {
 		{name: "disabled skips invalid proxy and identity", body: `[{"id":1,"enabled":false,"kind":"http","identity":{"id":7}}]`},
 		{name: "forbidden lookup", status: http.StatusForbidden, body: `{"password":"must-not-appear-in-errors"}`, wantFailure: true},
 		{name: "forbidden identity", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","identity":{"id":7}}]`, wantFailure: true},
-		{name: "unsupported exclusion", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","excluded":["10.0.0.0/8"]}]`, wantFailure: true},
+		{name: "CIDR with existing Maven settings", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","excluded":["10.0.0.0/8"]}]`, existingMaven: true},
+		{name: "unsupported generated Maven exclusion", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","excluded":["10.0.0.0/8"]}]`, wantFailure: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
+			settingsPath := filepath.Join(home, ".m2", "settings.xml")
+			if tt.existingMaven {
+				if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(settingsPath, []byte("<settings/>"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			proxyCalls := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -123,7 +134,7 @@ func TestRunStageProxyOptOutAndFailures(t *testing.T) {
 			if tt.switchValue == "off" && proxyCalls != 0 {
 				t.Error("opt-out still queried Hub proxies")
 			}
-			if _, err := os.Stat(filepath.Join(home, ".m2", "settings.xml")); !os.IsNotExist(err) {
+			if _, err := os.Stat(settingsPath); !tt.existingMaven && !os.IsNotExist(err) {
 				t.Error("absent, disabled or opted-out proxy settings should not create Maven settings")
 			}
 			termination, _ := os.ReadFile(filepath.Join(home, "termination-log"))

@@ -60,8 +60,17 @@ func TestPrepareMavenSettingsWithProxies(t *testing.T) {
 				}
 			}))
 			defer server.Close()
+			inherited := append([]proxy.Config(nil), configs...)
+			if tt.wantUnchanged != "" {
+				// These exclusions work for Git but cannot be translated to Maven.
+				inherited[0].Excluded = []string{"10.0.0.0/8", "private.example:8443"}
+			}
+			policy, err := proxy.New(inherited, func(string) (string, bool) { return "", false })
+			if err != nil {
+				t.Fatal(err)
+			}
 			red := newRedactor()
-			if err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", red, configs...); err != nil {
+			if err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", red, policy.HubProxies()...); err != nil {
 				t.Fatal(err)
 			}
 			data, err := os.ReadFile(path)
@@ -85,7 +94,7 @@ func TestPrepareMavenSettingsWithProxies(t *testing.T) {
 			if err := xml.Unmarshal(data, &settings); err != nil {
 				t.Fatal(err)
 			}
-			if len(settings.Proxies) != 1 || settings.Proxies[0].Password != "p&x" || settings.Proxies[0].NonProxyHosts != "*.internal.example|localhost" {
+			if len(settings.Proxies) != 1 || settings.Proxies[0].Password != "p&x" || settings.Proxies[0].NonProxyHosts != "*.internal.example|localhost|*.localhost" {
 				t.Fatal("generated settings lost proxy authentication or exclusions")
 			}
 			if strings.Contains(red.redact("p&x p&amp;x"), "p&x") || strings.Contains(red.redact("p&x p&amp;x"), "p&amp;x") {
@@ -120,5 +129,30 @@ func TestMavenProxyRejectsInterpolationCredentials(t *testing.T) {
 		if err != nil || settings != explicit {
 			t.Error("explicit Maven proxy settings must remain authoritative")
 		}
+	}
+}
+
+func TestGeneratedMavenProxiesRejectUnsupportedExclusions(t *testing.T) {
+	for _, exclusion := range []string{"10.0.0.0/8", "2001:db8::/32", "private.example:8443", "[2001:db8::1]:443", "*.private.example:443"} {
+		t.Run(exclusion, func(t *testing.T) {
+			policy, err := proxy.New([]proxy.Config{{Kind: "https", Host: "proxy", Excluded: []string{exclusion}}}, func(string) (string, bool) { return "", false })
+			if err != nil {
+				t.Fatalf("Git-compatible exclusion rejected before Maven setup: %v", err)
+			}
+			for _, source := range []string{"", "<settings><servers/></settings>"} {
+				_, err := withMavenProxies(source, policy.HubProxies())
+				if err == nil || !strings.Contains(err.Error(), "Maven") || !strings.Contains(err.Error(), "HARNESS_HUB_PROXY=off") {
+					t.Errorf("expected actionable Maven generation failure, got %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMavenExclusionTranslation(t *testing.T) {
+	got, err := mavenNonProxyHosts([]string{" EXAMPLE.com ", ".corp.example", "git*.example", "10.1.2.3", "[2001:db8::1]"})
+	const want = "example.com|*.example.com|*.corp.example|git*.example|10.1.2.3|2001:db8::1|[2001:db8::1]"
+	if err != nil || got != want {
+		t.Fatalf("nonProxyHosts = %q, %v; want %q", got, err, want)
 	}
 }

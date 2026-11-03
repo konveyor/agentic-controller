@@ -165,7 +165,7 @@ func TestMavenProxyBuild(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = prepareMavenSettings(hub.NewClient(clientServer.URL, "test-token"), "42", newRedactor(), policy.MavenProxies()...)
+			err = prepareMavenSettings(hub.NewClient(clientServer.URL, "test-token"), "42", newRedactor(), policy.HubProxies()...)
 			if mode == "literal expression password" {
 				if err == nil || !strings.Contains(err.Error(), "HARNESS_HUB_PROXY=off") {
 					t.Fatalf("expected actionable startup rejection instead of Maven silently changing the password: %v", err)
