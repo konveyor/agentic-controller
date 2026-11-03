@@ -386,6 +386,12 @@ if [ "${FAIL}" -gt 0 ]; then
         pod="$(run_pod "${r}")"
         [ -n "${pod}" ] || continue
         echo "--- ${r} (${pod}) phase=$(phase "${r}")"
+        # The harness can finish successfully after the controller has already
+        # failed the run. Preserve both accounts, including the exact failure
+        # condition and container exit status, before namespace cleanup.
+        kc get agentrun "${r}" -o json | jq '.status' || true
+        kc get sandbox "${pod}" -o json | jq '.status' || true
+        kc get pod "${pod}" -o json | jq '.status | {phase, reason, message, containerStatuses, initContainerStatuses}' || true
         # Events, not just logs: a container that never started has no logs,
         # and the reason it did not (ErrImagePull, scheduling) lives here.
         kc describe pod "${pod}" 2>/dev/null | sed -n '/^Events:/,$p' | sed 's/^/    /' || true
