@@ -5,12 +5,12 @@ description: "Reuse Lightspeed's DeepAgents runtime and its inspection behavior 
 status: accepted
 status_note: "Approves Konveyor direction only; implementation, backend qualification, and Lightspeed agreement are separate."
 date: "2026-10-20"
-last_updated: "2026-10-28"
+last_updated: "2026-11-02"
 authors:
   - "David Zager"
-last_reviewed: "2026-10-28"
+last_reviewed: "2026-11-02"
 implementation_status: deferred
-review_note: "Runtime reuse with model-boundary inspection and custom-image execution were demonstrated separately. Full runtime and ACP inspection parity, operator placement and credential delivery, and lifecycle qualification remain unresolved. Production integration is unimplemented."
+review_note: "Runtime reuse and custom-image execution were demonstrated separately. Full runtime adoption requires compatibility work for existing interaction, execution controls, session continuation, and inspection behavior. Operator placement, credential delivery, and lifecycle design remain open. Production integration is unimplemented."
 relates_to:
   - "0001"
   - "0004"
@@ -20,6 +20,20 @@ relates_to:
 ---
 
 # ADR 0021: Shared Runtime and Conditional Lightspeed Execution
+
+**Update (2026-11-02): shared runtime direction.** Reuse and contribute to
+Lightspeed's runtime, keeping Konveyor-specific behavior in the harness.
+Operator adoption remains conditional on the capabilities and integration
+design below.
+
+**Update (2026-10-30): existing behavior and upstream collaboration.** Runtime
+reuse remains the chosen direction, with compatibility changes needed before
+full adoption. This supersedes the earlier deferral of existing interaction
+features and same-session continuation needed for limit-triggered handoff.
+Usage/cost accounting belongs to the runtime; Konveyor consumes its reporting
+for execution controls. We can prototype and contribute runtime changes
+upstream. Operator adoption also requires collaboration, but its placement,
+access, credential, and lifecycle design remains unresolved.
 
 **Update (2026-10-28): scope clarification following review.** Runtime reuse
 includes Lightspeed's applicable inspection and tool-admission behavior inside
@@ -66,8 +80,24 @@ implementation for model, tool, skill, and MCP execution, including Lightspeed's
 applicable inspection and tool-admission behavior. Konveyor's harness continues
 to own Hub application/repository resolution, checkout, workspace and instruction
 preparation, Git push, token cleanup, and final outcome reporting.
-Initial runtime reuse does not require Lightspeed to implement those Konveyor
-behaviors or the retained-session improvements below.
+Runtime reuse does not require Lightspeed to implement those Konveyor-specific
+behaviors. We can prototype the integration with focused runtime changes and
+contribute reusable changes upstream; full adoption requires preserving our
+existing behavior.
+
+**Preserve existing interaction and execution controls.** Production integration
+must preserve tool approval (`mode: approve`), `ask_user`, steering, viewer
+cancellation, execution limits (`maxTurns`, `maxCost`), and limit-triggered
+handoff. Address gaps through runtime and harness integration changes in
+collaboration with Lightspeed. The prototype demonstrates a subset of this
+behavior; its restrictions do not narrow the product's existing capabilities.
+
+Usage and cost accounting belong to Lightspeed's runtime. Konveyor consumes
+runtime-reported usage/cost for its execution controls and reporting, rather
+than maintaining a parallel accounting implementation. Contribute upstream
+where reporting or controls are missing. Budget enforcement requires timely
+reporting and working cancellation; a completed-run total alone does not
+provide that behavior.
 
 **Preserve the runtime's inspection path when integrating it with our harness.**
 Reuse Lightspeed's DeepAgents integration, including inspection before untrusted
@@ -88,7 +118,9 @@ our harness and supply the runtime and toolchains. Honoring the selected image's
 declared entrypoint may be sufficient to meet the startup requirement. The
 integration design will determine whether an explicit command override is needed.
 
-Before adopting the operator, resolve and qualify the custom-workload contract:
+Collaborate with Lightspeed on the operator capabilities and integration design.
+Operator integration still has open design questions. Before adopting it,
+resolve and qualify the custom-workload contract:
 
 - **Placement, configuration, and credential delivery:** where the workload
   executes, how it reaches Hub, and how it receives inputs, provider/model
@@ -105,11 +137,10 @@ Execution in Konveyor's Hub namespace and execution in Lightspeed's namespace
 have different access and credential consequences. This ADR chooses neither;
 the supported design must provide the required Hub/ACP access, credential
 handling, and isolation. Retain our existing execution path while qualifying
-the alternative backend. Adopt operator execution for MTA 8.4 only if upstream
-capabilities and our integration are ready without delaying the release;
-otherwise continue the runtime path under our controller. We will not ship a
-patched Lightspeed operator. Broader roadmap commitment is not a prerequisite
-for runtime reuse.
+the alternative backend. Adopt operator execution when upstream capabilities
+and our integration meet these requirements. We will not ship a patched
+Lightspeed operator. Broader roadmap commitment is not a prerequisite for
+runtime reuse.
 
 **Migrate to Lightspeed resources as they cover our required capabilities.**
 Konveyor needs reusable Agent definitions covering images, skills, tools, MCP
@@ -139,25 +170,25 @@ state. The harness owns workload preparation/finalization; clients connect to
 the workload for ACP. Where backend integration code lives remains an
 implementation choice, subject to these behavioral boundaries.
 
-**Pursue retained conversation sessions as an independent runtime improvement.**
-A prompt finishing must be distinguishable from workload finalization so the
-same live session can accept a follow-up. A server, local stdio, or embedded
-session interface could provide this; no transport or native Lightspeed ACP
-implementation is selected here. Contribute the needed session-lifecycle changes
-to Lightspeed's DeepAgents implementation and adapt our integration. A supported
-session interface should replace the prototype's extraction of internal
-graph-construction code for this work. These contributions are follow-up work,
-not prerequisites for the initial use cases. Same-session continuation is
-distinct from a later workflow stage consuming committed handoff files.
-Reconnect to a live session is also distinct from recovery after process loss.
+**Keep the session available through limit-triggered handoff.** Existing
+unattended execution can require a second prompt: when a turn or cost limit is
+reached, the harness asks the same session to write its handoff before finalizing
+the workload. Production runtime integration must support that continuation.
+Distinguish prompt completion from workload finalization, and collaborate on
+the needed runtime session interface and harness changes. No transport or
+native Lightspeed ACP implementation is selected here. A supported interface
+should replace the prototype's extraction of internal graph-construction code.
+
+Extended conversations after task completion and durable recovery after process
+loss remain follow-up improvements. Same-session continuation for wind-down,
+reconnecting a viewer to a live session, and a later workflow stage consuming
+committed handoff files serve different needs.
 
 Primary use cases are the preview priority. A one-hour budget per step and
-restarting rare interrupted work from a fresh session are acceptable. Retained
-multi-prompt sessions are an important improvement, not an additional gate for
-the initial unattended-work/passive-observation path. ask_user, steering, safe
-cancellation, post-completion sessions, and durable checkpoint recovery remain
-separate work. Normal finalization revokes Hub tokens; existing short-lived
-tokens bound rare abrupt loss.
+restarting rare interrupted work from a fresh session are acceptable. These
+trade-offs do not defer existing interaction or execution-control behavior.
+Normal finalization revokes Hub tokens; existing short-lived tokens bound rare
+abrupt loss.
 
 ## Consequences and boundaries
 
@@ -181,8 +212,8 @@ qualify either production design.
 
 The common workload contract must avoid a separate Lightspeed-only mechanism
 for publishing core results. Each backend may require additional integration;
-none of the three paths is qualified merely by naming it as a portability goal,
-and qualifying all three is not a requirement for 8.4.
+none of the three paths is qualified merely by naming it as a portability goal.
+Each alternative backend requires qualification before adoption.
 
 This ADR supersedes only ADRs 0004/0016's deferred assumption that OpenShell is
 the predetermined execution destination and that adopting it automatically
@@ -214,7 +245,9 @@ operator probe. Full historical reports and operational records remain local. Th
 - Checkpoint-assisted continuation and fresh-process committed handoff each
   passed three bounded samples; first-party ACP multi-prompt behavior was
   measured separately. The live passive adapter accepts one owner prompt.
-  These do not establish a production continuation interface or reliability.
+  The experimental harness rejects approval, `askUser`, and `maxCost`, and the
+  passive adapter rejects steering and cancellation. These are prototype
+  limitations, not demonstrated production compatibility.
 - The ACP prototype kept model-boundary inspection but bypassed the provider's
   delayed approved-result display. Inspection/display behavior, typed failure
   propagation, accounting, and cancellation need further design and validation.
@@ -226,8 +259,10 @@ operator probe. Full historical reports and operational records remain local. Th
 Review and merge this decision internally in `konveyor/agentic-controller`.
 Then validate existing use-case coverage while integrating the existing runtime
 with our harness, including inspection at both model and client-display
-boundaries. Collaborate with Lightspeed on retained-session support as separate
-runtime work and on workload-image/entrypoint selection for optional operator
+boundaries. Extend the prototype with focused runtime changes to demonstrate
+existing interaction, session continuation, and execution-control behavior;
+contribute reusable changes upstream, including needed usage/cost reporting.
+Collaborate on workload-image/entrypoint selection for optional operator
 adoption. Resolve execution placement, provider configuration and credential
 delivery, Hub/ACP access, completion/shutdown behavior, and shared platform
 controls before qualifying that backend. Migrate and deprecate our APIs as
