@@ -140,7 +140,7 @@ var _ = Describe("Gateway Controller", func() {
 			)
 		} else {
 			job.Status.Conditions = append(job.Status.Conditions,
-				batchv1.JobCondition{Type: "FailureTarget", Status: corev1.ConditionTrue},
+				batchv1.JobCondition{Type: jobConditionFailureTarget, Status: corev1.ConditionTrue},
 				batchv1.JobCondition{Type: batchv1.JobFailed, Status: corev1.ConditionTrue},
 			)
 		}
@@ -392,7 +392,7 @@ var _ = Describe("Gateway Controller", func() {
 			now := metav1.Now()
 			job.Status.StartTime = &now
 			job.Status.Conditions = append(job.Status.Conditions,
-				batchv1.JobCondition{Type: "FailureTarget", Status: corev1.ConditionTrue},
+				batchv1.JobCondition{Type: jobConditionFailureTarget, Status: corev1.ConditionTrue},
 				batchv1.JobCondition{Type: batchv1.JobFailed, Status: corev1.ConditionTrue},
 			)
 			Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
@@ -585,18 +585,19 @@ var _ = Describe("Gateway Controller", func() {
 		})
 	})
 
-	// A native aws-bedrock / gcp-vertex-ai Gateway has no OpenAI-compatible
-	// /v1/models, so the probe can only ever fail and park it at
+	// A native gcp-vertex-ai Gateway has no OpenAI-compatible /v1/models, and
+	// reaching it needs an OAuth2 token minted from a service account that
+	// nothing in the Job can mint. A probe could only ever fail and park it at
 	// ConnectionFailed forever, holding every referencing Agent at
 	// DependenciesNotReady. It is settled without a probe instead.
-	Context("when the provider has no OpenAI-compatible surface", func() {
+	Context("when the provider has no probe the controller can speak", func() {
 		const (
-			name       = "llm-ctrl-bedrock"
-			secretName = "llm-secret-bedrock"
+			name       = "llm-ctrl-vertex"
+			secretName = "llm-secret-vertex"
 		)
 
 		It("should set Ready=True with VerificationSkipped and create no Job", func() {
-			secret, gateway := newBedrockGatewayFixture(name, secretName)
+			secret, gateway := newVertexGatewayFixture(name, secretName)
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
 
@@ -610,7 +611,7 @@ var _ = Describe("Gateway Controller", func() {
 				g.Expect(readyCond).NotTo(BeNil())
 				g.Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(readyCond.Reason).To(Equal(reasonVerificationSkipped))
-				g.Expect(readyCond.Message).To(ContainSubstring("aws-bedrock"))
+				g.Expect(readyCond.Message).To(ContainSubstring(testProviderVertex))
 				// Ready, but honest: nothing was actually checked.
 				g.Expect(fetched.Status.ConnectionVerified).To(BeFalse())
 			}, timeout, interval).Should(Succeed())
@@ -639,10 +640,10 @@ var _ = Describe("Gateway Controller", func() {
 		// at DependenciesNotReady until someone edits the spec (#227).
 		It("should replace a stale ConnectionFailed verdict left by an older controller", func() {
 			const (
-				staleName       = "llm-ctrl-bedrock-stale"
-				staleSecretName = "llm-secret-bedrock-stale"
+				staleName       = "llm-ctrl-vertex-stale"
+				staleSecretName = "llm-secret-vertex-stale"
 			)
-			secret, gateway := newBedrockGatewayFixture(staleName, staleSecretName)
+			secret, gateway := newVertexGatewayFixture(staleName, staleSecretName)
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
 
@@ -668,7 +669,7 @@ var _ = Describe("Gateway Controller", func() {
 					Status:             metav1.ConditionFalse,
 					ObservedGeneration: fetched.Generation,
 					Reason:             reasonConnectionFailed,
-					Message:            "Endpoint https://bedrock-runtime.us-east-1.amazonaws.com/v1/models returned HTTP 404",
+					Message:            "Endpoint https://aiplatform.googleapis.com/v1/models returned HTTP 404",
 				})
 				g.Expect(k8sClient.Status().Update(ctx, &fetched)).To(Succeed())
 			}, timeout, interval).Should(Succeed())
@@ -688,12 +689,216 @@ var _ = Describe("Gateway Controller", func() {
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
 		})
 	})
+
+	// A native aws-bedrock Gateway gets a SigV4 ConverseStream probe (#304),
+	// so bad credentials are caught here rather than mid-run as a bare
+	// "Authentication required".
+	Context("when the provider is aws-bedrock", func() {
+		It("should probe with a signed ConverseStream and mount the whole credential Secret", func() {
+			const (
+				name       = "llm-ctrl-bedrock"
+				secretName = "llm-secret-bedrock"
+			)
+			secret, gateway := newBedrockGatewayFixture(name, secretName)
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
+
+			By("verifying the Job signs for bedrock-runtime with the Secret's own keys")
+			job := awaitVerificationJob(name)
+			container := job.Spec.Template.Spec.Containers[0]
+			Expect(container.Command).To(HaveLen(3))
+			Expect(container.Command[2]).To(ContainSubstring("--aws-sigv4"))
+			Expect(container.Command[2]).To(ContainSubstring("converse-stream"))
+			// The credential arrives whole via envFrom, and the model id as
+			// an env var - nothing is interpolated into the command string.
+			Expect(container.EnvFrom).To(HaveLen(1))
+			Expect(container.EnvFrom[0].SecretRef.Name).To(Equal(secretName))
+			Expect(container.Env).To(ContainElement(corev1.EnvVar{
+				Name: "LLM_MODEL", Value: testLLMModelName,
+			}))
+			for _, e := range container.Env {
+				Expect(e.Value).NotTo(ContainSubstring("AKIAEXAMPLE"))
+			}
+
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+		})
+
+		// The failure from #304: the credential was valid but an SCP denied
+		// bedrock:InvokeModel*, and nothing in the chain said so. AWS's own
+		// sentence has to reach the Gateway status.
+		It("should surface an IAM/SCP denial as AuthenticationFailed naming the operation", func() {
+			const (
+				name       = "llm-ctrl-bedrock-denied"
+				secretName = "llm-secret-bedrock-denied"
+			)
+			secret, gateway := newBedrockGatewayFixture(name, secretName)
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
+
+			job := awaitVerificationJob(name)
+			failVerificationJob(job, `auth code=403 detail={"message":"User: `+
+				`arn:aws:iam::123456789012:user/agentic is not authorized to perform: `+
+				`bedrock:InvokeModelWithResponseStream on the inference profile `+
+				`us.anthropic.claude-sonnet-4-5-20250929-v1:0"}`)
+
+			By("verifying the Gateway says what AWS said")
+			gwKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.ConnectionVerified).To(BeFalse())
+
+				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
+				g.Expect(readyCond).NotTo(BeNil())
+				g.Expect(readyCond.Reason).To(Equal(reasonAuthenticationFailed))
+				g.Expect(readyCond.Message).To(ContainSubstring("bedrock:InvokeModelWithResponseStream"))
+				g.Expect(readyCond.Message).To(ContainSubstring("arn:aws:iam::123456789012:user/agentic"))
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+		})
+
+		// The probe needs the static SigV4 keys to sign. A Secret without
+		// them is a setup the probe cannot reproduce (IRSA, or just a missing
+		// AWS_REGION), which must stay a skip rather than become a failure.
+		It("should skip, not fail, when the Secret lacks the keys the probe signs with", func() {
+			const (
+				name       = "llm-ctrl-bedrock-noregion"
+				secretName = "llm-secret-bedrock-noregion"
+			)
+			secret, gateway := newBedrockGatewayFixture(name, secretName)
+			delete(secret.StringData, awsRegion)
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
+
+			gwKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
+				g.Expect(readyCond).NotTo(BeNil())
+				g.Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(readyCond.Reason).To(Equal(reasonVerificationSkipped))
+				g.Expect(readyCond.Message).To(ContainSubstring(awsRegion))
+				g.Expect(fetched.Status.ConnectionVerified).To(BeFalse())
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+		})
+
+		// Every native Bedrock Gateway on a controller from before this
+		// change is settled at VerificationSkipped for its current generation
+		// and credential. That reason is terminal, so without an explicit
+		// exception the upgrade would never probe any of them.
+		It("should re-probe a Gateway an older controller settled as VerificationSkipped", func() {
+			const (
+				name       = "llm-ctrl-bedrock-upgrade"
+				secretName = "llm-secret-bedrock-upgrade"
+			)
+			secret, gateway := newBedrockGatewayFixture(name, secretName)
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
+
+			By("letting it reach a settled verdict, then overwriting it with the old one")
+			job := awaitVerificationJob(name)
+			failVerificationJob(job, "auth code=403")
+
+			gwKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+				g.Expect(meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady).Reason).
+					To(Equal(reasonAuthenticationFailed))
+			}, timeout, interval).Should(Succeed())
+
+			// Same generation, same verifiedCredentialHash, terminal reason:
+			// exactly the shape the settled early return keys on.
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+				meta.SetStatusCondition(&fetched.Status.Conditions, metav1.Condition{
+					Type:               ConditionTypeReady,
+					Status:             metav1.ConditionTrue,
+					ObservedGeneration: fetched.Generation,
+					Reason:             reasonVerificationSkipped,
+					Message:            "Provider \"aws-bedrock\" has no OpenAI-compatible /v1/models to probe",
+				})
+				g.Expect(k8sClient.Status().Update(ctx, &fetched)).To(Succeed())
+			}, timeout, interval).Should(Succeed())
+
+			By("verifying the controller probes it instead of carrying the skip forward")
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+				g.Expect(meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady).Reason).
+					NotTo(Equal(reasonVerificationSkipped))
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+		})
+	})
 })
+
+// failVerificationJob simulates the probe pod terminating with a diagnostic
+// and its Job failing. envtest has no kubelet, so the pod and its terminated
+// container status have to be created by the test.
+func failVerificationJob(job batchv1.Job, diag string) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      job.Name + "-pod",
+			Namespace: testNamespace,
+			Labels: map[string]string{
+				batchv1.JobNameLabel:       job.Name,
+				batchv1.ControllerUidLabel: string(job.UID),
+			},
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers:    []corev1.Container{{Name: verifyContainerName, Image: "busybox"}},
+		},
+	}
+	ExpectWithOffset(1, k8sClient.Create(ctx, pod)).To(Succeed())
+	ExpectWithOffset(1, k8sClient.Get(ctx, client.ObjectKeyFromObject(pod), pod)).To(Succeed())
+	pod.Status.Phase = corev1.PodFailed
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		Name:  verifyContainerName,
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: diag}},
+	}}
+	ExpectWithOffset(1, k8sClient.Status().Update(ctx, pod)).To(Succeed())
+
+	ExpectWithOffset(1, k8sClient.Get(ctx, client.ObjectKeyFromObject(&job), &job)).To(Succeed())
+	now := metav1.Now()
+	job.Status.StartTime = &now
+	job.Status.Conditions = append(job.Status.Conditions,
+		batchv1.JobCondition{Type: jobConditionFailureTarget, Status: corev1.ConditionTrue},
+		batchv1.JobCondition{Type: batchv1.JobFailed, Status: corev1.ConditionTrue},
+	)
+	ExpectWithOffset(1, k8sClient.Status().Update(ctx, &job)).To(Succeed())
+}
+
+// newVertexGatewayFixture returns a native gcp-vertex-ai Gateway and the
+// Secret it points at, unsaved. Its credential is an ADC service account, so
+// the credentialRef is keyless and no probe the controller can run would say
+// anything true about it. The provider is hyphenated, as users write it: the
+// skip decision must go through normalizeProvider.
+func newVertexGatewayFixture(name, secretName string) (*corev1.Secret, *konveyoriov1alpha1.Gateway) {
+	secret, gateway := newBedrockGatewayFixture(name, secretName)
+	secret.StringData = map[string]string{
+		"GOOGLE_APPLICATION_CREDENTIALS_JSON": `{"type":"service_account"}`,
+	}
+	gateway.Spec.Provider = testProviderVertex
+	gateway.Spec.Endpoint = "https://aiplatform.googleapis.com"
+	return secret, gateway
+}
 
 // newBedrockGatewayFixture returns a native aws-bedrock Gateway and the
 // Secret it points at, unsaved. SigV4 spans three variables, so the
 // credentialRef is keyless and the whole Secret is the credential. The
-// provider is hyphenated, as users write it: the skip decision must go
+// provider is hyphenated, as users write it: the probe decision must go
 // through normalizeProvider.
 func newBedrockGatewayFixture(name, secretName string) (*corev1.Secret, *konveyoriov1alpha1.Gateway) {
 	secret := &corev1.Secret{

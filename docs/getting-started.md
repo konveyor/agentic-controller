@@ -650,6 +650,33 @@ kubectl patch gateway.konveyor.io <name> -n "$KONVEYOR_NS" --subresource=status 
   -p '{"status":{"connectionVerified":true,"conditions":[{"type":"Ready","status":"True","reason":"ConnectionVerified","message":"Manually verified; /v1/models probe is invalid for this provider","lastTransitionTime":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"}]}}'
 ```
 
+**`aws-bedrock` Gateway shows `Ready=False/AuthenticationFailed`**
+
+From [#304](https://github.com/konveyor/agentic-controller/issues/304) on,
+`aws-bedrock` is no longer skipped: the probe makes a SigV4-signed
+`ConverseStream` call to the configured model, capped at one output token,
+using the Secret's `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and
+`AWS_REGION`. The Ready condition's message carries the error AWS returned,
+so read it first — a 403 is either a credential the account rejects or an
+IAM policy / SCP denying `bedrock:InvokeModelWithResponseStream`, and AWS
+names which in the message:
+
+```bash
+kubectl get gateway.konveyor.io <name> -n "$KONVEYOR_NS" \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}{"\n"}'
+```
+
+A Bedrock Gateway still shows `VerificationSkipped` when the probe cannot
+run at all: when the Secret does not carry all three keys above (an IRSA or
+other SDK credential source is a working setup the probe cannot reproduce —
+the message names what is missing), or when `spec.endpoint` is not an AWS
+`bedrock-runtime` host, since the probe will not sign an AWS credential for
+anything else. A credential fixed outside the cluster does not re-trigger
+verification on its own; editing the Secret does, because the Gateway is
+re-verified when its credential changes
+([#246](https://github.com/konveyor/agentic-controller/issues/246) tracks
+the general case).
+
 **Hub returns `401` after enabling authentication**
 
 Every caller now needs credentials — see [Authentication](#authentication).
