@@ -1,0 +1,12 @@
+kind: feature
+description: >
+  Verify aws-bedrock Gateways instead of skipping them. The verification Job
+  now picks a probe per provider: the OpenAI-compatible /v1/models GET as
+  before, or a SigV4-signed ConverseStream against the configured model,
+  capped at one output token, for aws-bedrock. A credential an IAM policy or
+  SCP denies bedrock:InvokeModelWithResponseStream now fails verification with
+  AWS's own error text on the Gateway status, naming the operation it refused,
+  instead of reaching the user mid-run as "Authentication required".
+  gcp-vertex-ai still skips verification, as does a Bedrock Gateway whose
+  Secret lacks the static SigV4 keys or whose endpoint is not an AWS
+  bedrock-runtime host.
