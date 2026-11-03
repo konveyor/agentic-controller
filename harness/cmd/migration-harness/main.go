@@ -205,7 +205,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	restoreGitProxy := git.ConfigureProxy(proxyPolicy.GitProxy)
 	defer restoreGitProxy()
 
-	if err := prepareMavenSettings(hubClient, cfg.AppID, red, proxyPolicy.MavenProxies()...); err != nil {
+	if err := prepareMavenSettings(hubClient, cfg.AppID, red, proxyPolicy.HubProxies()...); err != nil {
 		return 1, fmt.Errorf("Maven settings: %w", err)
 	}
 

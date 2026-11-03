@@ -192,9 +192,13 @@ Inherited exclusions form one shared bypass list from all enabled Hub proxies.
 They support case-insensitive hostnames, IP addresses and `*` wildcards;
 surrounding whitespace is trimmed. A bare domain matches itself and its
 subdomains; a leading-dot domain matches only subdomains. Matches bypass all
-inherited proxies for both tools, including Maven's HTTP fallback. CIDRs, URLs and port-specific
-exclusions in Hub configuration fail startup with an error naming the opt-out.
-Explicit Git `NO_PROXY` retains its native syntax independently.
+inherited proxies for both tools, including Maven's HTTP fallback. Git also supports
+inherited CIDRs and port-specific exclusions. Maven cannot represent those forms;
+they stop setup only when the harness needs to generate Maven proxy settings.
+Existing user settings, Secret mounts, and an explicit Hub Maven `<proxies>` section
+remain authoritative and bypass Maven exclusion validation. URLs and malformed
+exclusions still fail shared validation. Errors name the inheritance opt-out;
+unsupported exclusions are never silently dropped.
 
 Maven interpolates credential values containing `${` before authentication.
 Automatic proxy settings reject those identities with a sanitized setup error

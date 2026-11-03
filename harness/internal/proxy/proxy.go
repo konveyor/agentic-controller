@@ -67,12 +67,10 @@ func New(configs []Config, lookup func(string) (string, bool)) (*Policy, error) 
 			if h == "" {
 				continue
 			}
-			if strings.ContainsAny(h, "/@?#| \\[]\t\r\n") || strings.Contains(h, ":") {
-				// IPv6 literals are valid hosts; CIDRs, URLs and ports are not.
-				if net.ParseIP(strings.Trim(h, "[]")) == nil {
-					return nil, fmt.Errorf("unsupported Hub proxy exclusion: use a hostname, IP address, or * wildcard")
-				}
-				h = strings.Trim(h, "[]")
+			var err error
+			h, err = normalizeHubExclusion(h)
+			if err != nil {
+				return nil, err
 			}
 			if !slices.Contains(p.excluded, h) {
 				p.excluded = append(p.excluded, h)
@@ -106,7 +104,7 @@ func New(configs []Config, lookup func(string) (string, bool)) (*Policy, error) 
 		}
 	}
 	p.gitProxy = make(map[string]func(*url.URL) (*url.URL, error))
-	var hubExclusions []func(string) bool
+	var hubExclusions []func(*url.URL) bool
 	for _, pattern := range p.excluded {
 		hubExclusions = append(hubExclusions, compileHubExclusion(pattern))
 	}
@@ -125,9 +123,8 @@ func New(configs []Config, lookup func(string) (string, bool)) (*Policy, error) 
 			continue
 		}
 		p.gitProxy[scheme] = func(target *url.URL) (*url.URL, error) {
-			host := strings.ToLower(target.Hostname())
 			for _, matches := range hubExclusions {
-				if matches(host) {
+				if matches(target) {
 					return nil, nil
 				}
 			}
@@ -155,28 +152,12 @@ func (p *Policy) addSecrets(u *url.URL) {
 
 func (p *Policy) Secrets() []string { return slices.Clone(p.secrets) }
 
-// MavenProxies uses one bypass list for all inherited proxies. This matches
-// Hub's UI and prevents Maven's HTTP fallback bypassing an HTTPS exclusion.
-func (p *Policy) MavenProxies() []Config {
+// HubProxies returns inherited proxies with their shared bypass list. Maven
+// validates and translates exclusions only when it generates proxy settings.
+func (p *Policy) HubProxies() []Config {
 	configs := slices.Clone(p.configs)
 	for i := range configs {
-		configs[i].Excluded = nil
-		for _, h := range p.excluded {
-			switch {
-			case net.ParseIP(h) != nil:
-				configs[i].Excluded = append(configs[i].Excluded, h)
-				// Java URL hosts can retain IPv6 brackets.
-				if strings.Contains(h, ":") {
-					configs[i].Excluded = append(configs[i].Excluded, "["+h+"]")
-				}
-			case strings.HasPrefix(h, "."):
-				configs[i].Excluded = append(configs[i].Excluded, "*"+h)
-			case !strings.Contains(h, "*"):
-				configs[i].Excluded = append(configs[i].Excluded, h, "*."+h)
-			default:
-				configs[i].Excluded = append(configs[i].Excluded, h)
-			}
-		}
+		configs[i].Excluded = slices.Clone(p.excluded)
 	}
 	return configs
 }
@@ -196,17 +177,57 @@ func (p *Policy) GitProxy(r *http.Request) (*url.URL, error) {
 	return selectProxy(r.URL)
 }
 
-func compileHubExclusion(pattern string) func(string) bool {
-	if strings.Contains(pattern, "*") {
-		// Only '*' is a wildcard; validation rejects other glob operators.
-		expression := "^" + strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, ".*") + "$"
-		return regexp.MustCompile(expression).MatchString
+func normalizeHubExclusion(pattern string) (string, error) {
+	if ip := net.ParseIP(strings.Trim(pattern, "[]")); ip != nil {
+		return ip.String(), nil
 	}
-	if net.ParseIP(pattern) != nil {
-		return func(host string) bool { return host == pattern }
+	if _, _, err := net.ParseCIDR(pattern); err == nil {
+		return pattern, nil
 	}
-	if strings.HasPrefix(pattern, ".") {
-		return func(host string) bool { return strings.HasSuffix(host, pattern) }
+	host := pattern
+	if strings.Contains(pattern, ":") {
+		var port string
+		var err error
+		host, port, err = net.SplitHostPort(pattern)
+		n, portErr := strconv.Atoi(port)
+		if err != nil || portErr != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("unsupported Hub proxy exclusion: use a hostname, IP address, CIDR, host:port, or * wildcard")
+		}
+		if net.ParseIP(host) != nil {
+			return pattern, nil
+		}
 	}
-	return func(host string) bool { return host == pattern || strings.HasSuffix(host, "."+pattern) }
+	if host == "" || strings.ContainsAny(host, "/@?#|, \\[]\t\r\n") {
+		return "", fmt.Errorf("unsupported Hub proxy exclusion: use a hostname, IP address, CIDR, host:port, or * wildcard")
+	}
+	return pattern, nil
+}
+
+func compileHubExclusion(pattern string) func(*url.URL) bool {
+	if !strings.Contains(pattern, "*") {
+		// Native matching covers domains, IPs, CIDRs and optional ports.
+		selectProxy := (&httpproxy.Config{HTTPProxy: "http://proxy", HTTPSProxy: "http://proxy", NoProxy: pattern}).ProxyFunc()
+		return func(target *url.URL) bool {
+			u, _ := selectProxy(target)
+			return u == nil
+		}
+	}
+	host, port, err := net.SplitHostPort(pattern)
+	if err != nil {
+		host, port = pattern, ""
+	}
+	// Hub supports '*' anywhere in a hostname, beyond native NO_PROXY syntax.
+	expression := "^" + strings.ReplaceAll(regexp.QuoteMeta(host), `\*`, ".*") + "$"
+	matches := regexp.MustCompile(expression).MatchString
+	return func(target *url.URL) bool {
+		targetPort := target.Port()
+		if targetPort == "" {
+			if target.Scheme == "https" {
+				targetPort = "443"
+			} else {
+				targetPort = "80"
+			}
+		}
+		return (port == "" || port == targetPort) && matches(strings.ToLower(target.Hostname()))
+	}
 }

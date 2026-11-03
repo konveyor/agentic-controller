@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 
 	"github.com/konveyor/migration-harness/internal/proxy"
@@ -87,10 +88,14 @@ func withMavenProxies(settings string, configs []proxy.Config) (string, error) {
 		if port == 0 {
 			port = 80
 		}
+		nonProxyHosts, err := mavenNonProxyHosts(c.Excluded)
+		if err != nil {
+			return "", err
+		}
 		section.Proxies = append(section.Proxies, mavenProxy{
 			ID: "konveyor-hub-" + c.Kind, Active: true, Protocol: c.Kind,
 			Host: c.Host, Port: port, Username: c.Username, Password: c.Password,
-			NonProxyHosts: strings.Join(c.Excluded, "|"),
+			NonProxyHosts: nonProxyHosts,
 		})
 	}
 	data, err := xml.Marshal(section)
@@ -101,4 +106,36 @@ func withMavenProxies(settings string, configs []proxy.Config) (string, error) {
 		return settings[:rootEnd-2] + ">" + string(data) + "</" + rootName + ">" + settings[rootEnd:], nil
 	}
 	return settings[:rootClose] + string(data) + settings[rootClose:], nil
+}
+
+// Maven has no CIDR or port-specific bypass syntax. Validate only after all
+// supplied settings overrides have won, rather than blocking Git configuration.
+func mavenNonProxyHosts(excluded []string) (string, error) {
+	var hosts []string
+	for _, raw := range excluded {
+		h := strings.ToLower(strings.TrimSpace(raw))
+		if h == "" {
+			continue
+		}
+		if ip := net.ParseIP(strings.Trim(h, "[]")); ip != nil {
+			h = ip.String()
+			hosts = append(hosts, h)
+			if strings.Contains(h, ":") {
+				hosts = append(hosts, "["+h+"]")
+			}
+			continue
+		}
+		if strings.ContainsAny(h, "/:@?#| \\[]\t\r\n") {
+			return "", errors.New("Hub proxy exclusions cannot be represented in Maven settings; supply explicit Maven proxy settings or set HARNESS_HUB_PROXY=off")
+		}
+		switch {
+		case strings.HasPrefix(h, "."):
+			hosts = append(hosts, "*"+h)
+		case !strings.Contains(h, "*"):
+			hosts = append(hosts, h, "*."+h)
+		default:
+			hosts = append(hosts, h)
+		}
+	}
+	return strings.Join(hosts, "|"), nil
 }
