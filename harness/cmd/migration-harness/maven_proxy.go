@@ -78,6 +78,11 @@ func withMavenProxies(settings string, configs []proxy.Config) (string, error) {
 		Proxies []mavenProxy `xml:"proxy"`
 	}{XMLName: xml.Name{Space: root.Name.Space, Local: "proxies"}}
 	for _, c := range configs {
+		// Maven interpolates settings before applying proxy authentication and
+		// provides no literal escape here. Never silently change a Hub secret.
+		if strings.Contains(c.Username, "${") || strings.Contains(c.Password, "${") {
+			return "", errors.New("Hub proxy credentials contain Maven interpolation syntax; supply explicit Maven proxy settings with encrypted credentials or set HARNESS_HUB_PROXY=off")
+		}
 		port := c.Port
 		if port == 0 {
 			port = 80

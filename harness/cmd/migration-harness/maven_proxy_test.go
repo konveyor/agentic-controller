@@ -101,3 +101,24 @@ func TestPrepareMavenSettingsWithProxies(t *testing.T) {
 		})
 	}
 }
+
+func TestMavenProxyRejectsInterpolationCredentials(t *testing.T) {
+	for _, config := range []proxy.Config{
+		{Kind: "http", Host: "proxy", Password: "private-${env.HOME}"},
+		{Kind: "https", Host: "proxy", Password: "private-${user.home}"},
+		{Kind: "https", Host: "proxy", Username: "private-${env.USER}"},
+	} {
+		_, err := withMavenProxies("<settings/>", []proxy.Config{config})
+		if err == nil || !strings.Contains(err.Error(), "HARNESS_HUB_PROXY=off") {
+			t.Errorf("expected actionable rejection of credentials Maven would interpolate, got %v", err)
+		}
+		if err != nil && strings.Contains(err.Error(), "private-") {
+			t.Error("error revealed credential content")
+		}
+		const explicit = "<settings><proxies/></settings>"
+		settings, err := withMavenProxies(explicit, []proxy.Config{config})
+		if err != nil || settings != explicit {
+			t.Error("explicit Maven proxy settings must remain authoritative")
+		}
+	}
+}

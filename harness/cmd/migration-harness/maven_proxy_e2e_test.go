@@ -62,10 +62,17 @@ func TestMavenProxyBuild(t *testing.T) {
 		artifact + ".jar": archive.Bytes(),
 		artifact + ".pom": []byte(`<project><modelVersion>4.0.0</modelVersion><groupId>org.konveyor</groupId><artifactId>proxy-fixture</artifactId><version>1.0</version></project>`),
 	}
-	for _, mode := range []string{"authenticated proxy-only repository", "excluded direct repository", "HTTPS exclusion blocks HTTP fallback"} {
+	for _, mode := range []string{"authenticated proxy-only repository", "literal brace password", "literal expression password", "excluded direct repository", "bare domain exclusion", "leading-dot domain exclusion", "HTTPS exclusion blocks HTTP fallback"} {
 		t.Run(mode, func(t *testing.T) {
-			excluded := mode != "authenticated proxy-only repository"
+			domain := strings.Contains(mode, "domain exclusion")
+			excluded := mode == "excluded direct repository" || mode == "HTTPS exclusion blocks HTTP fallback" || domain
 			https := mode == "HTTPS exclusion blocks HTTP fallback"
+			password := "proxy-password"
+			if mode == "literal brace password" {
+				password = "{s3cret}"
+			} else if mode == "literal expression password" {
+				password = "password-${env.HOME}"
+			}
 			var proxyCalls, artifactCalls atomic.Int32
 			repository := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
@@ -99,7 +106,7 @@ func TestMavenProxyBuild(t *testing.T) {
 			defer direct.Close()
 			forward := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				proxyCalls.Add(1)
-				if r.Header.Get("Proxy-Authorization") != "Basic "+base64.StdEncoding.EncodeToString([]byte("proxy-user:proxy-password")) {
+				if r.Header.Get("Proxy-Authorization") != "Basic "+base64.StdEncoding.EncodeToString([]byte("proxy-user:"+password)) {
 					w.Header().Set("Proxy-Authenticate", `Basic realm="fixture"`)
 					w.WriteHeader(http.StatusProxyAuthRequired)
 					return
@@ -110,6 +117,9 @@ func TestMavenProxyBuild(t *testing.T) {
 			repoURL := "http://maven.proxy-only.invalid"
 			if excluded {
 				repoURL = direct.URL
+			}
+			if domain {
+				repoURL = fmt.Sprintf("http://git.corp.example:%d", direct.Listener.Addr().(*net.TCPAddr).Port)
 			}
 			settings := fmt.Sprintf(`<settings><mirrors><mirror><id>fixture</id><mirrorOf>*</mirrorOf><url>%s</url></mirror></mirrors></settings>`, repoURL)
 			clientServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +132,19 @@ func TestMavenProxyBuild(t *testing.T) {
 			for _, key := range []string{"MAVEN_ARGS", "MAVEN_CONFIG", "MAVEN_OPTS", "JAVA_TOOL_OPTIONS"} {
 				t.Setenv(key, "")
 			}
-			configs := []proxy.Config{{Kind: "http", Host: "127.0.0.1", Port: forward.Listener.Addr().(*net.TCPAddr).Port, Username: "proxy-user", Password: "proxy-password", Excluded: []string{"127.0.0.1"}}}
+			configs := []proxy.Config{{Kind: "http", Host: "127.0.0.1", Port: forward.Listener.Addr().(*net.TCPAddr).Port, Username: "proxy-user", Password: password, Excluded: []string{"127.0.0.1"}}}
+			if domain {
+				exclusion := "corp.example"
+				if mode == "leading-dot domain exclusion" {
+					exclusion = "." + exclusion
+				}
+				configs[0].Excluded = []string{exclusion}
+				hosts := filepath.Join(work, "hosts")
+				if err := os.WriteFile(hosts, []byte("127.0.0.1 git.corp.example\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("MAVEN_OPTS", "-Djdk.net.hosts.file="+hosts)
+			}
 			if https {
 				// Hub's API can supply unequal per-scheme lists even though
 				// its UI shares one. A shared bypass prevents HTTP fallback.
@@ -143,7 +165,17 @@ func TestMavenProxyBuild(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := prepareMavenSettings(hub.NewClient(clientServer.URL, "test-token"), "42", newRedactor(), policy.MavenProxies()...); err != nil {
+			err = prepareMavenSettings(hub.NewClient(clientServer.URL, "test-token"), "42", newRedactor(), policy.MavenProxies()...)
+			if mode == "literal expression password" {
+				if err == nil || !strings.Contains(err.Error(), "HARNESS_HUB_PROXY=off") {
+					t.Fatalf("expected actionable startup rejection instead of Maven silently changing the password: %v", err)
+				}
+				if _, err := os.Stat(filepath.Join(work, "home/.m2/settings.xml")); !os.IsNotExist(err) {
+					t.Error("unsupported password produced a settings file")
+				}
+				return
+			}
+			if err != nil {
 				t.Fatal(err)
 			}
 			pom := `<project><modelVersion>4.0.0</modelVersion><groupId>org.konveyor</groupId><artifactId>proxy-build</artifactId><version>1.0</version><properties><maven.compiler.release>17</maven.compiler.release></properties><dependencies><dependency><groupId>org.konveyor</groupId><artifactId>proxy-fixture</artifactId><version>1.0</version></dependency></dependencies><build><plugins><plugin><artifactId>maven-resources-plugin</artifactId><version>3.3.1</version></plugin><plugin><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version></plugin></plugins></build></project>`
