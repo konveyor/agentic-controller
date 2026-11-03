@@ -1,0 +1,6 @@
+kind: bugfix
+description: >
+  Publish the skill bundle image (quay.io/konveyor/skills) for linux/arm64 as
+  well as linux/amd64, so the shipped plan, execute and verify SkillCards pull
+  on arm64 clusters instead of failing the skill-loader init container with
+  ImagePullBackOff.
