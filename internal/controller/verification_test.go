@@ -42,6 +42,7 @@ func TestSetRunVerified(t *testing.T) {
 		"verification": {
 			"status": "failed",
 			"reason": "Build failed: npm run tsc -w client",
+			"commit": "4f2a1c9e7b3041d8a6c25e90b17f3ac4d8e6b215",
 			"commands": [
 				{"label":"Build","command":"npm run tsc -w client","status":"failed","exitCode":2,"seconds":41.2,"output":"45 errors"},
 				{"label":"Test","command":"npm run test -w client","status":"passed","exitCode":0,"seconds":93.8}
@@ -60,10 +61,10 @@ func TestSetRunVerified(t *testing.T) {
 	}{
 		{
 			name:          "measured pass",
-			td:            blob(`{"verification":{"status":"passed","commands":[{"label":"Build","status":"passed","exitCode":0}]}}`),
+			td:            blob(`{"verification":{"status":"passed","commit":"4f2a1c9e7b3041d8a6c25e90b17f3ac4d8e6b215","commands":[{"label":"Build","status":"passed","exitCode":0}]}}`),
 			wantStatus:    metav1.ConditionTrue,
 			wantReason:    konveyoriov1alpha1.AgentRunReasonVerificationPassed,
-			wantInMessage: "exited 0",
+			wantInMessage: "exited 0 on commit 4f2a1c9e7b30",
 		},
 		{
 			name:          "measured failure carries the harness reason",
@@ -71,6 +72,29 @@ func TestSetRunVerified(t *testing.T) {
 			wantStatus:    metav1.ConditionFalse,
 			wantReason:    konveyoriov1alpha1.AgentRunReasonVerificationFailed,
 			wantInMessage: "Build failed: npm run tsc -w client",
+		},
+		{
+			// #308's fourth status: the step cap left part of the plan's
+			// Verification section unrun. Six passing commands and a
+			// seventh nobody ran is not a verified tree.
+			name: "incomplete is a False with its own reason",
+			td: blob(`{"verification":{"status":"incomplete",` +
+				`"reason":"the ## Verification section lists more than 12 commands; the rest were not run",` +
+				`"commit":"4f2a1c9e7b3041d8a6c25e90b17f3ac4d8e6b215"}}`),
+			wantStatus:    metav1.ConditionFalse,
+			wantReason:    konveyoriov1alpha1.AgentRunReasonVerificationIncomplete,
+			wantInMessage: "the rest were not run",
+		},
+		{
+			// The other incomplete path: the harness could not confirm
+			// the working tree was the commit being pushed, so it has no
+			// commit to name and the reason carries both SHAs.
+			name: "incomplete with no commit still reports incomplete",
+			td: blob(`{"verification":{"status":"incomplete",` +
+				`"reason":"the working tree is at 1111111111 but branch x points at 2222222222"}}`),
+			wantStatus:    metav1.ConditionFalse,
+			wantReason:    konveyoriov1alpha1.AgentRunReasonVerificationIncomplete,
+			wantInMessage: "is not verified: the working tree is at",
 		},
 		{
 			name:          "notRun is a False, not a pass and not silence",
@@ -127,7 +151,7 @@ func TestSetRunVerified(t *testing.T) {
 			// A newer harness inventing a status this controller does not
 			// know must degrade to "cannot say", never to a pass.
 			name:          "unrecognised status is Unknown, not True",
-			td:            blob(`{"verification":{"status":"partiallyPassed"}}`),
+			td:            blob(`{"verification":{"status":"partiallyPassed","commit":"4f2a1c9e7b30"}}`),
 			wantStatus:    metav1.ConditionUnknown,
 			wantReason:    konveyoriov1alpha1.AgentRunReasonVerificationNotReported,
 			wantInMessage: `"partiallyPassed"`,
@@ -181,6 +205,12 @@ func TestVerifiedTrueOnlyFromExplicitPass(t *testing.T) {
 		`{"verification":{"status":""}}`,
 		`{"verification":{"status":"failed"}}`,
 		`{"verification":{"status":"notRun"}}`,
+		`{"verification":{"status":"incomplete"}}`,
+		// Partly measured is the case most likely to be mistaken for a
+		// pass: a commit, a reason, and passing commands in the record.
+		`{"verification":{"status":"incomplete","commit":"4f2a1c9e7b3041d8a6c25e90b17f3ac4d8e6b215",` +
+			`"reason":"Test was not measured (run cancelled before this command)",` +
+			`"commands":[{"label":"Build","status":"passed","exitCode":0}]}}`,
 		`{"verification":{"status":"skipped"}}`,
 		`{"verification":{"status":"PASSED"}}`,
 		`{"verification":{"status":"passed "}}`,
@@ -208,6 +238,7 @@ func TestVerifiedMessagePointsAtEvidence(t *testing.T) {
 		`{"verification":{"status":"passed"}}`,
 		`{"verification":{"status":"failed","reason":"Build failed"}}`,
 		`{"verification":{"status":"notRun","reason":"HARNESS_VERIFY=off"}}`,
+		`{"verification":{"status":"incomplete","reason":"the step cap left commands unrun"}}`,
 	} {
 		_, _, message := verificationVerdict(blob(raw))
 		if !strings.Contains(message, "status.terminationData.verification.commands") {
@@ -274,5 +305,134 @@ func TestVerifiedDoesNotChangeOutcome(t *testing.T) {
 		konveyoriov1alpha1.AgentRunConditionVerified)
 	if verified == nil || verified.Status != metav1.ConditionFalse {
 		t.Fatalf("Verified condition = %+v, want False", verified)
+	}
+}
+
+// Every harness status the controller recognises maps to exactly one
+// reason, and the reasons are the closed set api/v1alpha1 documents.
+// #308 added "incomplete" to the harness enum; a status the harness
+// invents after it must still land on the catch-all rather than on a
+// reason a consumer has not been told about.
+func TestVerifiedReasonSetIsTheDocumentedOne(t *testing.T) {
+	want := map[string]struct {
+		status metav1.ConditionStatus
+		reason string
+	}{
+		harnessVerificationPassed: {metav1.ConditionTrue,
+			konveyoriov1alpha1.AgentRunReasonVerificationPassed},
+		harnessVerificationFailed: {metav1.ConditionFalse,
+			konveyoriov1alpha1.AgentRunReasonVerificationFailed},
+		harnessVerificationIncomplete: {metav1.ConditionFalse,
+			konveyoriov1alpha1.AgentRunReasonVerificationIncomplete},
+		harnessVerificationNotRun: {metav1.ConditionFalse,
+			konveyoriov1alpha1.AgentRunReasonVerificationNotRun},
+	}
+	seen := map[string]bool{}
+	for harnessStatus, expected := range want {
+		status, reason, _ := verificationVerdict(
+			blob(`{"verification":{"status":"` + harnessStatus + `"}}`))
+		if status != expected.status || reason != expected.reason {
+			t.Errorf("%q → %s/%s, want %s/%s",
+				harnessStatus, status, reason, expected.status, expected.reason)
+		}
+		if seen[reason] {
+			t.Errorf("reason %s is reused by more than one harness status", reason)
+		}
+		seen[reason] = true
+	}
+	// Anything outside the enum, including a plausible-looking fifth
+	// status, degrades to the one reason that claims nothing.
+	for _, unknown := range []string{"partiallyPassed", "cancelled", "unverifiable", "incompletely"} {
+		status, reason, _ := verificationVerdict(
+			blob(`{"verification":{"status":"` + unknown + `"}}`))
+		if status != metav1.ConditionUnknown ||
+			reason != konveyoriov1alpha1.AgentRunReasonVerificationNotReported {
+			t.Errorf("%q → %s/%s, want Unknown/%s", unknown, status, reason,
+				konveyoriov1alpha1.AgentRunReasonVerificationNotReported)
+		}
+	}
+}
+
+// The verdict is only checkable against a tree, so the commit the
+// harness measured (#308) reaches the condition message, abbreviated.
+// A value that is not a commit is dropped rather than shown as one.
+func TestVerifiedMessageNamesTheVerifiedCommit(t *testing.T) {
+	const (
+		full = "4f2a1c9e7b3041d8a6c25e90b17f3ac4d8e6b215"
+		// names is the message's lead-in for a commit; a verdict that
+		// measured nothing must not carry it at all.
+		names = "on commit"
+	)
+
+	cases := []struct {
+		name string
+		td   *runtime.RawExtension
+		// want is the substring the message must contain; wantNo is one
+		// it must not.
+		want, wantNo string
+	}{
+		{
+			name: "a pass names the commit it verified",
+			td:   blob(`{"verification":{"status":"passed","commit":"` + full + `"}}`),
+			want: names + " 4f2a1c9e7b30",
+		},
+		{
+			name: "a failure names the commit it measured",
+			td: blob(`{"verification":{"status":"failed","commit":"` + full +
+				`","reason":"Build failed"}}`),
+			want: names + " 4f2a1c9e7b30: Build failed",
+		},
+		{
+			name: "an incomplete pass names the commit where it has one",
+			td: blob(`{"verification":{"status":"incomplete","commit":"` + full +
+				`","reason":"the step cap left commands unrun"}}`),
+			want: names + " 4f2a1c9e7b30: the step cap left commands unrun",
+		},
+		{
+			// notRun measures nothing, so there is no commit to name and
+			// the message must not imply one.
+			name:   "notRun names no commit",
+			td:     blob(`{"verification":{"status":"notRun","reason":"HARNESS_VERIFY=off"}}`),
+			want:   "HARNESS_VERIFY=off",
+			wantNo: names,
+		},
+		{
+			// An already-abbreviated SHA, as the harness's own docs show.
+			name: "a short commit is used as given",
+			td:   blob(`{"verification":{"status":"passed","commit":"4f2a1c9e7b30"}}`),
+			want: names + " 4f2a1c9e7b30",
+		},
+		{
+			name:   "a non-commit value is not presented as a commit",
+			td:     blob(`{"verification":{"status":"passed","commit":"refs/heads/main"}}`),
+			wantNo: names,
+		},
+		{
+			name:   "a commit too short to be one is dropped",
+			td:     blob(`{"verification":{"status":"passed","commit":"4f2a"}}`),
+			wantNo: names,
+		},
+		{
+			name: "an absurdly long commit is dropped, not clipped into the message",
+			td: blob(`{"verification":{"status":"passed","commit":"` +
+				strings.Repeat("a", 4096) + `"}}`),
+			wantNo: names,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, message := verificationVerdict(tc.td)
+			if tc.want != "" && !strings.Contains(message, tc.want) {
+				t.Errorf("message = %q, want it to contain %q", message, tc.want)
+			}
+			if tc.wantNo != "" && strings.Contains(message, tc.wantNo) {
+				t.Errorf("message = %q, want it NOT to contain %q", message, tc.wantNo)
+			}
+			if strings.Contains(message, full) {
+				t.Errorf("message = %q carries the full SHA; the message abbreviates "+
+					"and the blob keeps the full value", message)
+			}
+		})
 	}
 }

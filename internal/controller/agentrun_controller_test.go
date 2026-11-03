@@ -1138,6 +1138,7 @@ var _ = Describe("AgentRun Controller", func() {
 			By("simulating an agent pod that exited 0 with a failed verification record")
 			const terminationMsg = `{"exitCode":0,"outcome":"succeeded","handoffStatus":"passed",` +
 				`"verification":{"status":"failed","reason":"Build failed: npm run tsc -w client",` +
+				`"commit":"4f2a1c9e7b3041d8a6c25e90b17f3ac4d8e6b215",` +
 				`"commands":[{"label":"Build","command":"npm run tsc -w client","status":"failed",` +
 				`"exitCode":2,"seconds":41.2,"output":"45 errors"},` +
 				`{"label":"Test","command":"npm run test -w client","status":"passed","exitCode":0}]}}`
@@ -1193,6 +1194,9 @@ var _ = Describe("AgentRun Controller", func() {
 				g.Expect(verified.Status).To(Equal(metav1.ConditionFalse))
 				g.Expect(verified.Reason).To(Equal(konveyoriov1alpha1.AgentRunReasonVerificationFailed))
 				g.Expect(verified.Message).To(ContainSubstring("npm run tsc -w client"))
+				// The verdict names the commit it describes (#308), so a
+				// reader can check it against the branch that was pushed.
+				g.Expect(verified.Message).To(ContainSubstring("on commit 4f2a1c9e7b30"))
 
 				// The evidence survives the round trip through the API
 				// server, uninterpreted, for the console to drill into.

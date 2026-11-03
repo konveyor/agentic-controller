@@ -39,12 +39,25 @@ const (
 	harnessVerificationPassed = "passed"
 	harnessVerificationFailed = "failed"
 	harnessVerificationNotRun = "notRun"
+	// harnessVerificationIncomplete — the harness had something to
+	// measure and could not finish measuring it: the run was cancelled
+	// part way, the step cap left commands unrun, or the working tree
+	// was not the commit being pushed. Added to the harness's enum after
+	// #302 was written; it is a definite non-pass, which is why it maps
+	// to False rather than sharing notRun's "nothing to measure" reason.
+	harnessVerificationIncomplete = "incomplete"
 )
 
 // verificationVerdictMaxRunes bounds how much of the harness's own reason
 // string is copied into the condition message. The harness already bounds
 // it, so this only guards against a malformed blob inflating the status.
 const verificationVerdictMaxRunes = 512
+
+// verificationCommitRunes is how much of the verified commit is shown in
+// the condition message — the same abbreviation the harness uses in its
+// own logs. The full SHA stays in
+// status.terminationData.verification.commit.
+const verificationCommitRunes = 12
 
 // evidencePointer tells a reader where the per-command detail lives. The
 // condition carries the verdict only; the controller does not lift the
@@ -65,6 +78,12 @@ type harnessTermination struct {
 type harnessVerification struct {
 	Status string `json:"status"`
 	Reason string `json:"reason,omitempty"`
+	// Commit is the commit the harness's result describes: the tip of
+	// the branch being pushed, which the working tree was confirmed to
+	// match before any command ran (#300). Empty when nothing was
+	// measured. Read only to name it in the condition message — a
+	// verdict that does not say which tree it checked is not checkable.
+	Commit string `json:"commit,omitempty"`
 }
 
 // setRunVerified derives the AgentRun's Verified condition (#302) from the
@@ -77,10 +96,14 @@ type harnessVerification struct {
 // explicit "passed", so a missing, unreadable, trimmed or unrecognised
 // record can never render as a verified pass:
 //
-//	passed  → True    + VerificationPassed
-//	failed  → False   + VerificationFailed
-//	notRun  → False   + VerificationNotRun
-//	nothing → Unknown + VerificationNotReported
+//	passed     → True    + VerificationPassed
+//	failed     → False   + VerificationFailed
+//	incomplete → False   + VerificationIncomplete
+//	notRun     → False   + VerificationNotRun
+//	nothing    → Unknown + VerificationNotReported
+//
+// Where the harness names the commit it measured, the condition message
+// names it too: the verdict is only checkable against a tree.
 //
 // Called once a run terminates, so every run that got far enough for the
 // agent container to exit carries a Verified condition. Runs that never
@@ -110,15 +133,24 @@ func verificationVerdict(td *runtime.RawExtension) (metav1.ConditionStatus, stri
 	case v.Status == harnessVerificationPassed:
 		return metav1.ConditionTrue,
 			konveyoriov1alpha1.AgentRunReasonVerificationPassed,
-			withDetail("Every verification command in the run's plan ran and exited 0", v.Reason)
+			withDetail("Every verification command in the run's plan ran and exited 0", v)
 	case v.Status == harnessVerificationFailed:
 		return metav1.ConditionFalse,
 			konveyoriov1alpha1.AgentRunReasonVerificationFailed,
-			withDetail("A verification command in the run's plan did not pass", v.Reason)
+			withDetail("A verification command in the run's plan did not pass", v)
+	case v.Status == harnessVerificationIncomplete:
+		// The harness measured and could not finish — a different fact
+		// from "nothing to measure" (notRun) and from "the controller
+		// cannot say" (NotReported). False either way: a partial
+		// measurement is not a verified tree.
+		return metav1.ConditionFalse,
+			konveyoriov1alpha1.AgentRunReasonVerificationIncomplete,
+			withDetail("Verification of the run's plan could not be completed, "+
+				"so the pushed tree is not verified", v)
 	case v.Status == harnessVerificationNotRun:
 		return metav1.ConditionFalse,
 			konveyoriov1alpha1.AgentRunReasonVerificationNotRun,
-			withDetail("No verification command ran, so the pushed tree is unverified", v.Reason)
+			withDetail("No verification command ran, so the pushed tree is unverified", v)
 	default:
 		// A status this controller does not know. Newer harness, or a
 		// corrupt blob; either way it is not a pass we can vouch for.
@@ -151,18 +183,54 @@ func harnessVerificationFrom(td *runtime.RawExtension) *harnessVerification {
 	return blob.Verification
 }
 
-// withDetail appends the harness's own reason to the condition message,
-// and points at where the per-command evidence lives.
-func withDetail(summary, reason string) string {
+// withDetail names the commit the harness measured, appends the
+// harness's own reason, and points at where the per-command evidence
+// lives. The commit is what makes a verdict checkable, so it goes in
+// front of the reason; it is absent whenever the harness measured
+// nothing (notRun, and the incomplete case where it could not identify
+// the commit being pushed at all).
+func withDetail(summary string, v *harnessVerification) string {
 	var b strings.Builder
 	b.WriteString(summary)
-	if r := strings.TrimSpace(reason); r != "" {
+	if c := shortCommit(v.Commit); c != "" {
+		b.WriteString(" on commit ")
+		b.WriteString(c)
+	}
+	if r := strings.TrimSpace(v.Reason); r != "" {
 		b.WriteString(": ")
 		b.WriteString(truncateRunes(r, verificationVerdictMaxRunes))
 	}
 	b.WriteString(". ")
 	b.WriteString(evidencePointer)
 	return b.String()
+}
+
+// shortCommit abbreviates the harness's recorded commit for the condition
+// message, and returns "" for anything that is not a commit. The blob is
+// the harness's schema and a future or corrupt one could put anything
+// under the key, so the message says "on commit <sha>" only for something
+// that is one — a bad value is dropped rather than presented as a tree
+// the run was verified against.
+func shortCommit(sha string) string {
+	sha = strings.TrimSpace(sha)
+	if len(sha) < 7 || len(sha) > 64 {
+		return ""
+	}
+	for _, r := range sha {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return ""
+		}
+	}
+	return truncateRunesPlain(sha, verificationCommitRunes)
+}
+
+// truncateRunesPlain clips s to at most max runes without marking the cut:
+// an abbreviated SHA is a conventional form, not a damaged string.
+func truncateRunesPlain(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	return string([]rune(s)[:max])
 }
 
 // truncateRunes clips s to at most max runes, marking that it was cut.

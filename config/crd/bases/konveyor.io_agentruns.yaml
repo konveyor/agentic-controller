@@ -661,7 +661,8 @@ spec:
                   usage/cost report, plus the independent verification record (#300).
                   The controller copies it verbatim; platform-specific UIs read the
                   harness's schema (ADR 0011/0018). The one key the controller reads
-                  is verification.status, to derive the Verified condition (#302);
+                  is verification.status (plus verification.commit, named in that
+                  condition's message), to derive the Verified condition (#302);
                   everything else, including the per-command verification evidence,
                   stays uninterpreted. Absent if the harness wrote nothing parseable.
                 type: object

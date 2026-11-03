@@ -29,13 +29,14 @@ turn; `failed` is a refusal. The reason rides `terminationData.stopReason`,
 as the limit kind does for exit 2. `NoChanges` remains future (#129).
 
 **Update (2026-11-02):** AgentRun gains a third orthogonal condition,
-`Verified` (#302), and with it a single, named exception to
+`Verified` (#302), and with it a narrow, named exception to
 `terminationData` opacity. This amends two clauses below: "An AgentRun
 then carries exactly two orthogonal condition facts" (now three), and
-"terminationData … uninterpreted" (now: uninterpreted but for one key).
-See *The `Verified` condition* below. Neither the exit-code contract nor
-the `Succeeded` reason set changes, and verification does not affect
-phase or workflow sequencing.
+"terminationData … uninterpreted" (now: uninterpreted but for the
+`verification` verdict and the commit it describes). See *The `Verified`
+condition* below. Neither the exit-code contract nor the `Succeeded`
+reason set changes, and verification does not affect phase or workflow
+sequencing.
 
 ## Context
 
@@ -234,6 +235,7 @@ surfaces.
 | --- | --- | --- |
 | `passed` | `True` | `VerificationPassed` |
 | `failed` | `False` | `VerificationFailed` |
+| `incomplete` | `False` | `VerificationIncomplete` |
 | `notRun` | `False` | `VerificationNotRun` |
 | absent, unreadable, or unrecognised | `Unknown` | `VerificationNotReported` |
 
@@ -247,12 +249,39 @@ to say. The condition is set on every run whose agent container
 terminated; runs that never started carry none, their `Succeeded`
 condition already saying the agent never ran.
 
-**The opacity exception is exactly one key.** The controller reads
+**The reason set is closed, and grew once.** The four reasons above were
+three plus a catch-all until #300's review added a fourth harness status:
+`incomplete`, a measurement that started and could not finish — the step
+cap left commands unrun, the run was cancelled part way, or the working
+tree was not the commit being pushed, so no result could honestly be
+claimed for it. The catch-all handled it safely (`Unknown` +
+`VerificationNotReported`, never a pass), which is what the catch-all is
+for, but it said "the controller cannot tell" where the harness was
+saying "I measured and could not finish". That is a fact worth keeping,
+so `VerificationIncomplete` was added and the set is five.
+
+The precedent this sets is deliberate: a closed set is not a frozen one.
+A new harness status becomes a new reason by an explicit API change, in a
+release note, not by a consumer discovering an unfamiliar string. In the
+interval, the catch-all holds — which is why consumers switching over
+the set must keep a default branch that claims nothing. The invariant
+that does not move is the asymmetry: `VerificationPassed` is the only
+reason that pairs with `Verified=True`, and no reason added later will
+change that.
+
+**The opacity exception is two keys.** The controller reads
 `verification.status`, treats it as a closed enum, and copies the
 harness's `verification.reason` into the condition message as text. It
-does not read, validate or re-shape the commands, exit codes, durations
-or output tails. `terminationData` remains the harness's contract with
-UIs for everything else.
+also reads `verification.commit` — the branch tip the harness confirmed
+the working tree matched before any command ran (#300) — and names it,
+abbreviated, in the same message: a verdict that does not say which tree
+it describes cannot be checked against anything, and "verified" over an
+unnamed tree is a weaker version of the claim this change exists to
+remove. The value is validated as a commit and dropped if it is not one;
+it is never parsed back out of the message, which stays human-readable
+with the full SHA in the blob. The commands, exit codes, durations and
+output tails are not read, validated or re-shaped. `terminationData`
+remains the harness's contract with UIs for everything else.
 
 ### The workflow guide renders from `workflow.*` only
 
@@ -275,9 +304,10 @@ plumbing PR #160 adds) and stores it on `AgentRun.status.terminationData`
 (`RawExtension`), uninterpreted. The kubelet's 4 KiB cap applies.
 
 Amended 2026-11-02 (#302): all of it stays uninterpreted but for the
-single `verification.status` key, from which the controller derives the
-`Verified` condition above. Nothing else in the blob is read, and
-nothing is re-shaped onto the API.
+`verification.status` key, from which the controller derives the
+`Verified` condition above, and `verification.commit`, which that
+condition's message names. Nothing else in the blob is read, and nothing
+is re-shaped onto the API.
 
 ## Consequences
 
@@ -298,8 +328,15 @@ nothing is re-shaped onto the API.
 - A future ADR retires `phase` once clients migrate to `Succeeded`.
 - (2026-11-02, #302) AgentRun carries a third condition, `Verified`,
   reporting the harness's independent measurement of the pushed tree.
-  `True` only from an explicit `passed`; absence, `notRun` and
-  unrecognised values never read as a pass. It does not affect `phase`,
-  `Succeeded`, or workflow sequencing. The controller reads one key of
-  `terminationData` to set it; the per-command evidence stays in the
-  blob. konveyor/tackle2-ui#3703 is the consumer.
+  `True` only from an explicit `passed`; absence, `notRun`, `incomplete`
+  and unrecognised values never read as a pass. It does not affect
+  `phase`, `Succeeded`, or workflow sequencing. The controller reads two
+  keys of `terminationData` to set it (`verification.status` and
+  `verification.commit`); the per-command evidence stays in the blob.
+  konveyor/tackle2-ui#3703 is the consumer.
+- (2026-11-02, #302) The `Verified` reason set holds five values. It is
+  closed to consumers — the controller never invents a reason — but it
+  grows by API change when the harness's own status enum does, as it did
+  for `VerificationIncomplete`. A consumer switching over it keeps a
+  default branch that claims nothing; only `VerificationPassed` ever
+  pairs with `Verified=True`.

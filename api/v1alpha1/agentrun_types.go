@@ -64,13 +64,20 @@ const (
 	//
 	//	True    + VerificationPassed      every command the plan named ran and exited 0
 	//	False   + VerificationFailed      at least one exited non-zero, timed out, or could not start
+	//	False   + VerificationIncomplete  the harness had something to measure and could not finish
 	//	False   + VerificationNotRun      the harness ran nothing, and says why in the message
 	//	Unknown + VerificationNotReported the harness reported no verification at all
+	//
+	// Where the harness names the commit it measured
+	// (terminationData.verification.commit, the branch tip the working
+	// tree was confirmed to match before any command ran), the condition
+	// message names it too, abbreviated. The message is human-readable;
+	// read the commit itself from the blob.
 	//
 	// The condition carries the verdict; the per-command evidence (label,
 	// command, exit code, duration, output tail) stays in
 	// terminationData.verification, which the controller does not
-	// interpret beyond the single status key above.
+	// interpret beyond the status and commit keys above.
 	AgentRunConditionVerified = "Verified"
 )
 
@@ -108,7 +115,17 @@ const (
 // AgentRun reasons on the Verified condition (#302). The set is closed:
 // a controller that does not recognise the harness's reported status
 // treats it as NotReported rather than inventing a reason, so a client
-// may switch exhaustively over these four.
+// may switch exhaustively over these five.
+//
+// Closed does not mean frozen. VerificationIncomplete was added after
+// the first four, when #300 grew a fourth harness status for a
+// measurement that started and could not finish; before that the
+// controller reported it as NotReported. Growing the set is an API
+// change in its own right, made here rather than left to a consumer to
+// discover. A client that switches over the set must therefore keep a
+// default branch, and that default must claim nothing — never a pass.
+// Only VerificationPassed pairs with Verified=True, and that is the one
+// property of this set which will not change.
 const (
 	// AgentRunReasonVerificationPassed — every command the run's plan
 	// named in its ## Verification section ran and exited 0. Pairs with
@@ -120,6 +137,17 @@ const (
 	// the Succeeded condition are unchanged by verification, so a
 	// Succeeded=True run may carry Verified=False.
 	AgentRunReasonVerificationFailed = "VerificationFailed"
+	// AgentRunReasonVerificationIncomplete — the harness had commands to
+	// run and could not finish running them: the run was cancelled part
+	// way, the harness's step cap left commands unrun, or the working
+	// tree it could reach was not the commit being pushed, so no result
+	// could honestly be claimed for that commit. Pairs with
+	// Verified=False. Distinct from NotRun, which is nothing to measure,
+	// and from NotReported, which is the controller being unable to say:
+	// here the harness measured and reports the gap. Partly passing is
+	// not passing — a plan whose first six commands passed and whose
+	// seventh never ran lands here, not on Passed.
+	AgentRunReasonVerificationIncomplete = "VerificationIncomplete"
 	// AgentRunReasonVerificationNotRun — the harness measured nothing:
 	// no plan, no ## Verification section, no runnable command in it,
 	// verification switched off, or a turn that did not reach success.
@@ -132,7 +160,10 @@ const (
 	// predating #300, a termination message that was lost or trimmed, or
 	// a status value this controller does not recognise. Pairs with
 	// Verified=Unknown — the controller cannot say either way, which is
-	// distinct from the harness saying it measured nothing.
+	// distinct from the harness saying it measured nothing (NotRun) and
+	// from the harness saying it could not finish (Incomplete). A status
+	// a future harness invents lands here, so a new harness status never
+	// reads as a pass on an older controller.
 	AgentRunReasonVerificationNotReported = "VerificationNotReported"
 )
 
@@ -360,7 +391,8 @@ type AgentRunStatus struct {
 	// usage/cost report, plus the independent verification record (#300).
 	// The controller copies it verbatim; platform-specific UIs read the
 	// harness's schema (ADR 0011/0018). The one key the controller reads
-	// is verification.status, to derive the Verified condition (#302);
+	// is verification.status (plus verification.commit, named in that
+	// condition's message), to derive the Verified condition (#302);
 	// everything else, including the per-command verification evidence,
 	// stays uninterpreted. Absent if the harness wrote nothing parseable.
 	// +optional
