@@ -44,11 +44,14 @@ import (
 // differ are normalized away. If someone changes a probe, resource limit, port,
 // arg, command, env, or securityContext in manager.yaml without updating the
 // .j2 (or vice versa), this fails -- turning silent drift into a red build.
+// Resource variables are substituted with the operator role defaults; requests
+// and limits remain part of the comparison. Operator tests exercise actual
+// Ansible rendering with both role defaults and Tackle CR overrides.
 //
 // The intentional differences (see normalizeContainer) are the templated image,
-// the SKILL_LOADER_IMAGE value that tracks it, and the metrics-bind-address arg
+// the SKILL_LOADER_IMAGE value that tracks it, the serving-certificate mount, and the metrics bind/certificate args
 // (a deployment-environment choice: kustomize enables HTTPS metrics via a patch,
-// the operator disables it, the base manager.yaml sets neither).
+// the operator enables it, and the base manager.yaml sets neither).
 
 const (
 	managerManifest    = "../../config/manager/manager.yaml"
@@ -86,7 +89,30 @@ func managerContainer(t *testing.T, path string, stripJinja bool) corev1.Contain
 		t.Fatalf("read %s: %v", path, err)
 	}
 	if stripJinja {
-		raw = jinjaExpr.ReplaceAll(raw, []byte("j2placeholder"))
+		// These defaults match roles/tackle/defaults/main.yml in the operator.
+		// Require resource and diagnostics variables so hardcoding a setting
+		// cannot silently remove its Tackle CR override.
+		templateDefaults := map[string]string{
+			"agentic_container_limits_cpu":                                                "500m",
+			"agentic_container_limits_memory":                                             "400Mi",
+			"agentic_container_requests_cpu":                                              "10m",
+			"agentic_container_requests_memory":                                           "64Mi",
+			"agentic_metrics_bind_address":                                                ":8443",
+			"agentic_pprof_bind_address":                                                  "0",
+			"agentic_memory_log_interval":                                                 "30s",
+			"(not (openshift_cluster | bool and agentic_metrics_enabled | bool)) | lower": "true",
+		}
+		raw = jinjaExpr.ReplaceAllFunc(raw, func(expr []byte) []byte {
+			name := strings.TrimSpace(string(expr[2 : len(expr)-2]))
+			if value, ok := templateDefaults[name]; ok {
+				delete(templateDefaults, name)
+				return []byte(value)
+			}
+			return []byte("j2placeholder")
+		})
+		if len(templateDefaults) != 0 {
+			t.Fatalf("operator template must expose all resource and diagnostics settings; missing: %v", templateDefaults)
+		}
 	}
 
 	decoder := k8syaml.NewYAMLOrJSONDecoder(bytes.NewReader(raw), 4096)
@@ -130,8 +156,18 @@ func normalizeContainer(c corev1.Container) corev1.Container {
 	}
 	// The metrics endpoint is a deployment-environment choice, not part of the
 	// controller's spec: kustomize enables HTTPS metrics via a patch (:8443),
-	// the operator disables it (=0), the base manager.yaml sets neither.
+	// the operator enables it, and the base manager.yaml sets neither.
 	c.Args = dropArgs(c.Args, "--metrics-bind-address")
+	c.Args = dropArgs(c.Args, "--metrics-cert-path")
+	// The operator uses an OpenShift service-serving certificate. Standalone
+	// TLS is configured by the Kustomize overlay instead.
+	mounts := c.VolumeMounts[:0]
+	for _, mount := range c.VolumeMounts {
+		if mount.Name != "metrics-certs" {
+			mounts = append(mounts, mount)
+		}
+	}
+	c.VolumeMounts = mounts
 	// Treat empty and nil slices as equal so `volumeMounts: []` matches its
 	// absence.
 	if len(c.VolumeMounts) == 0 {

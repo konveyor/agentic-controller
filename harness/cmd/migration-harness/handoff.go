@@ -87,7 +87,7 @@ var (
 // by an earlier stage, or by an earlier run on this branch, is not this
 // stage's. An unreadable file or base is logged and treated as nothing to
 // read, so the outcome the turn earned stands.
-func stageHandoff(cloneDir string, repo *gogit.Repository, baseSHA string) (handoffVerdict, bool) {
+func stageHandoff(cloneDir string, repo *gogit.Repository, baseSHA string, red *redactor) (handoffVerdict, bool) {
 	changed, err := git.FileChangedSince(repo, baseSHA, handoffPath)
 	if err != nil {
 		logging.Warn("handoff: %v — not read", err)
@@ -101,13 +101,13 @@ func stageHandoff(cloneDir string, repo *gogit.Repository, baseSHA string) (hand
 		logging.Warn("handoff: read %s: %v — not read", handoffPath, err)
 		return handoffVerdict{}, false
 	}
-	return parseHandoffVerdict(string(content))
+	return parseHandoffVerdict(string(content), red)
 }
 
 // parseHandoffVerdict reads the verdict from the last `## ` section of a
 // handoff document (the whole document when it has no such heading). ok is
 // false when the section has no Status line.
-func parseHandoffVerdict(content string) (v handoffVerdict, ok bool) {
+func parseHandoffVerdict(content string, red *redactor) (v handoffVerdict, ok bool) {
 	var tableDetail, lineDetail string
 	for _, line := range lastHandoffSection(content) {
 		if !ok {
@@ -135,7 +135,9 @@ func parseHandoffVerdict(content string) (v handoffVerdict, ok bool) {
 	if v.Detail == "" {
 		v.Detail = lineDetail
 	}
-	v.Detail = clipHandoffDetail(v.Detail)
+	// Redact before clipping so a cutoff inside a credential cannot expose
+	// its prefix in pod logs, viewer notices, or the termination message.
+	v.Detail = clipHandoffDetail(red.redact(v.Detail))
 	return v, true
 }
 

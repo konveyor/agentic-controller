@@ -36,6 +36,14 @@ func TestRedactorLongestFirst(t *testing.T) {
 	}
 }
 
+func TestRedactorAddedShortSecretsDoNotChangeReplacementMarkers(t *testing.T) {
+	r := newRedactor("repository-password")
+	r.addSecrets("acted", "s3!", "")
+	if got, want := r.redact("repository-password, acted, s3!"), "[redacted], [redacted], [redacted]"; got != want {
+		t.Fatalf("redact() = %q, want %q", got, want)
+	}
+}
+
 func TestNilRedactorIsANoop(t *testing.T) {
 	var r *redactor
 	if got := r.redact("unchanged"); got != "unchanged" {

@@ -48,13 +48,27 @@ func newRedactor(known ...string) *redactor {
 	return &redactor{secrets: secrets}
 }
 
+// addSecrets registers explicit credentials, including short passwords that the
+// environment heuristic would skip, and keeps overlapping values longest first.
+func (r *redactor) addSecrets(secrets ...string) {
+	for _, secret := range secrets {
+		if secret != "" && !slices.Contains(r.secrets, secret) {
+			r.secrets = append(r.secrets, secret)
+		}
+	}
+	slices.SortFunc(r.secrets, func(a, b string) int { return len(b) - len(a) })
+}
+
 // redact returns text with every known secret replaced by "[redacted]".
 func (r *redactor) redact(text string) string {
 	if r == nil {
 		return text
 	}
-	for _, s := range r.secrets {
-		text = strings.ReplaceAll(text, s, "[redacted]")
+	var replacements []string
+	for _, secret := range r.secrets {
+		replacements = append(replacements, secret, "[redacted]")
 	}
-	return text
+	// A single pass prevents short credentials from matching inside a
+	// replacement marker inserted for an earlier secret.
+	return strings.NewReplacer(replacements...).Replace(text)
 }

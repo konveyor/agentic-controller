@@ -1,0 +1,9 @@
+kind: bugfix
+description: >
+  Prepare Maven user settings from the application's Hub credential before
+  starting standalone agent runs and every workflow stage.
+  Credential lookup and settings setup errors, including empty credentials,
+  stop the run even for applications that do not use Maven.
+  Redact Maven passwords and passphrases from agent text and handoff diagnostics,
+  including credentials in existing or mounted settings files. Unreadable or
+  unparseable settings stop setup without exposing XML contents.

@@ -108,6 +108,38 @@ Execution limits and mode, plus workflow/agent parameter values, are delivered v
 
 ---
 
+## Maven Settings
+
+Before launching the agent runtime, the harness prepares Maven user settings
+at `$HOME/.m2/settings.xml` (`/home/harness/.m2/settings.xml` in the agent
+images). An existing settings file, including one mounted from a Secret or
+ConfigMap, takes precedence and is left unchanged. Otherwise, the harness
+retrieves the application's assigned Maven credential from Hub, falling back
+to the default Maven credential if none is assigned. A broken settings symlink
+stops setup before any credential lookup and is left unchanged.
+
+The harness creates the file with mode `0600` outside the repository. It logs
+the file's location, never its contents. If no credential applies, Maven keeps
+its normal defaults. Credential lookup and file setup failures stop the run
+with an error; an assigned credential with empty settings is also an error.
+If a write fails, the harness removes the incomplete settings file. Failure to
+remove it is reported alongside the write or close error.
+
+Before launching the runtime, the harness registers passwords and passphrases
+from the effective settings file with its log redactor, including existing and
+mounted settings. Both literal XML and decoded values are masked in agent text
+logged by the harness. Handoff failure details are redacted before truncation
+and before they reach logs, viewer notices, or termination status.
+Unreadable settings or XML parsing errors stop setup;
+parse errors omit XML details to avoid exposing credential contents.
+
+This setup runs for standalone AgentRuns and separately in every workflow
+stage's fresh Sandbox, independently of the selected skills. The settings
+file is not carried between stages through Git. Hub API credentials remain
+in the harness and are cleared from the agent runtime's environment.
+
+---
+
 ## Git Lifecycle & Commit Authorship
 
 1. **Clone** — entry point clones using Hub-provided credentials

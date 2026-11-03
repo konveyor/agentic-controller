@@ -201,7 +201,7 @@ func TestParseHandoffVerdict(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, ok := parseHandoffVerdict(c.content)
+			got, ok := parseHandoffVerdict(c.content, nil)
 			if ok != c.wantOK {
 				t.Fatalf("ok = %v, want %v (verdict %+v)", ok, c.wantOK, got)
 			}
@@ -220,13 +220,31 @@ func TestParseHandoffVerdict(t *testing.T) {
 
 func TestParseHandoffVerdictClipsLongDetail(t *testing.T) {
 	long := strings.Repeat("x", handoffDetailLen+50)
-	got, ok := parseHandoffVerdict("## Execute\n- Status: failed\n- Reason: " + long + "\n")
+	got, ok := parseHandoffVerdict("## Execute\n- Status: failed\n- Reason: "+long+"\n", nil)
 	if !ok {
 		t.Fatal("expected a verdict")
 	}
 	if r := []rune(got.Detail); len(r) != handoffDetailLen || !strings.HasSuffix(got.Detail, "…") {
 		t.Errorf("Detail = %d runes ending %q, want %d runes ending with an ellipsis",
 			len(r), got.Detail[len(got.Detail)-3:], handoffDetailLen)
+	}
+}
+
+func TestParseHandoffVerdictRedactsMavenSecretsBeforeClipping(t *testing.T) {
+	const secret = "maven-repository-password"
+	red := newRedactor()
+	if err := red.addMavenSettings("<settings><servers><server><password>" + secret + "</password></server></servers></settings>"); err != nil {
+		t.Fatal(err)
+	}
+	for _, detail := range []string{secret, strings.Repeat("x", handoffDetailLen-8) + secret} {
+		content := "## Execute\n- Status: failed\n- Reason: " + detail + "\n"
+		verdict, ok := parseHandoffVerdict(content, red)
+		if !ok || !verdict.failed() {
+			t.Fatal("redaction changed the handoff verdict")
+		}
+		if strings.Contains(verdict.Detail, "maven-") || strings.Contains(verdict.stopReason(), "maven-") {
+			t.Error("Maven credential or its truncated prefix leaked into handoff diagnostics")
+		}
 	}
 }
 
@@ -305,14 +323,14 @@ func TestStageHandoffReadsThisStagesVerdict(t *testing.T) {
 	dir, repo, base := handoffRepo(t)
 
 	// No handoff at all: nothing to read.
-	if _, ok := stageHandoff(dir, repo, base); ok {
+	if _, ok := stageHandoff(dir, repo, base, nil); ok {
 		t.Error("expected no verdict without a handoff file")
 	}
 
 	// The stage wrote and committed its refusal (#241).
 	writeHandoff(t, dir, executeRefused)
 	commitAll(t, repo, "execute: refused")
-	v, ok := stageHandoff(dir, repo, base)
+	v, ok := stageHandoff(dir, repo, base, nil)
 	if !ok || !v.failed() || v.Detail != "docs/plan.md not found" {
 		t.Errorf("committed refusal: got (%+v, %v)", v, ok)
 	}
@@ -321,7 +339,7 @@ func TestStageHandoffReadsThisStagesVerdict(t *testing.T) {
 	// not the agent remembered to commit it.
 	dir2, repo2, base2 := handoffRepo(t)
 	writeHandoff(t, dir2, executeRefused)
-	v, ok = stageHandoff(dir2, repo2, base2)
+	v, ok = stageHandoff(dir2, repo2, base2, nil)
 	if !ok || !v.failed() {
 		t.Errorf("uncommitted refusal: got (%+v, %v)", v, ok)
 	}
@@ -335,14 +353,14 @@ func TestStageHandoffIgnoresAnEarlierStagesVerdict(t *testing.T) {
 	// file — its verdict must not be re-read as this stage's.
 	writeHandoff(t, dir, executeRefused)
 	base := commitAll(t, repo, "execute: refused")
-	if v, ok := stageHandoff(dir, repo, base); ok {
+	if v, ok := stageHandoff(dir, repo, base, nil); ok {
 		t.Errorf("stale handoff read as this stage's verdict: %+v", v)
 	}
 
 	// Appending a section makes it this stage's file again, and the new
 	// section is the verdict.
 	writeHandoff(t, dir, executeRefused+"\n## Verify\n- Status: passed\n")
-	v, ok := stageHandoff(dir, repo, base)
+	v, ok := stageHandoff(dir, repo, base, nil)
 	if !ok || v.Status != "passed" {
 		t.Errorf("appended section: got (%+v, %v)", v, ok)
 	}
@@ -353,7 +371,7 @@ func TestStageHandoffWithUnknownBaseReadsTheFile(t *testing.T) {
 	// stage's output.
 	dir, repo, _ := handoffRepo(t)
 	writeHandoff(t, dir, executeRefused)
-	v, ok := stageHandoff(dir, repo, "")
+	v, ok := stageHandoff(dir, repo, "", nil)
 	if !ok || !v.failed() {
 		t.Errorf("got (%+v, %v), want the refusal", v, ok)
 	}

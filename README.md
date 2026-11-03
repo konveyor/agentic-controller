@@ -118,3 +118,9 @@ against the domain model.
 ## Code of Conduct
 
 Refer to Konveyor's Code of Conduct [here](https://github.com/konveyor/community/blob/main/CODE_OF_CONDUCT.md).
+
+## Controller diagnostics
+
+See [controller memory diagnostics](docs/controller-diagnostics.md) for continuous
+metrics capture, periodic memory logs, and opt-in heap profiling during OOM
+investigations.

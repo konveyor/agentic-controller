@@ -4,7 +4,7 @@ title: "In-turn human questions via the ask_user tool and ACP elicitation"
 description: "Defines the ask_user MCP tool and ACP elicitation path for interactive human questions during an AgentRun."
 status: proposed
 date: "2026-08-20"
-last_updated: "2026-09-17"
+last_updated: "2026-11-02"
 authors: []
 last_reviewed: "2026-08-31"
 implementation_status: in-sync
@@ -15,6 +15,7 @@ relates_to:
   - "issues #55/#56 (interactive input and approval flow)"
   - "PR #96 (ACP tee: watch and steer)"
   - "PR #161 (implementation of this ADR)"
+  - "ADR 0023 (interrogation stage; first deliberate consumer of ask_user)"
 ---
 
 # ADR 0017: In-turn human questions via the ask_user tool and ACP elicitation
@@ -39,6 +40,19 @@ controller; `HARNESS_HITL_ASK=off` still wins. Nothing else in this ADR
 changes — in particular the gate stays fail-closed, and there is still no
 "ask but proceed on timeout" mode. Opting out never made the agent guess; it
 removes the tool, which is the pre-#161 behavior.
+
+**Update (2026-11-02):** The follow-up list below gains a second item,
+raised by ADR 0023 (interrogation stage), which is the first design to
+put a planned series of questions through this tool rather than the
+occasional opportunistic one. Its method names a recommended option with
+every question, and today the model can only spell that out in the
+question text, where a console cannot tell it from the question. So:
+`ask_user` gains an optional `recommendation` argument naming one of the
+values already passed in `options`, carried in the elicitation schema
+beside the enum so a viewer can render it as the default. It is additive
+and no part of this ADR's decisions changes — a question without it
+behaves exactly as today, and the gate stays fail-closed. Neither this
+nor the longer question timeout is implemented.
 
 ## Context
 
@@ -217,7 +231,10 @@ write on the stream at all is the Hub's authorization question
 - Viewers receive a form-renderable schema, so consoles can show a real
   question card rather than parsing prose.
 - Known follow-ups, deliberately not blocking: questions share the
-  permission timeout and probably want their own, longer default; an
+  permission timeout and probably want their own, longer default; a
+  question carrying `options` cannot say which one it recommends except
+  in its prose, so an optional `recommendation` argument should name one
+  of them in the schema (2026-11-02 update, for ADR 0023); an
   operator that wants "ask, but fall back to a headless policy on
   timeout" would need a new opt-in mode (explicitly rejected here).
 - Adding an agent runtime now has a concrete acceptance checklist
