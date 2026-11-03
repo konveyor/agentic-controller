@@ -3,7 +3,8 @@
 bin/
 config/
 docs/
-hack/
+hack/*
+!hack/go-mod-download.sh
 images/
 skills/
 test/

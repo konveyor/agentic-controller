@@ -7,6 +7,8 @@ on:
       - 'images/**'
       - 'harness/**'
       - 'Dockerfile'
+      - '.dockerignore'
+      - 'hack/go-mod-download.sh'
       - 'cmd/**'
       - 'internal/**'
       - 'api/**'
@@ -52,6 +54,8 @@ jobs:
             images/**
             harness/**
             Dockerfile
+            .dockerignore
+            hack/go-mod-download.sh
             cmd/**
             internal/**
             api/**
