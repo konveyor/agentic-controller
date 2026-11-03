@@ -380,10 +380,16 @@ if [ "${FAIL}" -gt 0 ]; then
     echo ""
     echo "--- Debug info ---"
     kc get agentruns,agents,skillcards,gateways -o wide 2>/dev/null || true
+    conditions_tmpl='{range .status.conditions[*]}    condition {.type}={.status} {.reason}: {.message}{"\n"}{end}'
     for r in rule-on rule-off; do
         pod="$(run_pod "${r}")"
+        echo "--- ${r} (${pod:-no sandbox}) phase=$(phase "${r}")"
+        # The run's own conditions first. A Failed phase carries its reason
+        # here and nowhere else, and a run that failed before its Sandbox
+        # existed has no pod to describe — without this the phase is all we
+        # would see.
+        kc get agentrun "${r}" -o jsonpath="${conditions_tmpl}" 2>/dev/null || true
         [ -n "${pod}" ] || continue
-        echo "--- ${r} (${pod}) phase=$(phase "${r}")"
         # Events, not just logs: a container that never started has no logs,
         # and the reason it did not (ErrImagePull, scheduling) lives here.
         kc describe pod "${pod}" 2>/dev/null | sed -n '/^Events:/,$p' | sed 's/^/    /' || true
