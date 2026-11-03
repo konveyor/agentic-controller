@@ -23,8 +23,7 @@
 # hack/install-konveyor.sh, plus an agent-base image built and loaded under the
 # tag AGENT_IMAGE names below -- which is not the Makefile's default:
 #
-#   make agent-base-build AGENT_BASE_IMG=quay.io/konveyor/agent-base:e2e
-#   kind load docker-image quay.io/konveyor/agent-base:e2e --name agentic-controller-e2e
+#   ./hack/load-agent-base.sh
 #
 # Environment:
 #   E2E_TIMEOUT   how long to wait on any one condition (default 300s)
