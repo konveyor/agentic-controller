@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"time"
@@ -881,7 +882,7 @@ func TestPushAsksTheBranchNotHEAD(t *testing.T) {
 	}
 }
 
-func TestBranchTipSHAAndTrackedChanges(t *testing.T) {
+func TestBranchTipSHAAndUncommittedPaths(t *testing.T) {
 	dir, repo, first := initRepoWithCommit(t)
 
 	if err := repo.CreateBranch(&gogitcfg.Branch{Name: "target", Remote: "", Merge: ""}); err != nil {
@@ -931,28 +932,49 @@ func TestBranchTipSHAAndTrackedChanges(t *testing.T) {
 		t.Error("BranchTipSHA should fail for a branch that does not exist")
 	}
 
-	// An untracked file is not a tracked change — the harness writes
-	// .konveyor/analysis.json uncommitted on every run.
+	// An uncommitted source file counts: a build reading it can pass in the
+	// working directory while the commit being pushed does not contain it.
 	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write untracked: %v", err)
 	}
-	changed, err := TrackedChanges(repo)
+	changed, err := UncommittedPaths(repo)
 	if err != nil {
-		t.Fatalf("TrackedChanges: %v", err)
+		t.Fatalf("UncommittedPaths: %v", err)
 	}
-	if len(changed) != 0 {
-		t.Errorf("TrackedChanges = %v, want none for an untracked file", changed)
+	if len(changed) != 1 || changed[0] != "untracked.txt" {
+		t.Errorf("UncommittedPaths = %v, want [untracked.txt]", changed)
 	}
 
-	// Editing a tracked file is.
+	// So does editing a tracked file, and the two come back sorted together.
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("changed"), 0o644); err != nil {
 		t.Fatalf("modify tracked file: %v", err)
 	}
-	changed, err = TrackedChanges(repo)
+	changed, err = UncommittedPaths(repo)
 	if err != nil {
-		t.Fatalf("TrackedChanges: %v", err)
+		t.Fatalf("UncommittedPaths: %v", err)
 	}
-	if len(changed) != 1 || changed[0] != "README.md" {
-		t.Errorf("TrackedChanges = %v, want [README.md]", changed)
+	if len(changed) != 2 || changed[0] != "README.md" || changed[1] != "untracked.txt" {
+		t.Errorf("UncommittedPaths = %v, want [README.md untracked.txt]", changed)
+	}
+
+	// What the project ignores does not count: git excludes it, so a
+	// repository's build output is not uncommitted input.
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("ignored-out/\n"), 0o644); err != nil {
+		t.Fatalf("write gitignore: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "ignored-out"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ignored-out", "App.class"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write build output: %v", err)
+	}
+	changed, err = UncommittedPaths(repo)
+	if err != nil {
+		t.Fatalf("UncommittedPaths: %v", err)
+	}
+	for _, p := range changed {
+		if strings.HasPrefix(p, "ignored-out/") {
+			t.Errorf("UncommittedPaths = %v, want no gitignored path", changed)
+		}
 	}
 }

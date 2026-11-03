@@ -166,14 +166,28 @@ records each exit code in the termination blob, independently of anything the
 agent wrote.
 
 **Which commit the result describes.** `git.Push` sends `refs/heads/<TARGET_BRANCH>`
-whatever HEAD points at (#281), so before running anything the harness confirms
-the working tree *is* that commit: HEAD equal to the branch tip, and no tracked
-path differing from it. Untracked files are ignored — the harness itself writes
-`.konveyor/analysis.json` into the workspace uncommitted. When the tree is not
-the commit being pushed (an agent that commits onto the branch and then checks
-out a different commit), the harness records `status: "incomplete"` naming both
-commits rather than reporting a pass for a tree nobody will receive. A pass
-records the verified SHA in `verification.commit`.
+whatever HEAD points at (#281), so the working tree is not necessarily the tree
+that reaches the remote. Two checks, both made before any command runs, and a
+pass records the verified SHA in `verification.commit`:
+
+- **HEAD must be the branch tip.** An agent that commits onto the branch and
+  then checks out a different commit is refused outright (`incomplete`, naming
+  both commits): a different commit is not a partial measurement of this one.
+- **The working tree must hold nothing the commit does not.** Tracked files
+  edited but not committed, and untracked files git is not ignoring, are both
+  counted. The untracked half is the one that is easy to miss: a command that
+  passes in the working directory can be compiling a source file the agent
+  created and never added, so a clean checkout of the pushed commit does not
+  have it and does not build. Here the commands still run — a failure on a
+  superset of the commit is a real failure, and the evidence is worth keeping —
+  but a pass is downgraded to `incomplete` naming the uncommitted paths.
+
+Ignored paths do not count, because git does not count them: go-git's `Status`
+honours `.gitignore`, so a project's `node_modules`, `target` or `dist` does not
+show up while a stray source file does. The single exemption is
+`.konveyor/analysis.json`, which the harness writes into the workspace itself —
+it is not the agent's uncommitted work. Any other file under `.konveyor/` counts
+like anything else.
 
 The plan skill specifies that section as `- Build: <command>`,
 `- Test: <command>`, `- Blackbox: <steps>`. The harness parses those lines and
@@ -201,7 +215,7 @@ four values, and the difference between the last two is the point:
 | `passed` | Every command the plan named ran on the pushed commit and exited 0 |
 | `failed` | A command exited non-zero, timed out, or could not be started |
 | `notRun` | There was **nothing to measure**: no `docs/plan.md`, no `## Verification` section, no runnable command in it, `HARNESS_VERIFY=off`, or a stage that never claimed success |
-| `incomplete` | There **was** something to measure and the harness could not finish: the run was cancelled part way, the step cap left commands unrun, or the tree was not the commit being pushed |
+| `incomplete` | There **was** something to measure and the harness could not finish, or could not attribute the result to the pushed commit: the run was cancelled part way, the step cap left commands unrun, HEAD was not the branch tip, or the working tree held paths the commit does not |
 
 Every non-`passed` status carries a `reason`, and the field is never simply
 absent while the harness reached the end of a turn. `incomplete` is not a pass:

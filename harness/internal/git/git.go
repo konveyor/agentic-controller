@@ -175,13 +175,20 @@ func BranchTipSHA(repo *gogit.Repository, branch string) (string, error) {
 	return tip.String(), nil
 }
 
-// TrackedChanges returns the worktree paths whose tracked content differs
-// from HEAD — modified, staged, added or deleted — ignoring files git does
-// not track. Untracked files are excluded on purpose: the harness itself
-// writes .konveyor/analysis.json into the workspace uncommitted, so their
-// presence says nothing about whether the committed tree matches what is
-// in the working directory.
-func TrackedChanges(repo *gogit.Repository) ([]string, error) {
+// UncommittedPaths returns every worktree path whose content is not in the
+// commit at HEAD: modified, staged, added or deleted tracked files, AND
+// untracked files git is not ignoring.
+//
+// The untracked half matters as much as the tracked half. A build that
+// succeeds in the working directory can be reading a source file the agent
+// created and never committed, which the pushed commit does not contain, so
+// a clean checkout of that commit does not compile. Anything comparing the
+// working directory against the commit being pushed has to count those too.
+//
+// Ignored paths are excluded because git excludes them: go-git's Status
+// honours .gitignore, so a project's build output (node_modules, target,
+// dist) does not show up here, while a stray source file does.
+func UncommittedPaths(repo *gogit.Repository) ([]string, error) {
 	wt, err := repo.Worktree()
 	if err != nil {
 		return nil, fmt.Errorf("get worktree: %w", err)
@@ -190,15 +197,12 @@ func TrackedChanges(repo *gogit.Repository) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("worktree status: %w", err)
 	}
-	var changed []string
-	for path, s := range st {
-		if s.Worktree == gogit.Untracked && s.Staging == gogit.Untracked {
-			continue
-		}
-		changed = append(changed, path)
+	paths := make([]string, 0, len(st))
+	for path := range st {
+		paths = append(paths, path)
 	}
-	sort.Strings(changed)
-	return changed, nil
+	sort.Strings(paths)
+	return paths, nil
 }
 
 // FileChangedSince reports whether the worktree file at relPath differs

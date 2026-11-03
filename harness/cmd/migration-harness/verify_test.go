@@ -549,10 +549,10 @@ func TestRunPlanVerificationRefusesWhenHEADIsNotTheBranchBeingPushed(t *testing.
 
 // A tracked file edited but not committed means the tree the commands saw is
 // not the tree the push sends.
-func TestRunPlanVerificationRefusesWhenTrackedFilesDifferFromTheCommit(t *testing.T) {
+func TestRunPlanVerificationIncompleteWhenTrackedFilesDifferFromTheCommit(t *testing.T) {
 	requireShell(t)
 	dir, repo := writePlan(t, "## Verification\n- Build: true\n")
-	if err := os.WriteFile(filepath.Join(dir, planPath), []byte("## Verification\n- Build: exit 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, planPath), []byte("## Verification\n- Build: true\n# edited\n"), 0o644); err != nil {
 		t.Fatalf("dirty the plan: %v", err)
 	}
 
@@ -566,9 +566,93 @@ func TestRunPlanVerificationRefusesWhenTrackedFilesDifferFromTheCommit(t *testin
 	}
 }
 
-// An untracked file is normal — the harness itself writes
-// .konveyor/analysis.json uncommitted — and must not block verification.
-func TestRunPlanVerificationIgnoresUntrackedFiles(t *testing.T) {
+// The reviewer's case: a source file the agent created and never committed
+// makes the build pass in the working directory, while a clean checkout of
+// the pushed commit does not have the file and fails. The pass must not
+// stand — the commands did not run on the tree being pushed.
+func TestRunPlanVerificationIncompleteWhenAnUntrackedSourceFileMakesItPass(t *testing.T) {
+	requireShell(t)
+	// Build succeeds only while Helper.java is present, and Helper.java is
+	// never committed, so the commit being pushed does not compile.
+	dir, repo := writePlan(t, "## Verification\n- Build: test -f Helper.java\n")
+	if err := os.WriteFile(filepath.Join(dir, "Helper.java"), []byte("class Helper {}\n"), 0o644); err != nil {
+		t.Fatalf("write untracked source: %v", err)
+	}
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status == verificationPassed {
+		t.Fatalf("status = passed — the build only passed because of a file the commit does not contain")
+	}
+	if !v.incomplete() {
+		t.Fatalf("status = %q, want %q", v.Status, verificationIncomplete)
+	}
+	if !strings.Contains(v.Reason, "Helper.java") {
+		t.Errorf("reason = %q, want it to name the uncommitted file", v.Reason)
+	}
+	// The command still ran: a failure on a superset of the commit is a
+	// real failure, so the evidence is kept either way.
+	if len(v.Commands) != 1 || v.Commands[0].Status != verifyStepPassed {
+		t.Errorf("commands = %+v, want the Build recorded as it actually exited", v.Commands)
+	}
+}
+
+// A measured failure still wins over the uncommitted-tree gap: it is the
+// actionable finding, and the extra files cannot have caused it.
+func TestRunPlanVerificationFailureOutranksAnUncommittedTree(t *testing.T) {
+	requireShell(t)
+	dir, repo := writePlan(t, "## Verification\n- Build: exit 4\n")
+	if err := os.WriteFile(filepath.Join(dir, "Stray.java"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("write untracked source: %v", err)
+	}
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status != verificationFailed {
+		t.Fatalf("status = %q, want %q", v.Status, verificationFailed)
+	}
+}
+
+// Build output the project ignores is not uncommitted input: git excludes
+// it, so it must not cost the run its pass.
+func TestRunPlanVerificationIgnoresGitignoredBuildOutput(t *testing.T) {
+	requireShell(t)
+	dir, repo := writePlan(t, "## Verification\n- Build: true\n")
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules/\ntarget/\n"), 0o644); err != nil {
+		t.Fatalf("write gitignore: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if _, err := wt.Add(".gitignore"); err != nil {
+		t.Fatalf("git add .gitignore: %v", err)
+	}
+	if _, err := wt.Commit("ignore build output", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "t", Email: "t@example.com", When: time.Now()},
+	}); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	for _, rel := range []string{"node_modules/pkg/index.js", "target/classes/App.class"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, rel)), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status != verificationPassed {
+		t.Errorf("status = %q (%s), want %q — ignored build output is not uncommitted input",
+			v.Status, v.Reason, verificationPassed)
+	}
+}
+
+// The one untracked file the harness writes itself is exempt: it is not the
+// agent's uncommitted work and says nothing about the commit.
+func TestRunPlanVerificationIgnoresTheHarnessOwnAnalysisFile(t *testing.T) {
 	requireShell(t)
 	dir, repo := writePlan(t, "## Verification\n- Build: true\n")
 	if err := os.MkdirAll(filepath.Join(dir, ".konveyor"), 0o755); err != nil {
@@ -581,7 +665,15 @@ func TestRunPlanVerificationIgnoresUntrackedFiles(t *testing.T) {
 	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
 
 	if v.Status != verificationPassed {
-		t.Errorf("status = %q, want %q — an untracked file the harness wrote itself is not a mismatch", v.Status, verificationPassed)
+		t.Errorf("status = %q (%s), want %q — the harness wrote that file itself",
+			v.Status, v.Reason, verificationPassed)
+	}
+	// Any OTHER untracked file in the same directory still counts.
+	if err := os.WriteFile(filepath.Join(dir, ".konveyor", "scratch.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write scratch: %v", err)
+	}
+	if v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor()); !v.incomplete() {
+		t.Errorf("status = %q, want %q — only the harness's own file is exempt", v.Status, verificationIncomplete)
 	}
 }
 
@@ -641,7 +733,7 @@ func TestSettlePassedPlusUnmeasuredIsIncomplete(t *testing.T) {
 		{Label: "Test", Status: verifyStepAborted, Reason: "run cancelled during this command"},
 	}}
 
-	v.settle(false, newRedactor())
+	v.settle(newRedactor())
 
 	if v.Status != verificationIncomplete {
 		t.Fatalf("status = %q, want %q", v.Status, verificationIncomplete)

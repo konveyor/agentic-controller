@@ -278,6 +278,16 @@ func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, 
 		return incomplete("%s", mismatch)
 	}
 
+	// Measured before the commands run, so artefacts this pass creates
+	// cannot be mistaken for the agent's uncommitted work.
+	gap, err := worktreeGap(repo, target)
+	if err != nil {
+		return incomplete("inspect the working tree: %v", red.redact(err.Error()))
+	}
+	if gap != "" {
+		logging.Warn("verification: %s", gap)
+	}
+
 	v := &verification{Status: verificationPassed, Commit: target}
 	logging.Info("verification: checking commit %s, the tip of branch %s", shortSHA(target), branch)
 	for _, step := range steps {
@@ -303,8 +313,16 @@ func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, 
 		v.Commands = append(v.Commands, runVerifyStep(ctx, cloneDir, timeout, step, red))
 	}
 
-	v.settle(truncated, red)
+	v.settle(red, gap, truncatedGap(truncated))
 	return v
+}
+
+// truncatedGap renders the step cap as a gap, or "" when it did not bite.
+func truncatedGap(truncated bool) string {
+	if !truncated {
+		return ""
+	}
+	return fmt.Sprintf("the ## Verification section lists more than %d commands; the rest were not run", verifyMaxSteps)
 }
 
 // settle decides the overall verdict from the recorded steps, in strict
@@ -315,10 +333,12 @@ func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, 
 // dropped it — left a `passed` verdict covering work nobody checked. That
 // is the same unearned green the whole file exists to remove, with the
 // harness making the claim instead of the agent.
-func (v *verification) settle(truncated bool, red *redactor) {
+func (v *verification) settle(red *redactor, extra ...string) {
 	var gaps []string
-	if truncated {
-		gaps = append(gaps, fmt.Sprintf("the ## Verification section lists more than %d commands; the rest were not run", verifyMaxSteps))
+	for _, g := range extra {
+		if g != "" {
+			gaps = append(gaps, g)
+		}
 	}
 	ran := 0
 	for _, c := range v.Commands {
@@ -360,18 +380,23 @@ func (v *verification) settle(truncated bool, red *redactor) {
 	v.Reason = clipVerify(red.redact(v.Reason), verifyReasonLen)
 }
 
-// verifyTarget returns the commit the result may claim to describe: the tip
-// of the branch Push will send, confirmed to be what the working tree holds.
-// A non-empty mismatch means it cannot be claimed, and says why.
+// verifyTarget returns the commit the result describes: the tip of the branch
+// Push will send, confirmed to be the commit the working tree is on. A
+// non-empty mismatch means the harness cannot identify or reach that commit
+// at all, and says why.
 //
 // git.Push sends refs/heads/<branch> whatever HEAD points at (#281), so the
 // working tree in cloneDir is not necessarily the tree that reaches the
 // remote. An agent that commits a broken migration onto the branch and then
 // checks out a passing base commit would otherwise have the harness run its
 // commands against the base, pass them, and push the broken branch — a
-// verified-looking green over a tree nothing checked. The harness does not
-// try to be clever about it: when the tree it can reach is not the commit
-// being pushed, it refuses to claim a result for that commit and says so.
+// verified-looking green over a tree nothing checked. That case is refused
+// outright: a different commit is not a partial measurement of this one.
+//
+// Differences between the working tree and the commit are handled separately,
+// by worktreeGap: there the commands still run, because a failure on a tree
+// that is a superset of the commit is a real failure, while a pass is not a
+// pass for the commit.
 func verifyTarget(repo *gogit.Repository, branch string) (commit, mismatch string) {
 	if repo == nil || branch == "" {
 		return "", "the harness could not identify the commit being pushed"
@@ -388,23 +413,52 @@ func verifyTarget(repo *gogit.Repository, branch string) (commit, mismatch strin
 		return "", fmt.Sprintf("the working tree is at %s but branch %s points at %s — "+
 			"the harness cannot verify the commit being pushed", shortSHA(head), branch, shortSHA(tip))
 	}
-	// Only tracked changes matter: the harness itself writes
-	// .konveyor/analysis.json into the workspace uncommitted, so untracked
-	// files are normal and say nothing about the committed tree.
-	changed, err := git.TrackedChanges(repo)
-	if err != nil {
-		return "", fmt.Sprintf("inspect the working tree: %v", err)
-	}
-	if len(changed) > 0 {
-		shown := changed
-		if len(shown) > 3 {
-			shown = shown[:3]
-		}
-		return "", fmt.Sprintf("%d tracked path(s) differ from commit %s (%s) — "+
-			"the working tree is not the tree being pushed",
-			len(changed), shortSHA(tip), strings.Join(shown, ", "))
-	}
 	return tip, ""
+}
+
+// harnessOwnPaths are the uncommitted files the harness itself puts in the
+// workspace. They are not the agent's uncommitted work and say nothing about
+// whether the commit being pushed is complete, so they do not count against
+// it. Everything else does.
+var harnessOwnPaths = map[string]bool{
+	".konveyor/analysis.json": true,
+}
+
+// worktreeGap reports what the working tree holds that the commit being
+// pushed does not: tracked files edited but not committed, and untracked
+// files git is not ignoring. Empty when the tree is the commit.
+//
+// The untracked half is the one that is easy to miss. A command that passes
+// in the working directory can be compiling a source file the agent created
+// and never added, so the commit that reaches the remote does not contain it
+// and does not build — a pass measured against inputs the branch will not
+// have. The harness does not try to tell a stray source file from anything
+// else untracked: git already excludes what the project ignores, so what is
+// left is uncommitted input, and a pass over it is not a pass for the commit.
+func worktreeGap(repo *gogit.Repository, commit string) (string, error) {
+	paths, err := git.UncommittedPaths(repo)
+	if err != nil {
+		return "", err
+	}
+	kept := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !harnessOwnPaths[path] {
+			kept = append(kept, path)
+		}
+	}
+	if len(kept) == 0 {
+		return "", nil
+	}
+	shown := kept
+	if len(shown) > 3 {
+		shown = shown[:3]
+	}
+	more := ""
+	if len(kept) > len(shown) {
+		more = fmt.Sprintf(", and %d more", len(kept)-len(shown))
+	}
+	return fmt.Sprintf("%d path(s) in the working tree are not in commit %s (%s%s), so the commands "+
+		"did not run on the tree being pushed", len(kept), shortSHA(commit), strings.Join(shown, ", "), more), nil
 }
 
 // shortSHA abbreviates a commit for a log line or a reason.
