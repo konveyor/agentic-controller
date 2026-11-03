@@ -183,7 +183,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// Model text is logged at stage end; whatever it says, the
 	// credentials goose can read must not be in it. Maven setup adds the
 	// secrets from the effective settings file before goose starts.
-	red.addSecrets(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
+	red = newRedactor(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
 
 	if cfg.TargetBranch == creds.Branch {
 		return 1, fmt.Errorf("TARGET_BRANCH %q must differ from source branch", cfg.TargetBranch)

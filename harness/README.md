@@ -162,12 +162,14 @@ spec:
 ```
 
 Git resolves precedence independently for HTTP and HTTPS. `HTTP_PROXY` and
-`HTTPS_PROXY` override the respective Hub proxy; lowercase spellings apply
-when uppercase is absent. A supplied empty value selects direct access for
-that scheme. `NO_PROXY` (or `no_proxy`) replaces inherited exclusions using
-Go's native matching, including CIDRs and host/port entries. An explicitly
-empty bypass list removes inherited exclusions. With an explicit proxy
-environment variable, only explicit `NO_PROXY` applies. This covers
+`HTTPS_PROXY` override the respective Hub proxy; a nonempty lowercase value
+applies when uppercase is absent or empty. If a variable is supplied but both
+case variants are empty, that scheme uses direct access. `NO_PROXY` (or
+`no_proxy`, with the same nonempty-value precedence) replaces inherited
+exclusions using Go's native matching, including CIDRs and host/port entries. An explicitly
+empty bypass list removes inherited exclusions. Git always bypasses localhost
+and loopback addresses, matching Go's native HTTP proxy behavior. With an
+explicit proxy environment variable, only explicit `NO_PROXY` applies. This covers
 clone/fetch, watcher pushes and the final push.
 SSH, `git://` and local repositories retain their existing behavior.
 
@@ -188,15 +190,23 @@ to an enabled HTTP proxy when no HTTPS proxy applies.
 
 Inherited exclusions form one shared bypass list from all enabled Hub proxies.
 They support case-insensitive hostnames, IP addresses and `*` wildcards;
-surrounding whitespace is trimmed. Matches bypass all inherited proxies for
-both tools, including Maven's HTTP fallback. CIDRs, URLs and port-specific
+surrounding whitespace is trimmed. A bare domain matches itself and its
+subdomains; a leading-dot domain matches only subdomains. Matches bypass all
+inherited proxies for both tools, including Maven's HTTP fallback. CIDRs, URLs and port-specific
 exclusions in Hub configuration fail startup with an error naming the opt-out.
 Explicit Git `NO_PROXY` retains its native syntax independently.
+
+Maven interpolates credential values containing `${` before authentication.
+Automatic proxy settings reject those identities with a sanitized setup error
+instead of silently changing the credentials. For such identities, supply an
+explicit Maven proxy section with encrypted credentials, or disable inheritance
+and provide tool-specific settings. Literal brace passwords are preserved;
+the harness does not insert backslashes that would change their value.
 
 Hub proxy values are private to go-git's HTTP transport and generated Maven
 settings; they are not exported to the runtime environment or written to Git
 config. Maven can read its proxy credentials from its private settings file.
-Proxy passwords and encoded URL/XML forms are registered with the harness
+Proxy usernames, passwords and encoded URL/XML forms are registered with the harness
 redactor. Proxy lookup errors omit response bodies. Git push credentials stay
 in the harness. Hub connectivity, Gateway verification and skill loading
 retain their existing proxy behavior.

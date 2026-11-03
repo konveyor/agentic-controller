@@ -4,10 +4,10 @@ title: "Harness as Thin Single-Stage Runner with SkillCard-Based Skills"
 description: "Defines the harness as a thin, single-stage runner responsible for git lifecycle, skill delivery, and agent runtime lifecycle."
 status: accepted
 date: "2026-07-21"
-last_updated: "2026-11-02"
+last_updated: "2026-11-03"
 authors:
   - "Savitha Raghunathan"
-last_reviewed: "2026-11-02"
+last_reviewed: "2026-11-03"
 implementation_status: amended
 review_note: "Release 0.11 backports Maven credential setup and shared Hub proxies while retaining the release's execution and Git APIs. Deployed MTA 8.3 token scopes and image verification remain a release check."
 ---
@@ -52,6 +52,19 @@ Git push-access preflight and handoff-verdict features referenced by the
 main-branch implementation. The backport preserves the release's existing
 execution and Git APIs: proxying covers clone/fetch and all pushes, and Maven
 secrets are redacted from the available handoff-prompt and runtime diagnostics.
+
+**Update (2026-11-03):** Review clarified hostname exclusion compatibility:
+bare domains bypass themselves and subdomains, while leading-dot domains
+bypass subdomains only; Maven receives equivalent wildcard entries. Git always
+bypasses localhost/loopback. Nonempty lowercase proxy variables apply when the
+uppercase form is unset or empty. Proxy selection functions are prepared once
+per startup. Username-only proxy credentials and their encoded forms are
+redacted, while ordinary short placeholder LLM keys retain the pre-existing
+redaction heuristic. Real proxy/Maven credentials are still masked regardless
+of length. Generated Maven settings reject `${` in Hub proxy credentials with
+an actionable error because Maven would interpolate the value before using it;
+explicit proxy settings remain authoritative. Lookup failures and unsupported
+Hub exclusion forms retain the previously agreed fail-closed policy and opt-out.
 
 ## Context
 

@@ -3,11 +3,12 @@
 package proxy
 
 import (
+	"encoding/xml"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
-	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ type Policy struct {
 	excluded []string
 	env      map[string]string
 	secrets  []string
+	gitProxy map[string]func(*url.URL) (*url.URL, error)
 }
 
 func New(configs []Config, lookup func(string) (string, bool)) (*Policy, error) {
@@ -79,8 +81,12 @@ func New(configs []Config, lookup func(string) (string, bool)) (*Policy, error) 
 	}
 	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"} {
 		value, ok := lookup(key)
-		if !ok {
-			value, ok = lookup(strings.ToLower(key))
+		if value == "" {
+			lower, lowerOK := lookup(strings.ToLower(key))
+			if lowerOK && lower != "" {
+				value = lower
+			}
+			ok = ok || lowerOK
 		}
 		if ok {
 			p.env[key] = value
@@ -99,6 +105,35 @@ func New(configs []Config, lookup func(string) (string, bool)) (*Policy, error) 
 			}
 		}
 	}
+	p.gitProxy = make(map[string]func(*url.URL) (*url.URL, error))
+	var hubExclusions []func(string) bool
+	for _, pattern := range p.excluded {
+		hubExclusions = append(hubExclusions, compileHubExclusion(pattern))
+	}
+	for _, scheme := range []string{"http", "https"} {
+		key := strings.ToUpper(scheme) + "_PROXY"
+		if value, explicit := p.env[key]; explicit {
+			p.gitProxy[scheme] = (&httpproxy.Config{HTTPProxy: value, HTTPSProxy: value, NoProxy: p.env["NO_PROXY"]}).ProxyFunc()
+			continue
+		}
+		u := p.urls[scheme]
+		if u == nil {
+			continue
+		}
+		if value, explicit := p.env["NO_PROXY"]; explicit {
+			p.gitProxy[scheme] = (&httpproxy.Config{HTTPProxy: u.String(), HTTPSProxy: u.String(), NoProxy: value}).ProxyFunc()
+			continue
+		}
+		p.gitProxy[scheme] = func(target *url.URL) (*url.URL, error) {
+			host := strings.ToLower(target.Hostname())
+			for _, matches := range hubExclusions {
+				if matches(host) {
+					return nil, nil
+				}
+			}
+			return u, nil
+		}
+	}
 	return p, nil
 }
 
@@ -107,9 +142,15 @@ func (p *Policy) addSecrets(u *url.URL) {
 		return
 	}
 	password, _ := u.User.Password()
-	if password != "" {
-		p.secrets = append(p.secrets, password, url.PathEscape(password), url.QueryEscape(password), u.String(), u.User.String())
+	for _, value := range []string{u.User.Username(), password} {
+		if value == "" {
+			continue
+		}
+		var escaped strings.Builder
+		_ = xml.EscapeText(&escaped, []byte(value))
+		p.secrets = append(p.secrets, value, url.PathEscape(value), url.QueryEscape(value), escaped.String())
 	}
+	p.secrets = append(p.secrets, u.String(), u.User.String())
 }
 
 func (p *Policy) Secrets() []string { return slices.Clone(p.secrets) }
@@ -119,11 +160,21 @@ func (p *Policy) Secrets() []string { return slices.Clone(p.secrets) }
 func (p *Policy) MavenProxies() []Config {
 	configs := slices.Clone(p.configs)
 	for i := range configs {
-		configs[i].Excluded = slices.Clone(p.excluded)
-		// Java URL hosts can retain the brackets around IPv6 addresses.
+		configs[i].Excluded = nil
 		for _, h := range p.excluded {
-			if strings.Contains(h, ":") {
-				configs[i].Excluded = append(configs[i].Excluded, "["+h+"]")
+			switch {
+			case net.ParseIP(h) != nil:
+				configs[i].Excluded = append(configs[i].Excluded, h)
+				// Java URL hosts can retain IPv6 brackets.
+				if strings.Contains(h, ":") {
+					configs[i].Excluded = append(configs[i].Excluded, "["+h+"]")
+				}
+			case strings.HasPrefix(h, "."):
+				configs[i].Excluded = append(configs[i].Excluded, "*"+h)
+			case !strings.Contains(h, "*"):
+				configs[i].Excluded = append(configs[i].Excluded, h, "*."+h)
+			default:
+				configs[i].Excluded = append(configs[i].Excluded, h)
 			}
 		}
 	}
@@ -134,32 +185,28 @@ func (p *Policy) MavenProxies() []Config {
 // explicit empty value for direct access). NO_PROXY replaces inherited host
 // exclusions when supplied and retains Go's native environment semantics.
 func (p *Policy) GitProxy(r *http.Request) (*url.URL, error) {
-	scheme := strings.ToLower(r.URL.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return nil, nil
-	}
-	key := strings.ToUpper(scheme) + "_PROXY"
-	if value, explicit := p.env[key]; explicit {
-		return (&httpproxy.Config{HTTPProxy: value, HTTPSProxy: value, NoProxy: p.env["NO_PROXY"]}).ProxyFunc()(r.URL)
-	}
-	u := p.urls[scheme]
-	if u == nil {
-		return nil, nil
-	}
-	if value, explicit := p.env["NO_PROXY"]; explicit {
-		if value == "" {
-			return u, nil
-		}
-		return (&httpproxy.Config{HTTPProxy: u.String(), HTTPSProxy: u.String(), NoProxy: value}).ProxyFunc()(r.URL)
-	}
 	host := strings.ToLower(r.URL.Hostname())
-	for _, pattern := range p.excluded {
-		if pattern == host {
-			return nil, nil
-		}
-		if match, _ := path.Match(pattern, host); match {
-			return nil, nil
-		}
+	if host == "localhost" || net.ParseIP(host).IsLoopback() {
+		return nil, nil
 	}
-	return u, nil
+	selectProxy := p.gitProxy[strings.ToLower(r.URL.Scheme)]
+	if selectProxy == nil {
+		return nil, nil
+	}
+	return selectProxy(r.URL)
+}
+
+func compileHubExclusion(pattern string) func(string) bool {
+	if strings.Contains(pattern, "*") {
+		// Only '*' is a wildcard; validation rejects other glob operators.
+		expression := "^" + strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, ".*") + "$"
+		return regexp.MustCompile(expression).MatchString
+	}
+	if net.ParseIP(pattern) != nil {
+		return func(host string) bool { return host == pattern }
+	}
+	if strings.HasPrefix(pattern, ".") {
+		return func(host string) bool { return strings.HasSuffix(host, pattern) }
+	}
+	return func(host string) bool { return host == pattern || strings.HasSuffix(host, "."+pattern) }
 }

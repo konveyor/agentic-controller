@@ -8,7 +8,7 @@ import (
 
 func TestGitProxyPrecedenceAndExclusions(t *testing.T) {
 	configs := []Config{
-		{Kind: "http", Host: "hub-http", Port: 3128, Excluded: []string{"  *.INTERNAL.example  ", "127.0.0.2", "[::1]"}},
+		{Kind: "http", Host: "hub-http", Port: 3128, Excluded: []string{"  *.INTERNAL.example  ", ".corp.example.com", "127.0.0.2", "[::1]"}},
 		{Kind: "https", Host: "hub-https", Port: 8080, Excluded: []string{"private.example"}},
 	}
 	for _, tt := range []struct {
@@ -19,14 +19,24 @@ func TestGitProxyPrecedenceAndExclusions(t *testing.T) {
 		{name: "HTTPS", target: "https://repo.example", want: "http://hub-https:8080"},
 		{name: "wildcard ignores case and port", target: "https://REPO.internal.EXAMPLE:8443", want: ""},
 		{name: "exact exclusions shared across schemes", target: "http://private.example", want: ""},
+		{name: "bare domain includes subdomains", target: "http://git.private.example", want: ""},
+		{name: "bare domain respects label boundary", target: "http://evilprivate.example", want: "http://hub-http:3128"},
+		{name: "leading dot matches subdomains", target: "https://git.corp.example.com", want: ""},
+		{name: "leading dot excludes bare domain", target: "https://corp.example.com", want: "http://hub-https:8080"},
 		{name: "IP exclusion", target: "http://127.0.0.2:80", want: ""},
 		{name: "IPv6 exclusion", target: "https://[::1]:8443", want: ""},
+		{name: "localhost always direct", target: "https://localhost:8443", want: ""},
+		{name: "unlisted loopback always direct", target: "http://127.42.1.2:8080", want: ""},
+		{name: "mapped loopback always direct", target: "https://[::ffff:127.0.0.1]:8443", want: ""},
+		{name: "empty explicit bypass still avoids loopback", target: "http://127.0.0.3", env: map[string]string{"NO_PROXY": ""}, want: ""},
 		{name: "domain boundary", target: "http://internal.example.attacker.test", want: "http://hub-http:3128"},
 		{name: "explicit scheme wins", target: "https://private.example", env: map[string]string{"HTTPS_PROXY": "http://explicit:8081"}, want: "http://explicit:8081"},
 		{name: "other scheme still inherited", target: "http://repo.example", env: map[string]string{"HTTPS_PROXY": "http://explicit:8081"}, want: "http://hub-http:3128"},
 		{name: "explicit direct", target: "https://repo.example", env: map[string]string{"HTTPS_PROXY": ""}, want: ""},
 		{name: "lowercase", target: "https://repo.example", env: map[string]string{"https_proxy": "http://explicit:8081"}, want: "http://explicit:8081"},
 		{name: "uppercase wins", target: "https://repo.example", env: map[string]string{"HTTPS_PROXY": "http://upper:81", "https_proxy": "http://lower:82"}, want: "http://upper:81"},
+		{name: "empty uppercase falls back to lowercase", target: "https://repo.example", env: map[string]string{"HTTPS_PROXY": "", "https_proxy": "http://lower:82"}, want: "http://lower:82"},
+		{name: "empty uppercase bypass falls back to lowercase", target: "https://repo.example", env: map[string]string{"NO_PROXY": "", "no_proxy": "repo.example"}, want: ""},
 		{name: "explicit native CIDR bypass", target: "http://10.42.1.2", env: map[string]string{"NO_PROXY": "10.0.0.0/8"}, want: ""},
 		{name: "explicit bypass replaces inherited", target: "https://private.example", env: map[string]string{"NO_PROXY": "other.example"}, want: "http://hub-https:8080"},
 		{name: "explicit empty bypass", target: "http://private.example", env: map[string]string{"NO_PROXY": ""}, want: "http://hub-http:3128"},
