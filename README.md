@@ -100,9 +100,11 @@ agentic-controller/
 - Agent Sandbox v1.0.x
 - containerd 2.1+ or CRI-O 1.31+ — image volumes are mounted by the
   kubelet through the CRI, and `cri-dockerd` does not implement them
-- amd64, for the published controller, skill-bundle and
-  `agentic-controller-agent` images; an arm64 cluster needs all three
-  built locally (see [Running on arm64](docs/getting-started.md#running-on-arm64))
+- amd64, for the published controller and `agentic-controller-agent`
+  images; an arm64 cluster needs both built locally (see
+  [Running on arm64](docs/getting-started.md#running-on-arm64)). The
+  skill bundle is multi-arch as of `:latest`; release tags through
+  `v0.11.0` are amd64-only
 
 ## Related projects
 
