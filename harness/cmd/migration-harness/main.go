@@ -655,23 +655,34 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	case stageOutcome != outcomeSucceeded:
 		verified = notRun("stage outcome %s — the harness verifies a turn that claims success", stageOutcome)
 	default:
-		verified = runPlanVerification(ctx, cloneDir, cfg.VerifyTimeout, red)
+		// creds.Branch, not HEAD: the branch is what the final push sends
+		// (#281), so it is the only commit a result may claim to describe.
+		verified = runPlanVerification(ctx, repo, cloneDir, creds.Branch, cfg.VerifyTimeout, red)
 	}
-	if verified.failed() {
+	if verified.unmet() {
 		// The console viewer has no pod log; this is the only place a
-		// person watching is told the tree does not do what it claims.
-		emitNotice("the harness re-ran the plan's verification commands and one failed — %s", verified.Reason)
+		// person watching is told the tree does not do what it claims, or
+		// that part of it went unchecked.
+		if verified.failed() {
+			emitNotice("the harness re-ran the plan's verification commands and one failed — %s", verified.Reason)
+		} else {
+			emitNotice("the harness could not finish verifying this stage — %s", verified.Reason)
+		}
 		if cfg.VerifyEnforce {
 			// Opt-in (HARNESS_VERIFY_ENFORCE=on): the measurement, not the
-			// agent's account of it, decides the stage. Mapped onto the
-			// existing exit 1 rather than a new code — what a failed
-			// verification should mean for AgentRun.status is #302, and
-			// inventing an exit code here would pre-empt it.
-			logging.Err("verification failed and HARNESS_VERIFY_ENFORCE=on — failing the stage")
+			// agent's account of it, decides the stage. An incomplete
+			// measurement counts, because under enforcement the stage must
+			// be verified and a partly measured one is not; notRun does not,
+			// so a run with no plan is unaffected. Mapped onto the existing
+			// exit 1 rather than a new code — what this should mean for
+			// AgentRun.status is #302, and inventing an exit code here would
+			// pre-empt it.
+			logging.Err("verification %s and HARNESS_VERIFY_ENFORCE=on — failing the stage", verified.Status)
 			stageOutcome, limit = outcomeFailed, limitNone
 		} else {
-			logging.Warn("verification failed but enforcement is off — the stage keeps its outcome; " +
-				"the result is recorded in the termination data (HARNESS_VERIFY_ENFORCE=on to fail the stage)")
+			logging.Warn("verification %s but enforcement is off — the stage keeps its outcome; "+
+				"the result is recorded in the termination data (HARNESS_VERIFY_ENFORCE=on to fail the stage)",
+				verified.Status)
 		}
 	}
 
@@ -691,11 +702,11 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			Verification:  verified,
 		}
 		switch {
-		case cfg.VerifyEnforce && verified.failed():
+		case cfg.VerifyEnforce && verified.unmet():
 			// Enforcement turned the measurement into the outcome, so it
 			// is also the reason — "end_turn" describes the agent's turn,
 			// not why the stage failed.
-			term.StopReason = "verification: " + verified.Reason
+			term.StopReason = "verification " + verified.Status + ": " + verified.Reason
 		case providerRejected:
 			// "end_turn" is what goose said; the provider's message is
 			// what happened, and stopReason is the blob's free-text field
@@ -803,11 +814,12 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			emitOutcome("run cancelled by viewer — no commits to push")
 		case providerRejected:
 			emitOutcome("stage failed — the model provider rejected the call; no work was done")
-		case cfg.VerifyEnforce && verified.failed() && pushed:
-			emitOutcome("stage failed — the harness's own verification failed (%s); work pushed to branch %s",
-				verified.Reason, creds.Branch)
-		case cfg.VerifyEnforce && verified.failed():
-			emitOutcome("stage failed — the harness's own verification failed (%s); no commits to push", verified.Reason)
+		case cfg.VerifyEnforce && verified.unmet() && pushed:
+			emitOutcome("stage failed — the harness's own verification %s (%s); work pushed to branch %s",
+				verified.Status, verified.Reason, creds.Branch)
+		case cfg.VerifyEnforce && verified.unmet():
+			emitOutcome("stage failed — the harness's own verification %s (%s); no commits to push",
+				verified.Status, verified.Reason)
 		case pushed:
 			emitOutcome("stage failed — partial work pushed to branch %s", creds.Branch)
 		default:
@@ -821,9 +833,9 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			logging.Err("stage failed: the model provider rejected the call — %s", providerSummary)
 			return 1, fmt.Errorf("stage failed: provider error: %s", providerSummary)
 		}
-		if cfg.VerifyEnforce && verified.failed() {
-			logging.Err("stage failed: verification — %s", verified.Reason)
-			return 1, fmt.Errorf("stage failed: verification: %s", verified.Reason)
+		if cfg.VerifyEnforce && verified.unmet() {
+			logging.Err("stage failed: verification %s — %s", verified.Status, verified.Reason)
+			return 1, fmt.Errorf("stage failed: verification %s: %s", verified.Status, verified.Reason)
 		}
 		logging.Err("stage failed")
 		return 1, fmt.Errorf("stage failed")

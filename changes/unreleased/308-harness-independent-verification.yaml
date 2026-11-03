@@ -12,11 +12,18 @@ description: >
   and toolchain the agent used, less the Hub credentials already cleared from
   it. Blackbox and other prose lines, unfilled plan-template placeholders and
   explicit "none" values are recorded as skipped with a reason rather than
-  guessed at. A missing plan, a missing or command-less Verification section, a
-  disabled pass and a stage that did not reach success all record
-  status "notRun" with a reason, so silence is never read as a pass. Each
-  command is bounded by a timeout (HARNESS_VERIFY_TIMEOUT_SECONDS, default 600s)
-  and killed as a process group, and captured output is tailed. By default a
-  non-zero exit is recorded without changing the stage's phase; set
-  HARNESS_VERIFY_ENFORCE=on to fail the stage on one, or HARNESS_VERIFY=off to
-  skip the pass entirely.
+  guessed at. The result names the commit it describes — the tip of the branch
+  being pushed, confirmed before any command runs to be what the working tree
+  holds, since the push sends that branch whatever HEAD points at. The status
+  distinguishes a pass and a failure from "notRun" (there was nothing to
+  measure: no plan, no or command-less Verification section, a disabled pass, a
+  stage that never claimed success) and "incomplete" (there was, and the harness
+  could not finish: the run was cancelled part way, the step cap left commands
+  unrun, or the working tree was not the commit being pushed). Every non-passing
+  status carries a reason, so neither silence nor a partly measured run is read
+  as a pass. Each command is bounded by a timeout
+  (HARNESS_VERIFY_TIMEOUT_SECONDS, default 600s) and killed as a process group,
+  and captured output is tailed. By default the result is recorded without
+  changing the stage's phase; set HARNESS_VERIFY_ENFORCE=on to fail the stage on
+  a failed or incomplete verification, or HARNESS_VERIFY=off to skip the pass
+  entirely.

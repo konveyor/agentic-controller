@@ -8,9 +8,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
+	gogit "github.com/go-git/go-git/v5"
+
+	"github.com/konveyor/migration-harness/internal/git"
 	"github.com/konveyor/migration-harness/internal/logging"
 )
 
@@ -34,11 +38,20 @@ const (
 	// verificationFailed: at least one command exited non-zero, timed out, or
 	// could not be started.
 	verificationFailed = "failed"
-	// verificationNotRun: the harness ran nothing. Deliberately NOT an absence —
-	// no plan, no Verification section, no runnable command and a disabled
-	// pass all land here with a reason, because silence that renders as
-	// green is the failure mode this whole file exists to close.
+	// verificationNotRun: there was nothing to measure. No plan, no
+	// Verification section, no runnable command, a disabled pass, a stage
+	// that never claimed success. Deliberately NOT an absence: it carries a
+	// reason, because silence that renders as green is the failure mode this
+	// whole file exists to close.
 	verificationNotRun = "notRun"
+	// verificationIncomplete: there WAS something to measure and the harness
+	// could not finish measuring it — the run was cancelled part way, the
+	// step cap left commands unrun, or the tree checked was not the commit
+	// being pushed. Distinct from notRun because the two differ in what a
+	// consumer should do: nothing to verify is normal, a verification that
+	// could not be completed is a gap. Neither is a pass, and under
+	// enforcement this one fails the stage while notRun does not.
+	verificationIncomplete = "incomplete"
 )
 
 // Per-command results.
@@ -65,8 +78,14 @@ const (
 type verification struct {
 	Status string `json:"status"`
 	// Reason says why, for a Status the result alone does not explain:
-	// why nothing ran, or which command failed.
-	Reason   string             `json:"reason,omitempty"`
+	// why nothing ran, why it could not be completed, or which command
+	// failed.
+	Reason string `json:"reason,omitempty"`
+	// Commit is the commit the result describes: the tip of the branch
+	// being pushed, which the working tree was confirmed to match before
+	// any command ran. Empty when nothing was measured. Without it the
+	// record says a tree passed without saying which tree.
+	Commit   string             `json:"commit,omitempty"`
 	Commands []verificationStep `json:"commands,omitempty"`
 }
 
@@ -96,6 +115,18 @@ type verificationStep struct {
 // distinguishable all the way out to the termination blob.
 func (v *verification) failed() bool { return v != nil && v.Status == verificationFailed }
 
+// incomplete reports whether the pass started and could not finish.
+func (v *verification) incomplete() bool { return v != nil && v.Status == verificationIncomplete }
+
+// unmet reports whether the result is anything other than a measured pass
+// over work there was something to measure: what enforcement acts on. A
+// failure is obvious; an incomplete pass counts too, because under
+// enforcement the stage must be verified and a partial measurement is not
+// verification — six passing commands with a seventh left unrun is exactly
+// the gap. notRun does not count: a run with no plan must not fail for
+// having nothing to check.
+func (v *verification) unmet() bool { return v.failed() || v.incomplete() }
+
 // withoutOutput is the first thing the termination blob sheds when it does
 // not fit: the output excerpts, whose full text is in the pod log anyway.
 // Copies rather than editing in place, so the caller's record — the one the
@@ -120,7 +151,9 @@ func (v *verification) verdictOnly() *verification {
 	if v == nil {
 		return nil
 	}
-	return &verification{Status: v.Status, Reason: v.Reason}
+	// Commit comes with it: a verdict that does not say which commit it
+	// describes is most of the way back to the claim this change removes.
+	return &verification{Status: v.Status, Reason: v.Reason, Commit: v.Commit}
 }
 
 const (
@@ -139,9 +172,13 @@ const (
 	verifyCommandLen = 120
 	// verifyReasonLen bounds a recorded reason.
 	verifyReasonLen = 160
-	// verifyMaxSteps caps how many Verification lines are recorded, so a plan
-	// with a hundred of them cannot wedge the stage or flood the blob.
-	verifyMaxSteps = 6
+	// verifyMaxSteps caps how many Verification lines are run, so a plan with
+	// a hundred of them cannot wedge the stage or flood the blob. Set above
+	// the handful a real plan lists (Build, Test, Lint, Typecheck, Format,
+	// Blackbox is already six) because exceeding it now costs the run its
+	// pass: a dropped line makes the verdict incomplete rather than being
+	// quietly ignored.
+	verifyMaxSteps = 12
 	// verifyCommandMaxLen is the longest value still treated as a command.
 	// Past this it is prose — the Blackbox line's "if a README exists with
 	// run instructions, …" is a paragraph, not something to hand a shell.
@@ -210,7 +247,7 @@ func (s planStep) runnable() bool { return s.Command != "" }
 // own shell had: the harness is the process that started the runtime in this
 // container, so the runtime's environment is this process's environment, less
 // the Hub credentials the harness cleared before the agent ever ran.
-func runPlanVerification(ctx context.Context, cloneDir string, timeout time.Duration, red *redactor) *verification {
+func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, branch string, timeout time.Duration, red *redactor) *verification {
 	if timeout <= 0 {
 		timeout = DefaultVerifyTimeout
 	}
@@ -223,16 +260,26 @@ func runPlanVerification(ctx context.Context, cloneDir string, timeout time.Dura
 		}
 		return notRun("read %s: %v", planPath, red.redact(err.Error()))
 	}
-	steps, found := parsePlanVerification(string(content))
+	steps, truncated, found := parsePlanVerification(string(content))
 	if !found {
 		return notRun("%s has no ## Verification section", planPath)
 	}
 	if len(steps) == 0 {
 		return notRun("the ## Verification section of %s is empty", planPath)
 	}
+	if !slices.ContainsFunc(steps, planStep.runnable) {
+		return notRun("the ## Verification section of %s names no command to run", planPath)
+	}
 
-	v := &verification{Status: verificationPassed}
-	ran := 0
+	// There is work to measure, so from here on anything short of
+	// measuring all of it is incomplete, never notRun and never a pass.
+	target, mismatch := verifyTarget(repo, branch)
+	if mismatch != "" {
+		return incomplete("%s", mismatch)
+	}
+
+	v := &verification{Status: verificationPassed, Commit: target}
+	logging.Info("verification: checking commit %s, the tip of branch %s", shortSHA(target), branch)
 	for _, step := range steps {
 		if !step.runnable() {
 			logging.Info("verification: %s skipped — %s", step.Label, step.Skip)
@@ -254,34 +301,121 @@ func runPlanVerification(ctx context.Context, cloneDir string, timeout time.Dura
 			continue
 		}
 		v.Commands = append(v.Commands, runVerifyStep(ctx, cloneDir, timeout, step, red))
-		ran++
 	}
 
-	// Every line was prose, a placeholder or an explicit "none": the plan
-	// named nothing the harness could measure. Not a pass.
-	if ran == 0 {
-		v.Status, v.Reason = verificationNotRun, "the ## Verification section names no command to run"
-		logging.Warn("verification: %s", v.Reason)
-		return v
+	v.settle(truncated, red)
+	return v
+}
+
+// settle decides the overall verdict from the recorded steps, in strict
+// precedence: a measured failure, then an incomplete measurement, then a
+// pass. The precedence is the point. Before this the verdict started at
+// passed and only a failed step moved it, so a command the harness never
+// got to — because the run was cancelled under it, or because the step cap
+// dropped it — left a `passed` verdict covering work nobody checked. That
+// is the same unearned green the whole file exists to remove, with the
+// harness making the claim instead of the agent.
+func (v *verification) settle(truncated bool, red *redactor) {
+	var gaps []string
+	if truncated {
+		gaps = append(gaps, fmt.Sprintf("the ## Verification section lists more than %d commands; the rest were not run", verifyMaxSteps))
 	}
+	ran := 0
 	for _, c := range v.Commands {
 		switch c.Status {
+		case verifyStepPassed:
+			ran++
 		case verifyStepFailed, verifyStepTimedOut, verifyStepError:
-			v.Status = verificationFailed
-			if v.Reason == "" {
+			ran++
+			if !v.failed() {
+				v.Status = verificationFailed
 				v.Reason = fmt.Sprintf("%s %s: %s", c.Label, c.Status, c.Command)
 			}
+		case verifyStepAborted:
+			gaps = append(gaps, fmt.Sprintf("%s was not measured (%s)", c.Label, c.Reason))
 		}
 	}
-	if v.failed() {
+	switch {
+	case v.failed():
+		// A real failure outranks a gap: it is the most actionable thing
+		// the pass found, and the gap is noted in the step records.
 		logging.Err("verification FAILED — %s", v.Reason)
 		logging.Err("the pushed tree does not satisfy the plan's own verification commands, " +
 			"whatever the handoff says about them")
-	} else {
-		logging.Ok("verification passed — %d command(s) from %s re-run by the harness", ran, planPath)
+	case len(gaps) > 0:
+		v.Status = verificationIncomplete
+		v.Reason = strings.Join(gaps, "; ")
+		logging.Err("verification INCOMPLETE — %s", v.Reason)
+		logging.Err("%d command(s) passed, but this is not a verified pass: part of the plan's "+
+			"verification was never measured", ran)
+	case ran == 0:
+		// Defensive: the runnable check above means this should not happen.
+		v.Status = verificationIncomplete
+		v.Reason = "no verification command produced a result"
+		logging.Err("verification INCOMPLETE — %s", v.Reason)
+	default:
+		logging.Ok("verification passed — %d command(s) from %s re-run by the harness on commit %s",
+			ran, planPath, shortSHA(v.Commit))
 	}
-	v.Reason = clipVerify(v.Reason, verifyReasonLen)
-	return v
+	v.Reason = clipVerify(red.redact(v.Reason), verifyReasonLen)
+}
+
+// verifyTarget returns the commit the result may claim to describe: the tip
+// of the branch Push will send, confirmed to be what the working tree holds.
+// A non-empty mismatch means it cannot be claimed, and says why.
+//
+// git.Push sends refs/heads/<branch> whatever HEAD points at (#281), so the
+// working tree in cloneDir is not necessarily the tree that reaches the
+// remote. An agent that commits a broken migration onto the branch and then
+// checks out a passing base commit would otherwise have the harness run its
+// commands against the base, pass them, and push the broken branch — a
+// verified-looking green over a tree nothing checked. The harness does not
+// try to be clever about it: when the tree it can reach is not the commit
+// being pushed, it refuses to claim a result for that commit and says so.
+func verifyTarget(repo *gogit.Repository, branch string) (commit, mismatch string) {
+	if repo == nil || branch == "" {
+		return "", "the harness could not identify the commit being pushed"
+	}
+	tip, err := git.BranchTipSHA(repo, branch)
+	if err != nil {
+		return "", fmt.Sprintf("resolve branch %s: %v", branch, err)
+	}
+	head, err := git.HeadSHA(repo)
+	if err != nil {
+		return "", fmt.Sprintf("resolve HEAD: %v", err)
+	}
+	if head != tip {
+		return "", fmt.Sprintf("the working tree is at %s but branch %s points at %s — "+
+			"the harness cannot verify the commit being pushed", shortSHA(head), branch, shortSHA(tip))
+	}
+	// Only tracked changes matter: the harness itself writes
+	// .konveyor/analysis.json into the workspace uncommitted, so untracked
+	// files are normal and say nothing about the committed tree.
+	changed, err := git.TrackedChanges(repo)
+	if err != nil {
+		return "", fmt.Sprintf("inspect the working tree: %v", err)
+	}
+	if len(changed) > 0 {
+		shown := changed
+		if len(shown) > 3 {
+			shown = shown[:3]
+		}
+		return "", fmt.Sprintf("%d tracked path(s) differ from commit %s (%s) — "+
+			"the working tree is not the tree being pushed",
+			len(changed), shortSHA(tip), strings.Join(shown, ", "))
+	}
+	return tip, ""
+}
+
+// shortSHA abbreviates a commit for a log line or a reason.
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	if sha == "" {
+		return "unknown"
+	}
+	return sha
 }
 
 // runVerifyStep runs one command and records what it exited with.
@@ -359,7 +493,7 @@ func runVerifyStep(ctx context.Context, dir string, timeout time.Duration, step 
 // inside a fence carries a second `## Verification` heading and a second set
 // of `- Build:` lines, and reading those would have the harness run the
 // template's own `<build command>` placeholder.
-func parsePlanVerification(content string) (steps []planStep, found bool) {
+func parsePlanVerification(content string) (steps []planStep, truncated, found bool) {
 	inSection := false
 	for _, line := range handoffProse(content) {
 		if m := sectionHeading.FindStringSubmatch(line); m != nil {
@@ -367,22 +501,29 @@ func parsePlanVerification(content string) (steps []planStep, found bool) {
 			case verificationHeading.MatchString(line):
 				// A second Verification heading restarts the section:
 				// later wins, as it does for the handoff's verdict.
-				inSection, found, steps = true, true, nil
+				inSection, found, steps, truncated = true, true, nil, false
 			case len(m[1]) <= 2:
 				inSection = false
 			}
 			continue
 		}
-		if !inSection || len(steps) >= verifyMaxSteps {
+		if !inSection {
 			continue
 		}
 		m := verificationItem.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
+		// The cap bounds the work, not the honesty about it: a dropped
+		// line is reported so the verdict can say the section was only
+		// partly measured, instead of passing on the prefix it ran.
+		if len(steps) >= verifyMaxSteps {
+			truncated = true
+			continue
+		}
 		steps = append(steps, classifyVerifyItem(m[1], m[2]))
 	}
-	return steps, found
+	return steps, truncated, found
 }
 
 // classifyVerifyItem decides whether one Verification line is a command the
@@ -418,6 +559,14 @@ func notRun(format string, args ...any) *verification {
 	reason := clipVerify(fmt.Sprintf(format, args...), verifyReasonLen)
 	logging.Warn("verification not run: %s", reason)
 	return &verification{Status: verificationNotRun, Reason: reason}
+}
+
+// incomplete builds the recorded "started and could not finish" result:
+// there was something to measure and the harness cannot claim it did.
+func incomplete(format string, args ...any) *verification {
+	reason := clipVerify(fmt.Sprintf(format, args...), verifyReasonLen)
+	logging.Err("verification INCOMPLETE — %s", reason)
+	return &verification{Status: verificationIncomplete, Reason: reason}
 }
 
 // clipVerify bounds s to n runes with an ellipsis.

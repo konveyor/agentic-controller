@@ -9,7 +9,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	gogit "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
+
+// verifyBranch is the branch the fixtures push: the harness verifies the
+// tip of the branch being pushed, not HEAD.
+const verifyBranch = "migration-target"
 
 // planFromSkill is the Verification section as the plan skill specifies it
 // (catalog/skills/plan/SKILL.md) and as a real plan writes it.
@@ -33,24 +41,65 @@ const planFromSkill = `# Migration Plan
 Nothing special.
 `
 
-func writePlan(t *testing.T, content string) string {
+// writePlan builds a workspace the harness will verify: a git repository on
+// verifyBranch whose committed tree holds the plan, so the working tree is
+// the commit being pushed. The tests that care about the commit check
+// deliberately break one of those properties.
+func writePlan(t *testing.T, content string) (string, *gogit.Repository) {
 	t.Helper()
 	dir := t.TempDir()
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	commitPlan(t, dir, repo, content)
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if err := wt.Checkout(&gogit.CheckoutOptions{Branch: plumbing.NewBranchReferenceName(verifyBranch), Create: true}); err != nil {
+		t.Fatalf("checkout %s: %v", verifyBranch, err)
+	}
+	return dir, repo
+}
+
+// commitPlan writes docs/plan.md and commits it.
+func commitPlan(t *testing.T, dir string, repo *gogit.Repository, content string) plumbing.Hash {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
 		t.Fatalf("mkdir docs: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, planPath), []byte(content), 0o644); err != nil {
 		t.Fatalf("write plan: %v", err)
 	}
-	return dir
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if _, err := wt.Add(planPath); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	sha, err := wt.Commit("plan", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "t", Email: "t@example.com", When: time.Now()},
+	})
+	if err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	return sha
+}
+
+// runPlan is runPlanVerification over a fixture built by writePlan.
+func runPlan(ctx context.Context, dir string, repo *gogit.Repository, timeout time.Duration, red *redactor) *verification {
+	return runPlanVerification(ctx, repo, dir, verifyBranch, timeout, red)
 }
 
 func TestParsePlanVerification(t *testing.T) {
 	cases := []struct {
-		name      string
-		content   string
-		wantFound bool
-		wantSteps []planStep
+		name          string
+		content       string
+		wantFound     bool
+		wantTruncated bool
+		wantSteps     []planStep
 	}{
 		{
 			name:      "the plan skill's own Verification section",
@@ -117,9 +166,12 @@ func TestParsePlanVerification(t *testing.T) {
 			wantSteps: []planStep{{Label: "Smoke", Skip: "prose, not a command (too long to be one)"}},
 		},
 		{
-			name:      "the section is capped so a huge plan cannot flood the record",
-			content:   "## Verification\n" + strings.Repeat("- Build: make\n", verifyMaxSteps+5),
-			wantFound: true,
+			// The cap stays, but it must SAY it dropped lines: a prefix the
+			// harness ran is not verification of the whole section.
+			name:          "the section is capped, and the cap is reported",
+			content:       "## Verification\n" + strings.Repeat("- Build: make\n", verifyMaxSteps+5),
+			wantFound:     true,
+			wantTruncated: true,
 			wantSteps: func() []planStep {
 				steps := make([]planStep, verifyMaxSteps)
 				for i := range steps {
@@ -132,9 +184,12 @@ func TestParsePlanVerification(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			steps, found := parsePlanVerification(tc.content)
+			steps, truncated, found := parsePlanVerification(tc.content)
 			if found != tc.wantFound {
 				t.Fatalf("found = %v, want %v", found, tc.wantFound)
+			}
+			if truncated != tc.wantTruncated {
+				t.Errorf("truncated = %v, want %v", truncated, tc.wantTruncated)
 			}
 			if len(steps) != len(tc.wantSteps) {
 				t.Fatalf("got %d steps %+v, want %d", len(steps), steps, len(tc.wantSteps))
@@ -150,9 +205,9 @@ func TestParsePlanVerification(t *testing.T) {
 
 func TestRunPlanVerificationRecordsExitCodes(t *testing.T) {
 	requireShell(t)
-	dir := writePlan(t, "## Verification\n- Build: exit 0\n- Test: exit 7\n- Blackbox: click around\n")
+	dir, repo := writePlan(t, "## Verification\n- Build: exit 0\n- Test: exit 7\n- Blackbox: click around\n")
 
-	v := runPlanVerification(context.Background(), dir, time.Minute, newRedactor())
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
 
 	if v.Status != verificationFailed {
 		t.Fatalf("status = %q, want %q (one command exited 7)", v.Status, verificationFailed)
@@ -178,9 +233,9 @@ func TestRunPlanVerificationRecordsExitCodes(t *testing.T) {
 // one it never re-ran was not. The harness runs what the plan names.
 func TestRunPlanVerificationCatchesTheCompileItNeverRan(t *testing.T) {
 	requireShell(t)
-	dir := writePlan(t, "## Verification\n- Build: echo 'error TS2339: Property _isPending does not exist' >&2; exit 2\n")
+	dir, repo := writePlan(t, "## Verification\n- Build: echo 'error TS2339: Property _isPending does not exist' >&2; exit 2\n")
 
-	v := runPlanVerification(context.Background(), dir, time.Minute, newRedactor())
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
 
 	if v.Status != verificationFailed {
 		t.Fatalf("status = %q, want %q", v.Status, verificationFailed)
@@ -192,9 +247,9 @@ func TestRunPlanVerificationCatchesTheCompileItNeverRan(t *testing.T) {
 
 func TestRunPlanVerificationPasses(t *testing.T) {
 	requireShell(t)
-	dir := writePlan(t, "## Verification\n- Build: true\n- Test: true\n")
+	dir, repo := writePlan(t, "## Verification\n- Build: true\n- Test: true\n")
 
-	v := runPlanVerification(context.Background(), dir, time.Minute, newRedactor())
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
 
 	if v.Status != verificationPassed {
 		t.Fatalf("status = %q, want %q", v.Status, verificationPassed)
@@ -214,27 +269,37 @@ func TestRunPlanVerificationNotRun(t *testing.T) {
 	requireShell(t)
 	cases := []struct {
 		name       string
-		setup      func(t *testing.T) string
+		setup      func(t *testing.T) (string, *gogit.Repository)
 		wantReason string
 	}{
 		{
-			name:       "no plan at all",
-			setup:      func(t *testing.T) string { return t.TempDir() },
-			wantReason: "not found",
-		},
-		{
-			name:       "a plan with no Verification section",
-			setup:      func(t *testing.T) string { return writePlan(t, "# Plan\n\n## Steps\n- do a thing\n") },
+			name: "no plan at all",
+			setup: func(t *testing.T) (string, *gogit.Repository) {
+				return writePlan(t, "# Plan\n")
+			},
 			wantReason: "no ## Verification section",
 		},
 		{
-			name:       "a Verification section with nothing in it",
-			setup:      func(t *testing.T) string { return writePlan(t, "## Verification\n\n## Notes\n") },
+			name: "no docs/plan.md in the workspace",
+			setup: func(t *testing.T) (string, *gogit.Repository) {
+				dir, repo := writePlan(t, "# Plan\n")
+				if err := os.Remove(filepath.Join(dir, planPath)); err != nil {
+					t.Fatalf("remove plan: %v", err)
+				}
+				return dir, repo
+			},
+			wantReason: "not found",
+		},
+		{
+			name: "a Verification section with nothing in it",
+			setup: func(t *testing.T) (string, *gogit.Repository) {
+				return writePlan(t, "## Verification\n\n## Notes\n")
+			},
 			wantReason: "is empty",
 		},
 		{
 			name: "a Verification section naming only manual steps",
-			setup: func(t *testing.T) string {
+			setup: func(t *testing.T) (string, *gogit.Repository) {
 				return writePlan(t, "## Verification\n- Blackbox: start the app and click around\n- Test: none\n")
 			},
 			wantReason: "names no command to run",
@@ -243,7 +308,8 @@ func TestRunPlanVerificationNotRun(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			v := runPlanVerification(context.Background(), tc.setup(t), time.Minute, newRedactor())
+			dir, repo := tc.setup(t)
+			v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
 			if v == nil {
 				t.Fatal("verification is nil — an unmeasured run must still be recorded")
 			}
@@ -262,10 +328,10 @@ func TestRunPlanVerificationNotRun(t *testing.T) {
 
 func TestRunPlanVerificationTimesOut(t *testing.T) {
 	requireShell(t)
-	dir := writePlan(t, "## Verification\n- Build: sleep 30\n")
+	dir, repo := writePlan(t, "## Verification\n- Build: sleep 30\n")
 
 	start := time.Now()
-	v := runPlanVerification(context.Background(), dir, 300*time.Millisecond, newRedactor())
+	v := runPlan(context.Background(), dir, repo, 300*time.Millisecond, newRedactor())
 	elapsed := time.Since(start)
 
 	if elapsed > 15*time.Second {
@@ -288,19 +354,12 @@ func TestRunPlanVerificationTimeoutKillsTheChild(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("process groups are a unix concept")
 	}
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "still-running")
-	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
-		t.Fatalf("mkdir docs: %v", err)
-	}
+	marker := filepath.Join(t.TempDir(), "still-running")
 	// The shell backgrounds a child that would touch the marker well after
 	// the deadline; killing only `sh` would leave it to do so.
-	plan := "## Verification\n- Build: sh -c 'sleep 2; touch " + marker + "' & wait\n"
-	if err := os.WriteFile(filepath.Join(dir, planPath), []byte(plan), 0o644); err != nil {
-		t.Fatalf("write plan: %v", err)
-	}
+	dir, repo := writePlan(t, "## Verification\n- Build: sh -c 'sleep 2; touch "+marker+"' & wait\n")
 
-	runPlanVerification(context.Background(), dir, 200*time.Millisecond, newRedactor())
+	runPlan(context.Background(), dir, repo, 200*time.Millisecond, newRedactor())
 
 	time.Sleep(3 * time.Second)
 	if _, err := os.Stat(marker); err == nil {
@@ -310,14 +369,17 @@ func TestRunPlanVerificationTimeoutKillsTheChild(t *testing.T) {
 
 func TestRunPlanVerificationAbortedRunIsNotAFailure(t *testing.T) {
 	requireShell(t)
-	dir := writePlan(t, "## Verification\n- Build: true\n")
+	dir, repo := writePlan(t, "## Verification\n- Build: true\n")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	v := runPlanVerification(ctx, dir, time.Minute, newRedactor())
+	v := runPlan(ctx, dir, repo, time.Minute, newRedactor())
 
 	if v.failed() {
 		t.Errorf("status = %q — a cancelled run did not measure a failure, it measured nothing", v.Status)
+	}
+	if !v.incomplete() {
+		t.Errorf("status = %q, want %q — nothing was measured, so this is not a pass", v.Status, verificationIncomplete)
 	}
 	if got := v.Commands[0]; got.Status != verifyStepAborted {
 		t.Errorf("Build = %+v, want %q", got, verifyStepAborted)
@@ -327,9 +389,9 @@ func TestRunPlanVerificationAbortedRunIsNotAFailure(t *testing.T) {
 func TestRunPlanVerificationRedactsSecrets(t *testing.T) {
 	requireShell(t)
 	const token = "ghp_sup3rs3cret"
-	dir := writePlan(t, "## Verification\n- Build: echo "+token+"; exit 1\n")
+	dir, repo := writePlan(t, "## Verification\n- Build: echo "+token+"; exit 1\n")
 
-	v := runPlanVerification(context.Background(), dir, time.Minute, newRedactor(token))
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor(token))
 
 	blob, err := json.Marshal(v)
 	if err != nil {
@@ -419,5 +481,235 @@ func requireShell(t *testing.T) {
 	t.Helper()
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skipf("no /bin/sh: %v", err)
+	}
+}
+
+// A pass must name the commit it describes, and that commit must be the
+// one the final push sends.
+func TestRunPlanVerificationRecordsTheCommitBeingPushed(t *testing.T) {
+	requireShell(t)
+	dir, repo := writePlan(t, "## Verification\n- Build: true\n")
+	tip, err := repo.Reference(plumbing.NewBranchReferenceName(verifyBranch), true)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", verifyBranch, err)
+	}
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status != verificationPassed {
+		t.Fatalf("status = %q, want %q", v.Status, verificationPassed)
+	}
+	if v.Commit != tip.Hash().String() {
+		t.Errorf("commit = %q, want the tip of %s (%s)", v.Commit, verifyBranch, tip.Hash())
+	}
+}
+
+// git.Push sends refs/heads/<branch> even when HEAD is elsewhere (#281). An
+// agent can commit a broken migration onto the branch and then check out a
+// passing commit; the harness must not report a pass for a tree that is not
+// the one being pushed.
+func TestRunPlanVerificationRefusesWhenHEADIsNotTheBranchBeingPushed(t *testing.T) {
+	requireShell(t)
+	dir, repo := writePlan(t, "## Verification\n- Build: true\n")
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	// The branch moves on to a commit whose plan would fail…
+	broken := commitPlan(t, dir, repo, "## Verification\n- Build: exit 1\n")
+	// …and the agent checks the passing commit back out, leaving HEAD
+	// detached at it while the branch still points at the broken one.
+	base, err := repo.CommitObject(broken)
+	if err != nil {
+		t.Fatalf("commit object: %v", err)
+	}
+	parent, err := base.Parent(0)
+	if err != nil {
+		t.Fatalf("parent: %v", err)
+	}
+	if err := wt.Checkout(&gogit.CheckoutOptions{Hash: parent.Hash, Force: true}); err != nil {
+		t.Fatalf("detach at %s: %v", parent.Hash, err)
+	}
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status == verificationPassed {
+		t.Fatalf("status = %q — the checked tree is not the commit being pushed, so this is not a pass", v.Status)
+	}
+	if !v.incomplete() {
+		t.Errorf("status = %q, want %q", v.Status, verificationIncomplete)
+	}
+	if !strings.Contains(v.Reason, verifyBranch) {
+		t.Errorf("reason = %q, want it to name the branch and both commits", v.Reason)
+	}
+	if v.Commit != "" {
+		t.Errorf("commit = %q, want empty — nothing was verified", v.Commit)
+	}
+}
+
+// A tracked file edited but not committed means the tree the commands saw is
+// not the tree the push sends.
+func TestRunPlanVerificationRefusesWhenTrackedFilesDifferFromTheCommit(t *testing.T) {
+	requireShell(t)
+	dir, repo := writePlan(t, "## Verification\n- Build: true\n")
+	if err := os.WriteFile(filepath.Join(dir, planPath), []byte("## Verification\n- Build: exit 1\n"), 0o644); err != nil {
+		t.Fatalf("dirty the plan: %v", err)
+	}
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if !v.incomplete() {
+		t.Fatalf("status = %q, want %q — the working tree is not the committed tree", v.Status, verificationIncomplete)
+	}
+	if !strings.Contains(v.Reason, planPath) {
+		t.Errorf("reason = %q, want it to name the differing path", v.Reason)
+	}
+}
+
+// An untracked file is normal — the harness itself writes
+// .konveyor/analysis.json uncommitted — and must not block verification.
+func TestRunPlanVerificationIgnoresUntrackedFiles(t *testing.T) {
+	requireShell(t)
+	dir, repo := writePlan(t, "## Verification\n- Build: true\n")
+	if err := os.MkdirAll(filepath.Join(dir, ".konveyor"), 0o755); err != nil {
+		t.Fatalf("mkdir .konveyor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".konveyor", "analysis.json"), []byte("[]"), 0o644); err != nil {
+		t.Fatalf("write analysis: %v", err)
+	}
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status != verificationPassed {
+		t.Errorf("status = %q, want %q — an untracked file the harness wrote itself is not a mismatch", v.Status, verificationPassed)
+	}
+}
+
+// Cancellation AFTER a command has passed: the build passes, the run is
+// cancelled while the test command is running, and the test is never
+// measured. The verdict must not be the build's.
+func TestRunPlanVerificationCancelledMidPassIsIncomplete(t *testing.T) {
+	requireShell(t)
+	marker := filepath.Join(t.TempDir(), "build-ran")
+	// Build touches the marker and exits; Test then sleeps long enough to
+	// be interrupted. The watcher below cancels once the marker appears and
+	// a beat has passed, so Build has certainly exited and Test has
+	// certainly started.
+	dir, repo := writePlan(t, "## Verification\n- Build: touch "+marker+"\n- Test: sleep 5\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for {
+			if _, err := os.Stat(marker); err == nil {
+				time.Sleep(200 * time.Millisecond)
+				cancel()
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	v := runPlan(ctx, dir, repo, time.Minute, newRedactor())
+
+	if v.Status == verificationPassed {
+		t.Fatalf("status = passed — Test was never measured, so the pass is unearned")
+	}
+	if !v.incomplete() {
+		t.Fatalf("status = %q, want %q", v.Status, verificationIncomplete)
+	}
+	if !strings.Contains(v.Reason, "Test") {
+		t.Errorf("reason = %q, want it to name the command that went unmeasured", v.Reason)
+	}
+	if len(v.Commands) != 2 {
+		t.Fatalf("recorded %d commands, want 2", len(v.Commands))
+	}
+	if got := v.Commands[0]; got.Status != verifyStepPassed {
+		t.Errorf("Build = %+v, want it recorded as passed — it did pass", got)
+	}
+	if got := v.Commands[1]; got.Status != verifyStepAborted {
+		t.Errorf("Test = %+v, want %q — the gap must be visible per command, not only in the verdict",
+			got, verifyStepAborted)
+	}
+}
+
+// settle is the aggregation on its own: one passing command plus one the
+// harness never measured is not a pass, whatever order they come in.
+func TestSettlePassedPlusUnmeasuredIsIncomplete(t *testing.T) {
+	zero := 0
+	v := &verification{Status: verificationPassed, Commit: "abc123abc123", Commands: []verificationStep{
+		{Label: "Build", Status: verifyStepPassed, ExitCode: &zero},
+		{Label: "Test", Status: verifyStepAborted, Reason: "run cancelled during this command"},
+	}}
+
+	v.settle(false, newRedactor())
+
+	if v.Status != verificationIncomplete {
+		t.Fatalf("status = %q, want %q", v.Status, verificationIncomplete)
+	}
+	if !strings.Contains(v.Reason, "Test") {
+		t.Errorf("reason = %q, want it to name Test", v.Reason)
+	}
+}
+
+// The step cap hid a failing command behind a prefix of passing ones: six
+// passing commands then `Test: exit 7` reported passed, and the failure
+// never ran or appeared in the record.
+func TestRunPlanVerificationStepCapIsIncompleteNotPassed(t *testing.T) {
+	requireShell(t)
+	plan := "## Verification\n" + strings.Repeat("- Build: true\n", verifyMaxSteps) + "- Test: exit 7\n"
+	dir, repo := writePlan(t, plan)
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status == verificationPassed {
+		t.Fatalf("status = passed — a command past the cap never ran, so the section was not verified")
+	}
+	if !v.incomplete() {
+		t.Fatalf("status = %q, want %q", v.Status, verificationIncomplete)
+	}
+	if !strings.Contains(v.Reason, "not run") {
+		t.Errorf("reason = %q, want it to say the remaining commands were not run", v.Reason)
+	}
+	if len(v.Commands) != verifyMaxSteps {
+		t.Errorf("recorded %d commands, want the cap of %d", len(v.Commands), verifyMaxSteps)
+	}
+}
+
+// A real failure outranks a gap: it is the actionable finding.
+func TestRunPlanVerificationFailureOutranksAnIncompleteGap(t *testing.T) {
+	requireShell(t)
+	plan := "## Verification\n- Build: exit 3\n" + strings.Repeat("- Lint: true\n", verifyMaxSteps) + "- Test: true\n"
+	dir, repo := writePlan(t, plan)
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status != verificationFailed {
+		t.Fatalf("status = %q, want %q — a measured failure is the most actionable result", v.Status, verificationFailed)
+	}
+	if !strings.Contains(v.Reason, "Build") {
+		t.Errorf("reason = %q, want it to name the failing command", v.Reason)
+	}
+}
+
+// unmet is what enforcement acts on: failed and incomplete yes, notRun no.
+func TestVerificationUnmet(t *testing.T) {
+	cases := []struct {
+		status string
+		want   bool
+	}{
+		{verificationFailed, true},
+		{verificationIncomplete, true},
+		{verificationPassed, false},
+		{verificationNotRun, false},
+	}
+	for _, tc := range cases {
+		v := &verification{Status: tc.status}
+		if got := v.unmet(); got != tc.want {
+			t.Errorf("(%s).unmet() = %v, want %v", tc.status, got, tc.want)
+		}
+	}
+	var none *verification
+	if none.unmet() {
+		t.Error("a nil verification must not read as unmet")
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
@@ -159,6 +160,45 @@ func branchTip(repo *gogit.Repository, branch string) (plumbing.Hash, error) {
 		return plumbing.ZeroHash, fmt.Errorf("resolve branch %s: %w", branch, err)
 	}
 	return ref.Hash(), nil
+}
+
+// BranchTipSHA is branchTip for callers outside this package: the hash
+// of refs/heads/<branch>, the commit Push will actually send. Anything
+// reporting on the push — including the harness's own verification of
+// the tree it is about to push — must compare against this and not
+// HEAD.
+func BranchTipSHA(repo *gogit.Repository, branch string) (string, error) {
+	tip, err := branchTip(repo, branch)
+	if err != nil {
+		return "", err
+	}
+	return tip.String(), nil
+}
+
+// TrackedChanges returns the worktree paths whose tracked content differs
+// from HEAD — modified, staged, added or deleted — ignoring files git does
+// not track. Untracked files are excluded on purpose: the harness itself
+// writes .konveyor/analysis.json into the workspace uncommitted, so their
+// presence says nothing about whether the committed tree matches what is
+// in the working directory.
+func TrackedChanges(repo *gogit.Repository) ([]string, error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, fmt.Errorf("get worktree: %w", err)
+	}
+	st, err := wt.Status()
+	if err != nil {
+		return nil, fmt.Errorf("worktree status: %w", err)
+	}
+	var changed []string
+	for path, s := range st {
+		if s.Worktree == gogit.Untracked && s.Staging == gogit.Untracked {
+			continue
+		}
+		changed = append(changed, path)
+	}
+	sort.Strings(changed)
+	return changed, nil
 }
 
 // FileChangedSince reports whether the worktree file at relPath differs

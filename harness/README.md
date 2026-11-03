@@ -89,7 +89,7 @@ Configuration comes from two sources: environment variables (required and option
 | `HARNESS_HITL_ASK` | — | The `ask_user` tool is opt-in, normally via the run's `spec.execution.askUser` (params.json `execution.askUser`). `on` mounts it for a harness run outside the controller; `off` leaves it out even when the run asked for it |
 | `HARNESS_GIT_WRITE_CHECK` | `on` | `off` skips the pre-flight that proves the resolved credential can push to the source repository before the stage runs; only for runs that deliberately never push |
 | `HARNESS_VERIFY` | `on` | `off` skips the harness's own verification pass (the commands in `docs/plan.md`'s `## Verification` section, re-run on the final tree) |
-| `HARNESS_VERIFY_ENFORCE` | `off` | `on` fails the stage (exit `1`) when one of those commands exits non-zero. Default off: the result is recorded either way |
+| `HARNESS_VERIFY_ENFORCE` | `off` | `on` fails the stage (exit `1`) when verification comes back `failed` or `incomplete`. Default off: the result is recorded either way |
 | `HARNESS_VERIFY_TIMEOUT_SECONDS` | `600` | Per-command timeout for the verification pass; clamped to 30–3600 |
 
 ### Parameters (`/run/konveyor/params.json`)
@@ -165,6 +165,16 @@ the commands in the `## Verification` section of `docs/plan.md` itself and
 records each exit code in the termination blob, independently of anything the
 agent wrote.
 
+**Which commit the result describes.** `git.Push` sends `refs/heads/<TARGET_BRANCH>`
+whatever HEAD points at (#281), so before running anything the harness confirms
+the working tree *is* that commit: HEAD equal to the branch tip, and no tracked
+path differing from it. Untracked files are ignored — the harness itself writes
+`.konveyor/analysis.json` into the workspace uncommitted. When the tree is not
+the commit being pushed (an agent that commits onto the branch and then checks
+out a different commit), the harness records `status: "incomplete"` naming both
+commits rather than reporting a pass for a tree nobody will receive. A pass
+records the verified SHA in `verification.commit`.
+
 The plan skill specifies that section as `- Build: <command>`,
 `- Test: <command>`, `- Blackbox: <steps>`. The harness parses those lines and
 runs each **command** through `/bin/sh -c` in the clone directory, inheriting
@@ -183,26 +193,42 @@ What is **not** run, recorded line by line with a reason rather than dropped:
 - An unfilled template placeholder (`<build command, …>`), an explicit `none` /
   `n/a` / `-`, or a value too long to be a command.
 
-**A pass must be measured, never assumed.** No `docs/plan.md`, no
-`## Verification` section, a section with no runnable command, a disabled pass,
-or a stage that did not reach success all record
-`verification.status: "notRun"` **with a reason** — never an absent field and
-never `passed`.
+**A pass must be measured, never assumed.** `verification.status` is one of
+four values, and the difference between the last two is the point:
+
+| Status | Means |
+|---|---|
+| `passed` | Every command the plan named ran on the pushed commit and exited 0 |
+| `failed` | A command exited non-zero, timed out, or could not be started |
+| `notRun` | There was **nothing to measure**: no `docs/plan.md`, no `## Verification` section, no runnable command in it, `HARNESS_VERIFY=off`, or a stage that never claimed success |
+| `incomplete` | There **was** something to measure and the harness could not finish: the run was cancelled part way, the step cap left commands unrun, or the tree was not the commit being pushed |
+
+Every non-`passed` status carries a `reason`, and the field is never simply
+absent while the harness reached the end of a turn. `incomplete` is not a pass:
+a command the harness never reached — because the run was cancelled under it,
+or because the step cap dropped it — leaves a verdict that says so, rather than
+a `passed` covering work nobody checked. A measured failure outranks a gap,
+since it is the actionable finding.
 
 Bounds: each command gets `HARNESS_VERIFY_TIMEOUT_SECONDS` (default 10 min) and
 is killed as a process group, so a hung build does not survive its own timeout;
 output is captured as a bounded 64 KiB tail, logged to the pod log, and carried
 into the termination blob only for a command that did not pass, as a short
-excerpt. At most 6 Verification lines are recorded.
+excerpt. At most 12 Verification lines are run — the cap bounds the work, not
+the honesty about it, so a plan that exceeds it verdicts `incomplete`.
 
 By default a non-zero exit **does not** change the stage's phase — it is
 recorded, and surfacing it on `AgentRun.status` is #302.
-`HARNESS_VERIFY_ENFORCE=on` makes a failing command fail the stage (exit `1`).
+`HARNESS_VERIFY_ENFORCE=on` makes `failed` *or* `incomplete` fail the stage
+(exit `1`): under enforcement the stage must be verified, and a partial
+measurement is not verification. `notRun` never fails the stage — a run with no
+plan must not fail for having nothing to check.
 
 ```json
 "verification": {
   "status": "failed",
   "reason": "Build failed: npm run tsc -w client",
+  "commit": "4f2a1c9e7b30",
   "commands": [
     { "label": "Build", "command": "npm run tsc -w client", "status": "failed", "exitCode": 2, "seconds": 41.2, "output": "…45 errors" },
     { "label": "Test",  "command": "npm run test -w client", "status": "passed", "exitCode": 0, "seconds": 93.8 },

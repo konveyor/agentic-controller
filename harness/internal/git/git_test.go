@@ -880,3 +880,79 @@ func TestPushAsksTheBranchNotHEAD(t *testing.T) {
 		t.Errorf("Push of a branch still at the base = %s, %v; want skipped, nil", outcome, err)
 	}
 }
+
+func TestBranchTipSHAAndTrackedChanges(t *testing.T) {
+	dir, repo, first := initRepoWithCommit(t)
+
+	if err := repo.CreateBranch(&gogitcfg.Branch{Name: "target", Remote: "", Merge: ""}); err != nil {
+		t.Fatalf("create branch config: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if err := wt.Checkout(&gogit.CheckoutOptions{Branch: plumbing.NewBranchReferenceName("target"), Create: true}); err != nil {
+		t.Fatalf("checkout target: %v", err)
+	}
+	commitFile(t, repo, dir, "on-target.txt")
+
+	tip, err := BranchTipSHA(repo, "target")
+	if err != nil {
+		t.Fatalf("BranchTipSHA: %v", err)
+	}
+	head, err := HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+	if tip != head {
+		t.Fatalf("tip %s != head %s while on the branch", tip, head)
+	}
+	if tip == first {
+		t.Fatal("the branch tip should have moved past the first commit")
+	}
+
+	// Detaching HEAD at the base must separate the two: anything reporting
+	// on the push has to ask the branch, not HEAD.
+	if err := wt.Checkout(&gogit.CheckoutOptions{Hash: plumbing.NewHash(first), Force: true}); err != nil {
+		t.Fatalf("detach: %v", err)
+	}
+	head, err = HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+	if head == tip {
+		t.Error("HEAD should no longer equal the branch tip after detaching")
+	}
+	if again, err := BranchTipSHA(repo, "target"); err != nil || again != tip {
+		t.Errorf("BranchTipSHA = %q, %v — the branch must not follow HEAD", again, err)
+	}
+
+	if _, err := BranchTipSHA(repo, "no-such-branch"); err == nil {
+		t.Error("BranchTipSHA should fail for a branch that does not exist")
+	}
+
+	// An untracked file is not a tracked change — the harness writes
+	// .konveyor/analysis.json uncommitted on every run.
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write untracked: %v", err)
+	}
+	changed, err := TrackedChanges(repo)
+	if err != nil {
+		t.Fatalf("TrackedChanges: %v", err)
+	}
+	if len(changed) != 0 {
+		t.Errorf("TrackedChanges = %v, want none for an untracked file", changed)
+	}
+
+	// Editing a tracked file is.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("changed"), 0o644); err != nil {
+		t.Fatalf("modify tracked file: %v", err)
+	}
+	changed, err = TrackedChanges(repo)
+	if err != nil {
+		t.Fatalf("TrackedChanges: %v", err)
+	}
+	if len(changed) != 1 || changed[0] != "README.md" {
+		t.Errorf("TrackedChanges = %v, want [README.md]", changed)
+	}
+}
