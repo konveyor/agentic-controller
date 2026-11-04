@@ -98,6 +98,10 @@ type Config struct {
 	// deliberately run against a repository they never push to.
 	GitWriteCheck bool
 
+	// HubProxy inherits Hub proxies for Git and generated Maven settings.
+	// HARNESS_HUB_PROXY=off skips lookup and leaves supplied settings in control.
+	HubProxy bool
+
 	// Verify: after the agent's turn and before the final push, the
 	// harness runs the commands in the `## Verification` section of
 	// docs/plan.md itself and records each exit code, independently of
@@ -248,6 +252,7 @@ func LoadFromEnv() (*Config, error) {
 	cfg.HITLAsk = (cfg.Params.Execution.AskUser || envSwitchedOn("HARNESS_HITL_ASK")) &&
 		!envSwitchedOff("HARNESS_HITL_ASK")
 	cfg.GitWriteCheck = !envSwitchedOff("HARNESS_GIT_WRITE_CHECK")
+	cfg.HubProxy = !envSwitchedOff("HARNESS_HUB_PROXY")
 	// Verification is default-ON for the same reason the push pre-flight
 	// is: the cost of running it is one build, and the cost of not
 	// running it is a green run on a tree that does not compile (#300).
