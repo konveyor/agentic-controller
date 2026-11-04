@@ -26,6 +26,24 @@ import (
 	"github.com/konveyor/migration-harness/internal/proxy"
 )
 
+func TestConfigureProxyWithCustomDefaultTransport(t *testing.T) {
+	old := http.DefaultTransport
+	http.DefaultTransport = &struct{ http.RoundTripper }{old}
+	defer func() { http.DefaultTransport = old }()
+	var requests atomic.Int32
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer origin.Close()
+	restore := ConfigureProxy(func(*http.Request) (*url.URL, error) { return nil, nil })
+	defer restore()
+	_, err := Clone(context.Background(), &Credentials{RepoURL: origin.URL + "/remote.git"}, filepath.Join(t.TempDir(), "clone"))
+	if err == nil || requests.Load() == 0 {
+		t.Fatalf("expected Git authentication failure after reaching the server; err=%v, requests=%d", err, requests.Load())
+	}
+}
+
 func TestGitLifecycleThroughAuthenticatedProxy(t *testing.T) {
 	gitBinary, err := exec.LookPath("git")
 	if err != nil {
