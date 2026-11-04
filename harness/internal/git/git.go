@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	gogit "github.com/go-git/go-git/v5"
@@ -159,6 +160,49 @@ func branchTip(repo *gogit.Repository, branch string) (plumbing.Hash, error) {
 		return plumbing.ZeroHash, fmt.Errorf("resolve branch %s: %w", branch, err)
 	}
 	return ref.Hash(), nil
+}
+
+// BranchTipSHA is branchTip for callers outside this package: the hash
+// of refs/heads/<branch>, the commit Push will actually send. Anything
+// reporting on the push — including the harness's own verification of
+// the tree it is about to push — must compare against this and not
+// HEAD.
+func BranchTipSHA(repo *gogit.Repository, branch string) (string, error) {
+	tip, err := branchTip(repo, branch)
+	if err != nil {
+		return "", err
+	}
+	return tip.String(), nil
+}
+
+// UncommittedPaths returns every worktree path whose content is not in the
+// commit at HEAD: modified, staged, added or deleted tracked files, AND
+// untracked files git is not ignoring.
+//
+// The untracked half matters as much as the tracked half. A build that
+// succeeds in the working directory can be reading a source file the agent
+// created and never committed, which the pushed commit does not contain, so
+// a clean checkout of that commit does not compile. Anything comparing the
+// working directory against the commit being pushed has to count those too.
+//
+// Ignored paths are excluded because git excludes them: go-git's Status
+// honours .gitignore, so a project's build output (node_modules, target,
+// dist) does not show up here, while a stray source file does.
+func UncommittedPaths(repo *gogit.Repository) ([]string, error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, fmt.Errorf("get worktree: %w", err)
+	}
+	st, err := wt.Status()
+	if err != nil {
+		return nil, fmt.Errorf("worktree status: %w", err)
+	}
+	paths := make([]string, 0, len(st))
+	for path := range st {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths, nil
 }
 
 // FileChangedSince reports whether the worktree file at relPath differs
