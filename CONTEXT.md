@@ -195,9 +195,14 @@ to runtime-specific configuration (e.g. `GOOSE_MAX_TURNS`,
 for cumulative cost and enforces cost limits via cancel-then-handoff.
 Turn limits are enforced by the runtime natively; the harness
 reserves 15-20% of the turn budget for a handoff prompt when the
-runtime stops. On exit, the harness writes usage data to
-`/dev/termination-log` as opaque JSON; the controller copies it to
-`AgentRunStatus.terminationData` without interpretation.
+runtime stops. On exit, the harness writes usage data and its own
+verification record to `/dev/termination-log` as opaque JSON; the
+controller copies the blob to `AgentRunStatus.terminationData`
+verbatim and reads exactly two keys of it — `verification.status`,
+which it maps onto the `Verified` condition, and `verification.commit`,
+which it names in that condition's message (see Verification).
+Everything else, the per-command evidence included, stays
+uninterpreted.
 In both modes, the harness launches the agent
 runtime and pushes to the target branch on exit. The agent commits
 locally; the harness pushes. The harness is domain-specific — other
@@ -285,6 +290,26 @@ from success. The limit-reached wind-down writes to the same file
 _Avoid_: reading anything else in the handoff from the harness — the
 section body is knowledge for the next stage, not execution control;
 `Refused` for what the machinery broke — that is `Failed`.
+
+**Verification** — The harness re-running the commands in the plan's
+own `## Verification` section (`docs/plan.md`) after the agent's turn
+and before the push, and recording what each one exited with under the
+`verification` key of the termination blob (#300, ADR 0018). It
+measures the work; the handoff `- Status:` line is the agent's own
+claim about it (see Handoff), and the two disagreeing is the case the
+measurement exists for. The verdict is `passed`, `failed`, `notRun`
+(nothing to measure, carrying a reason) or `incomplete` (there was
+something to measure and the harness could not finish it). The controller
+maps that one key onto the `Verified` condition on AgentRun: `True`
+only from an explicit `passed`, `False` for the other three, `Unknown`
+when no verdict could be read. It changes neither `phase` nor
+`Succeeded`, so a run can be `Succeeded=True` with `Verified=False`;
+`HARNESS_VERIFY_ENFORCE=on` makes `failed` or `incomplete` fail the
+stage in the harness instead (exit `1`).
+_Avoid_: treating `Verified=Unknown`, or an absent condition, as a
+pass — only `VerificationPassed` is one; reading the per-command
+evidence from the controller — it stays in `terminationData` for the
+UI to render.
 
 **Interrogation Record** — The committed file an Interrogation
 produces, `.konveyor/interrogation.md`: one block per decision carrying
