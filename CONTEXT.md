@@ -298,18 +298,25 @@ and before the push, and recording what each one exited with under the
 measures the work; the handoff `- Status:` line is the agent's own
 claim about it (see Handoff), and the two disagreeing is the case the
 measurement exists for. The verdict is `passed`, `failed`, `notRun`
-(nothing to measure, carrying a reason) or `incomplete` (there was
-something to measure and the harness could not finish it). The controller
+(nothing to measure — a section the harness read that names nothing
+scorable, no section, no plan — carrying a reason) or `incomplete`
+(there was something to measure and the harness could not finish or
+could not read it: commands sitting inside a fenced block, which is
+dropped before parsing, are unreadable, not absent — #336). The controller
 maps that one key onto the `Verified` condition on AgentRun: `True`
 only from an explicit `passed`, `False` for the other three, `Unknown`
 when no verdict could be read. It changes neither `phase` nor
 `Succeeded`, so a run can be `Succeeded=True` with `Verified=False`;
 `HARNESS_VERIFY_ENFORCE=on` makes `failed` or `incomplete` fail the
-stage in the harness instead (exit `1`).
+stage in the harness instead (exit `1`). `notRun` never fails a stage,
+under enforcement or not — which is why the line between the two
+verdicts is what the harness understood, not what it ran.
 _Avoid_: treating `Verified=Unknown`, or an absent condition, as a
 pass — only `VerificationPassed` is one; reading the per-command
 evidence from the controller — it stays in `terminationData` for the
-UI to render.
+UI to render; `notRun` for a section whose content the harness dropped
+— unreadable is not absent, and `notRun` is the verdict enforcement
+ignores.
 
 **Interrogation Record** — The committed file an Interrogation
 produces, `.konveyor/interrogation.md`: one block per decision carrying

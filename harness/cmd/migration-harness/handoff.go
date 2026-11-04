@@ -164,8 +164,42 @@ func lastHandoffSection(content string) []string {
 // it, so the harness finds no verdict and the workflow advances from a
 // stage that refused its task — the very thing #241 closed.
 func handoffProse(content string) []string {
+	entries := handoffProseLines(content)
+	prose := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.Fence {
+			prose = append(prose, entry.Text)
+		}
+	}
+	return prose
+}
+
+// proseLine is one entry of a document read as prose: either a line that no
+// fenced block covered, or the place where a fenced block was dropped.
+type proseLine struct {
+	// Text is the line itself, or, for a dropped block, its opening fence
+	// line including any info string, trimmed — so a reader can tell a
+	// ```bash block from a quoted ```markdown template.
+	Text string
+	// Fence marks this entry as a removed block rather than prose. A
+	// reader that wants only prose drops these (handoffProse); a reader
+	// that must know whether content went missing keeps them.
+	Fence bool
+}
+
+// handoffProseLines is handoffProse with a marker left where each fenced
+// block was, in the block's own position in the stream.
+//
+// The marker exists because dropping a fence is right for what the fence
+// might contain and wrong for what the dropping implies: a `## Verification`
+// section whose every command sits inside a fence parses as a section that
+// named no command, and the verification pass then reports "there was
+// nothing to measure" over a plan that listed six commands (#336). Nothing
+// here reads the block's contents — they stay dropped, for the reason above
+// — it only records that there were some.
+func handoffProseLines(content string) []proseLine {
 	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
-	prose := make([]string, 0, len(lines))
+	prose := make([]proseLine, 0, len(lines))
 	fence := ""
 	for _, line := range lines {
 		marker := handoffFence.FindStringSubmatch(line)
@@ -173,9 +207,10 @@ func handoffProse(content string) []string {
 		case fence == "":
 			if marker != nil {
 				fence = marker[1]
+				prose = append(prose, proseLine{Text: strings.TrimSpace(line), Fence: true})
 				continue
 			}
-			prose = append(prose, line)
+			prose = append(prose, proseLine{Text: line})
 		// Only a bare run of the opening character, at least as long as
 		// the opening fence, closes it: an inner ``` inside a ~~~ block,
 		// or one carrying an info string, is content.

@@ -326,7 +326,14 @@ Maven settings the agent's own shell had, since the harness is the process that
 started the runtime in this container. Hub credentials were already cleared from
 that environment before the agent ran, so verification does not see them either.
 Fenced code blocks are skipped before parsing, so a plan quoting the plan
-template back cannot supply commands it never meant.
+template back cannot supply commands it never meant. That cuts both ways: a
+real plan wrote its six commands *inside* a ```` ```bash ```` block with prose
+around them, and the parser saw none of them (#336). The harness still does not
+read fenced blocks — it cannot tell a plan's own commands from a quoted
+template's `<build command>` placeholder — but a section that names no command
+outside one is reported as `incomplete`, naming the block, rather than as
+"nothing to measure". The commands have to be list items for the harness to run
+them.
 
 What is **not** run, recorded line by line with a reason rather than dropped:
 
@@ -343,6 +350,16 @@ What is **not** run, recorded line by line with a reason rather than dropped:
   sub-bullet under a later `### Automated checks` is scored, not skipped.
 - An unfilled template placeholder (`<build command, …>`), an explicit `none` /
   `n/a` / `-`, or a value too long to be a command.
+- A value that **reads as English** rather than as a command: one whose first
+  word is a skip word followed by the plan's reasoning for it, or one carrying a
+  sentence boundary (a letter, a full stop, a capitalised next word or the end
+  of the line). `**Runtime verification**: skipped — this migration changes only
+  the query library API surface, not application behavior. The type system
+  enforces correctness.` is 132 runes, well under the length guard, and before
+  #336 it went to `/bin/sh -c`, which recorded `/bin/sh: skipped: command not
+  found` as that tree's verification result. A command is a program and its
+  arguments; it does not end a word with a full stop, which is why `go test
+  ./...`, `find . -name x` and `. ./scripts/env.sh && npm test` are still run.
 
 **A pass must be measured, never assumed.** `verification.status` is one of
 four values, and the difference between the last two is the point:
@@ -351,8 +368,16 @@ four values, and the difference between the last two is the point:
 |---|---|
 | `passed` | Every command the plan named ran on the pushed commit and exited 0 |
 | `failed` | A command exited non-zero, timed out, or could not be started |
-| `notRun` | There was **nothing to measure**: no `docs/plan.md`, no `## Verification` section, no runnable command in it, `HARNESS_VERIFY=off`, or a stage that never claimed success |
-| `incomplete` | There **was** something to measure and the harness could not finish, or could not attribute the result to the pushed commit: the run was cancelled part way, the step cap or the pass budget left commands unrun, HEAD was not the branch tip, or the working tree held paths the commit does not |
+| `notRun` | There was **nothing to measure**: no `docs/plan.md`, no `## Verification` section, a section the harness read that names nothing scorable (`Blackbox` only, an explicit `none`, an unfilled placeholder), `HARNESS_VERIFY=off`, or a stage that never claimed success |
+| `incomplete` | There **was** something to measure and the harness could not finish it, could not read it, or could not attribute the result to the pushed commit: the section's commands were inside a fenced block, the run was cancelled part way, the step cap or the pass budget left commands unrun, HEAD was not the branch tip, or the working tree held paths the commit does not |
+
+The line between the last two is what the harness *understood*, not what it
+ran. A section that was read and had nothing scorable in it is `notRun`: the
+plan skill specifies `Blackbox` as manual steps with no exit code, and a plan
+that did as it was asked must not fail for it. A section whose content never
+reached the parser — commands sitting in a dropped fence — is `incomplete`:
+there was something to measure and the harness cannot say what it would have
+measured.
 
 Every non-`passed` status carries a `reason`, and the field is never simply
 absent while the harness reached the end of a turn. `incomplete` is not a pass:

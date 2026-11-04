@@ -21,7 +21,13 @@ import (
 const verifyBranch = "migration-target"
 
 // planFromSkill is the Verification section as the plan skill specifies it
-// (catalog/skills/plan/SKILL.md) and as a real plan writes it.
+// (catalog/skills/plan/SKILL.md).
+//
+// It used to say "and as a real plan writes it". That second half was the
+// assumption #336 measured and disproved: the plan agent on the run that
+// motivated #300 wrote the same commands inside a fenced block with prose
+// around them, which this parser cannot read at all. See planFromRealRun —
+// the skill specifies this form, but nothing makes a plan use it.
 const planFromSkill = `# Migration Plan
 
 ## Summary
@@ -41,6 +47,46 @@ const planFromSkill = `# Migration Plan
 ## Notes
 Nothing special.
 `
+
+// planFromRealRun is the Verification section the plan agent actually wrote
+// on workflow run `ui-5nlrx`, from `ibolton336/tackle2-ui@f31caea66` — the
+// tree that reported "Build: passed, remaining errors: none" while `tsc`
+// failed with 45 errors, the artefact #300 was filed for. Reproduced
+// verbatim from the measurement in #336, because an invented fixture is what
+// let this shape through: every command it names is inside a fenced block
+// that is dropped before parsing, and the one line that survives is English.
+const planFromRealRun = "# Migration Plan\n" + `
+## Verification
+
+Run from the repository root:
+
+` + "```bash" + `
+npm ci
+npm run build -w common
+npm run tsc -w client
+npm run lint -w client
+npm run format:check
+npm run test -w client -- --maxWorkers=2
+` + "```" + `
+
+` + "`tsc`" + ` is the authoritative check: it is the only one of these that sees the whole type graph.
+
+**Runtime verification**: ` + realRunProse + `
+`
+
+// realRunProse is the prose value that, before #336, reached `/bin/sh -c`
+// and recorded `/bin/sh: skipped: command not found` as this tree's
+// measured verification result.
+const realRunProse = "skipped — this migration changes only the query library API surface, " +
+	"not application behavior. The type system enforces correctness."
+
+// planFromRealRunBareSkip is planFromRealRun with that prose shortened to
+// the bare word `verifyEmptyValues` already covered — the one-word edit
+// that, in #336's measurement, turned the verdict from a bogus `failed` into
+// a `notRun` which never fails a stage, leaving the original false green
+// intact. The fence is unchanged, so this must verdict the same way as the
+// line it came from.
+var planFromRealRunBareSkip = strings.Replace(planFromRealRun, realRunProse, "skipped", 1)
 
 // writePlan builds a workspace the harness will verify: a git repository on
 // verifyBranch whose committed tree holds the plan, so the working tree is
@@ -106,7 +152,10 @@ func TestParsePlanVerification(t *testing.T) {
 		content       string
 		wantFound     bool
 		wantTruncated bool
-		wantSteps     []planStep
+		// wantFence is the opening fence line the parser must report for
+		// a section whose content sat inside a fenced block.
+		wantFence string
+		wantSteps []planStep
 	}{
 		{
 			name:      "the plan skill's own Verification section",
@@ -160,11 +209,66 @@ func TestParsePlanVerification(t *testing.T) {
 		},
 		{
 			// handoffProse drops fences first, so a plan quoting the
-			// template back cannot supply commands it never meant.
+			// template back cannot supply commands it never meant. The
+			// block is reported, but a section that also names a real
+			// command is measured on that command.
 			name:      "a fenced template excerpt supplies nothing",
 			content:   "## Verification\n- Build: make\n\n```markdown\n## Verification\n- Build: <build command>\n```\n",
 			wantFound: true,
+			wantFence: "```markdown",
 			wantSteps: []planStep{{Label: "Build", Command: "make"}},
+		},
+		{
+			// #336. The plan agent's own output on the run that motivated
+			// #300: six commands in a fence, and one bold prose line. The
+			// commands are dropped before parsing, and the prose line must
+			// not take their place — it used to be handed to `sh -c`,
+			// which exited 127 on the word `skipped`.
+			name:      "the Verification section a real plan wrote",
+			content:   planFromRealRun,
+			wantFound: true,
+			wantFence: "```bash",
+			wantSteps: []planStep{
+				{Label: "Runtime verification", Skip: `the plan says "skipped" here, not a command`},
+			},
+		},
+		{
+			// The same plan with the prose cut to the bare word: a
+			// different skip reason, the same fence, and so the same
+			// verdict. One word of prose must not be the difference.
+			name:      "the same plan with its prose cut to the bare word",
+			content:   planFromRealRunBareSkip,
+			wantFound: true,
+			wantFence: "```bash",
+			wantSteps: []planStep{
+				{Label: "Runtime verification", Skip: "the plan names no command here"},
+			},
+		},
+		{
+			// A fence is not what makes a value prose: the sentence is.
+			// `- Runtime: not needed — the types enforce it.` is 44 runes,
+			// well under verifyCommandMaxLen, and is not a command.
+			name:      "a short sentence is prose, not a command",
+			content:   "## Verification\n- Runtime: not needed — the types enforce it.\n- Build: make\n",
+			wantFound: true,
+			wantSteps: []planStep{
+				{Label: "Runtime", Skip: "prose, not a command (reads as a sentence)"},
+				{Label: "Build", Command: "make"},
+			},
+		},
+		{
+			// The prose heuristic must not eat real commands: a dot in a
+			// path, a `./...` package pattern, a `--` separator.
+			name: "commands that contain dots are still commands",
+			content: "## Verification\n- Test: go test ./...\n- Lint: bash scripts/lint.sh\n" +
+				"- Unit: npm run test -w client -- --maxWorkers=2\n- Find: find . -name '*.java'\n",
+			wantFound: true,
+			wantSteps: []planStep{
+				{Label: "Test", Command: "go test ./..."},
+				{Label: "Lint", Command: "bash scripts/lint.sh"},
+				{Label: "Unit", Command: "npm run test -w client -- --maxWorkers=2"},
+				{Label: "Find", Command: "find . -name '*.java'"},
+			},
 		},
 		{
 			name:      "a prose value too long to be a command is skipped",
@@ -191,19 +295,22 @@ func TestParsePlanVerification(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			steps, truncated, found := parsePlanVerification(tc.content)
-			if found != tc.wantFound {
-				t.Fatalf("found = %v, want %v", found, tc.wantFound)
+			parsed := parsePlanVerification(tc.content)
+			if parsed.Found != tc.wantFound {
+				t.Fatalf("found = %v, want %v", parsed.Found, tc.wantFound)
 			}
-			if truncated != tc.wantTruncated {
-				t.Errorf("truncated = %v, want %v", truncated, tc.wantTruncated)
+			if parsed.Truncated != tc.wantTruncated {
+				t.Errorf("truncated = %v, want %v", parsed.Truncated, tc.wantTruncated)
 			}
-			if len(steps) != len(tc.wantSteps) {
-				t.Fatalf("got %d steps %+v, want %d", len(steps), steps, len(tc.wantSteps))
+			if parsed.Fence != tc.wantFence {
+				t.Errorf("fence = %q, want %q", parsed.Fence, tc.wantFence)
+			}
+			if len(parsed.Steps) != len(tc.wantSteps) {
+				t.Fatalf("got %d steps %+v, want %d", len(parsed.Steps), parsed.Steps, len(tc.wantSteps))
 			}
 			for i, want := range tc.wantSteps {
-				if steps[i] != want {
-					t.Errorf("step %d = %+v, want %+v", i, steps[i], want)
+				if parsed.Steps[i] != want {
+					t.Errorf("step %d = %+v, want %+v", i, parsed.Steps[i], want)
 				}
 			}
 		})
@@ -305,9 +412,23 @@ func TestRunPlanVerificationNotRun(t *testing.T) {
 			wantReason: "is empty",
 		},
 		{
+			// Must stay notRun after #336. The plan skill specifies
+			// Blackbox as manual steps with no exit code, so a section
+			// that is only Blackbox genuinely has nothing to score — it
+			// was read and understood, unlike the fenced case, and
+			// failing the stage on it would fail a plan that did as it
+			// was asked.
 			name: "a Verification section naming only manual steps",
 			setup: func(t *testing.T) (string, *gogit.Repository) {
 				return writePlan(t, "## Verification\n- Blackbox: start the app and click around\n- Test: none\n")
+			},
+			wantReason: "names no command to run",
+		},
+		{
+			name: "a Verification section whose only line is a Blackbox paragraph",
+			setup: func(t *testing.T) (string, *gogit.Repository) {
+				return writePlan(t, "## Verification\n- Blackbox: start the app with npm run start:dev "+
+					"and check the applications table loads\n")
 			},
 			wantReason: "names no command to run",
 		},
@@ -328,6 +449,113 @@ func TestRunPlanVerificationNotRun(t *testing.T) {
 			}
 			if !strings.Contains(v.Reason, tc.wantReason) {
 				t.Errorf("reason = %q, want it to mention %q", v.Reason, tc.wantReason)
+			}
+		})
+	}
+}
+
+// TestRunPlanVerificationIncompleteWhenThePlansCommandsAreUnreadable is
+// #336's measurement as a test. A `## Verification` section whose commands
+// sit inside a fenced block was read by the harness and not understood by
+// it; that is a gap, not an absent measurement, and the difference matters
+// because `notRun` never fails a stage even under HARNESS_VERIFY_ENFORCE=on
+// while `incomplete` does. Both shapes below are the same plan — the second
+// differs by one shortened sentence, the edit that used to flip the verdict
+// between a bogus `failed` and a stage-passing `notRun`.
+func TestRunPlanVerificationIncompleteWhenThePlansCommandsAreUnreadable(t *testing.T) {
+	requireShell(t)
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{name: "the plan agent's own Verification section", content: planFromRealRun},
+		{name: "the same section with its prose cut to the bare word", content: planFromRealRunBareSkip},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, repo := writePlan(t, tc.content)
+			v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+			if v.Status != verificationIncomplete {
+				t.Fatalf("status = %q (reason %q), want %q — a section the harness could not read is not "+
+					"a section with nothing in it", v.Status, v.Reason, verificationIncomplete)
+			}
+			if !v.unmet() {
+				t.Error("an unreadable Verification section must count as unmet under enforcement")
+			}
+			// The reason has to tell a reader WHY nothing ran, or the next
+			// person to see it writes the same plan again.
+			for _, want := range []string{"fenced", "```bash"} {
+				if !strings.Contains(v.Reason, want) {
+					t.Errorf("reason = %q, want it to mention %q", v.Reason, want)
+				}
+			}
+			// Nothing was handed to a shell: the prose line is not a
+			// command, and the fence's contents were never read.
+			for _, c := range v.Commands {
+				if c.Command != "" {
+					t.Errorf("recorded command %q — the plan named none the harness can run", c.Command)
+				}
+			}
+		})
+	}
+}
+
+// TestClassifyVerifyItemNeverRunsProse pins the shapes that must not reach
+// `sh -c`, and the ones that must still get there.
+func TestClassifyVerifyItemNeverRunsProse(t *testing.T) {
+	cases := []struct {
+		name        string
+		label       string
+		value       string
+		wantCommand string
+	}{
+		{
+			// The measured case: `/bin/sh: skipped: command not found`
+			// recorded as this tree's verification result (#336).
+			name:  "a skip word followed by a sentence of reasoning",
+			label: "Runtime verification",
+			value: realRunProse,
+		},
+		{
+			name:  "a sentence with no skip word",
+			label: "Runtime",
+			value: "not needed — the type system enforces correctness.",
+		},
+		{
+			name:  "two sentences",
+			label: "Smoke",
+			value: "Start the app. Then click through the applications table.",
+		},
+		{name: "an explicit none", label: "Test", value: "none"},
+		{
+			name:        "a command whose argument is a dotted path",
+			label:       "Build",
+			value:       "mvn -q -f pom.xml clean verify",
+			wantCommand: "mvn -q -f pom.xml clean verify",
+		},
+		{
+			name:        "a command sourcing a file",
+			label:       "Test",
+			value:       ". ./scripts/env.sh && npm test",
+			wantCommand: ". ./scripts/env.sh && npm test",
+		},
+		{
+			name:        "the real plan's own commands, had they been list items",
+			label:       "Typecheck",
+			value:       "npm run tsc -w client",
+			wantCommand: "npm run tsc -w client",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			step := classifyVerifyItem(tc.label, tc.value)
+			if step.Command != tc.wantCommand {
+				t.Errorf("command = %q, want %q", step.Command, tc.wantCommand)
+			}
+			if tc.wantCommand == "" && step.Skip == "" {
+				t.Error("a line that is not a command must be skipped WITH a reason, not dropped silently")
 			}
 		})
 	}
@@ -827,9 +1055,10 @@ func TestParsePlanVerificationNestedProseStepsAreNotCommands(t *testing.T) {
 		"  - Check the endpoint: curl -sf localhost:8080/q/health\n" +
 		"- Test: mvn test\n"
 
-	steps, _, found := parsePlanVerification(content)
+	parsed := parsePlanVerification(content)
+	steps := parsed.Steps
 
-	if !found {
+	if !parsed.Found {
 		t.Fatal("found = false, want the section")
 	}
 	if len(steps) != 5 {
@@ -863,9 +1092,10 @@ func TestParsePlanVerificationHeadingEndsTheManualList(t *testing.T) {
 		"### Automated checks\n" +
 		"  - Test: exit 7\n"
 
-	steps, _, found := parsePlanVerification(content)
+	parsed := parsePlanVerification(content)
+	steps := parsed.Steps
 
-	if !found {
+	if !parsed.Found {
 		t.Fatal("found = false, want the section")
 	}
 	if len(steps) != 3 {
@@ -878,7 +1108,7 @@ func TestParsePlanVerificationHeadingEndsTheManualList(t *testing.T) {
 
 // Tab-indented sub-bullets nest like space-indented ones.
 func TestParsePlanVerificationNestedWithTabs(t *testing.T) {
-	steps, _, _ := parsePlanVerification("## Verification\n- Blackbox:\n\t- Start the app: npm start\n")
+	steps := parsePlanVerification("## Verification\n- Blackbox:\n\t- Start the app: npm start\n").Steps
 	if len(steps) != 2 {
 		t.Fatalf("got %d steps %+v, want 2", len(steps), steps)
 	}

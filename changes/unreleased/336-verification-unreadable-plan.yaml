@@ -1,0 +1,15 @@
+kind: bugfix
+description: >
+  Stop the harness's verification pass running a plan's prose as a shell command,
+  and stop it reporting a Verification section it could not read as a section with
+  nothing to measure. A real plan wrote its six commands inside a ```bash block
+  with prose around them: fenced blocks are dropped before parsing (so a quoted
+  plan template cannot have its placeholders run), which discarded every command,
+  left one bold prose line as the only item, and handed 132 runes of English to
+  /bin/sh -c — recording "skipped: command not found" as that tree's verification
+  result. Shortening the same prose to the bare word "skipped" instead produced
+  notRun, which never fails a stage, so a tree failing tsc with 45 errors kept its
+  green. A value that reads as English is now skipped with a reason rather than
+  run, and a section naming no command outside a fenced block verdicts incomplete
+  naming the block — unreadable is not absent, and only incomplete fails a stage
+  under HARNESS_VERIFY_ENFORCE=on. A Blackbox-only section still reports notRun.
