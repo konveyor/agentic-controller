@@ -71,8 +71,7 @@ USER 0
 WORKDIR /src/harness
 COPY api/go.mod api/go.sum /src/api/
 COPY harness/go.mod harness/go.sum ./
-COPY hack/go-mod-download.sh /usr/local/bin/go-mod-download.sh
-RUN sh /usr/local/bin/go-mod-download.sh
+RUN go mod download
 COPY api/ /src/api/
 COPY harness/cmd/ cmd/
 COPY harness/internal/ internal/

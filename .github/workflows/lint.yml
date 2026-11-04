@@ -27,9 +27,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Download Go modules
-        run: sh hack/go-mod-download.sh
-
       - name: Check linter configuration
         run: make lint-config
       - name: Run linter
@@ -50,10 +47,6 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: api/go.mod
-
-      - name: Download Go modules
-        working-directory: api
-        run: sh ../hack/go-mod-download.sh
 
       - name: Check formatting
         working-directory: api
@@ -78,10 +71,6 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: harness/go.mod
-
-      - name: Download Go modules
-        working-directory: harness
-        run: sh ../hack/go-mod-download.sh
 
       - name: Check formatting
         working-directory: harness

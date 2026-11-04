@@ -16,8 +16,7 @@ COPY api/go.mod api/go.mod
 COPY api/go.sum api/go.sum
 # cache deps before building and copying source so that we don't need to re-download as much
 # and so that source changes don't invalidate our downloaded layer
-COPY hack/go-mod-download.sh /usr/local/bin/go-mod-download.sh
-RUN sh /usr/local/bin/go-mod-download.sh
+RUN go mod download
 
 # Copy the Go source (relies on .dockerignore to filter)
 COPY . .

@@ -17,7 +17,6 @@ limitations under the License.
 package ci
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,54 +26,6 @@ import (
 
 	yaml "sigs.k8s.io/yaml/goyaml.v3"
 )
-
-func TestGoModuleDownloadRetries(t *testing.T) {
-	script, err := filepath.Abs("../../hack/go-mod-download.sh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tt := range []struct {
-		name     string
-		failures int
-		attempts int
-		exitCode int
-		backoff  string
-	}{
-		{name: "warm cache", attempts: 1},
-		{name: "transient failure", failures: 2, attempts: 3, backoff: "5\n10\n"},
-		{name: "persistent failure", failures: 9, attempts: 3, exitCode: 7, backoff: "5\n10\n"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			writeFile(t, filepath.Join(dir, "go"), `#!/bin/sh
-echo "$*" >> "$RETRY_STATE/attempts"
-attempt=$(wc -l < "$RETRY_STATE/attempts")
-if [ "$attempt" -le "$DOWNLOAD_FAILURES" ]; then
-    echo 'stream error: INTERNAL_ERROR; received from peer' >&2
-    exit 7
-fi
-`, 0o755)
-			writeFile(t, filepath.Join(dir, "sleep"), "#!/bin/sh\necho \"$1\" >> \"$RETRY_STATE/backoff\"\n", 0o755)
-			cmd := exec.Command("sh", script, "-x")
-			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
-				"RETRY_STATE="+dir, fmt.Sprintf("DOWNLOAD_FAILURES=%d", tt.failures))
-			out, runErr := cmd.CombinedOutput()
-			if got := cmd.ProcessState.ExitCode(); got != tt.exitCode {
-				t.Fatalf("exit = %d, want %d (%v): %s", got, tt.exitCode, runErr, out)
-			}
-			if got := readFile(t, filepath.Join(dir, "attempts")); got != strings.Repeat("mod download -x\n", tt.attempts) {
-				t.Errorf("unexpected download calls: %q", got)
-			}
-			if tt.backoff != "" {
-				if got := readFile(t, filepath.Join(dir, "backoff")); got != tt.backoff {
-					t.Errorf("backoff = %q, want %q", got, tt.backoff)
-				}
-			} else if _, err := os.Stat(filepath.Join(dir, "backoff")); !os.IsNotExist(err) {
-				t.Errorf("successful download should not sleep: %v", err)
-			}
-		})
-	}
-}
 
 // Queue refs must run through merge_group exactly once, while ordinary PRs
 // and pushes to supported branches retain their checks.
