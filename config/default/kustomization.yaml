@@ -241,6 +241,12 @@ patches:
 # enumeration Job run the controller's image, and `kustomize edit set image`
 # only rewrites the image field, so without this the env var would keep the
 # placeholder while the container moved.
+#
+# VERIFICATION_IMAGE deliberately has no replacement here: the Gateway
+# verification Job runs the agent image, which is built and tagged
+# independently of the manager, so there is nothing for it to track. It is
+# left empty in config/manager, and the controller falls back to
+# quay.io/konveyor/agentic-controller-agent:latest.
 replacements:
 - source:
     kind: Deployment
