@@ -9,7 +9,7 @@ authors:
   - "Savitha Raghunathan"
 last_reviewed: "2026-11-04"
 implementation_status: amended
-review_note: "Release 0.11 backports Maven credential setup and shared Hub proxies while retaining the release's execution and Git APIs. Deployed MTA 8.3 token scopes and image verification remain a release check."
+review_note: "Release 0.11 retains its execution and Git APIs. Hub proxy lookup and shared validation remain strict; unsupported Maven proxy conversion warns and preserves supplied settings without blocking runs. Deployed MTA 8.3 token scopes and image verification remain a release check."
 ---
 
 # ADR 0007: Harness as Thin Single-Stage Runner with SkillCard-Based Skills
@@ -87,6 +87,18 @@ brace passwords. Maven may report failed decryption of brace values while
 retaining the original credential. Setup remains independent of installed
 toolchains: generated Maven proxy incompatibilities also stop non-Java runs,
 with explicit settings or `HARNESS_HUB_PROXY=off` as the supplied workarounds.
+
+**Update (2026-11-04):** Further review replaces fatal Maven proxy conversion
+with warning-and-continue behavior. When inherited exclusions or credential
+syntax cannot be represented safely, skip the entire automatic Maven proxy
+addition rather than dropping individual entries. Preserve supplied Maven
+settings byte-for-byte, including repository credentials and their redaction;
+without a Maven credential, leave the user settings file absent. Git retains
+its valid proxy policy. Maven may later use direct/default access and fail at
+the build step if explicit proxy settings are required. This applies to all
+images without toolchain detection and supersedes the earlier startup-failure
+choice for Maven conversion only. Hub lookup/shared validation, malformed
+supplied settings, and filesystem errors retain their existing error handling.
 
 
 ## Context

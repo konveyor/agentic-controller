@@ -65,9 +65,16 @@ func prepareMavenSettings(client *hub.Client, appID string, red *redactor, proxi
 		}
 		settings = identity.Settings
 	}
-	settings, err = withMavenProxies(settings, proxies)
-	if err != nil {
+	generated, err := withMavenProxies(settings, proxies)
+	if errors.Is(err, errMavenProxyConversion) {
+		logging.Warn("skipping automatic Maven proxy configuration: %v; continuing with supplied/default Maven settings; supply explicit Maven proxy settings if needed", err)
+		if identity == nil {
+			return nil
+		}
+	} else if err != nil {
 		return err
+	} else {
+		settings = generated
 	}
 	if err := red.addMavenSettings(settings); err != nil {
 		return err

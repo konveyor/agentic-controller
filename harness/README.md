@@ -145,8 +145,8 @@ in the harness and are cleared from the agent runtime's environment.
 Every standalone AgentRun and every fresh workflow stage resolves enabled Hub
 HTTP/HTTPS proxies and decrypted identities before cloning or launching the
 runtime. The Hub token needs read access to `/proxies` and referenced decrypted
-identities. Disabled proxies are ignored. Lookup and configuration errors stop
-startup; an empty proxy list preserves direct access unless the run supplies
+identities. Disabled proxies are ignored. Lookup and shared proxy validation
+errors stop startup; an empty proxy list preserves direct access unless the run supplies
 its own Git proxy environment.
 
 Set `HARNESS_HUB_PROXY=off` to skip automatic Hub proxy lookup and injection for
@@ -194,23 +194,27 @@ surrounding whitespace is trimmed. A bare domain matches itself and its
 subdomains; a leading-dot domain matches only subdomains. Matches bypass all
 inherited proxies for both tools, including Maven's HTTP fallback. Git also supports
 inherited CIDRs and port-specific exclusions. Maven cannot represent those forms;
-they stop setup only when the harness needs to generate Maven proxy settings.
+automatic Maven proxy conversion then emits a warning and skips the entire
+inherited Maven proxy block. Supplied Maven settings remain unchanged; without
+a Maven credential, no proxy-only settings file is created.
 Existing user settings, Secret mounts, and an explicit Hub Maven `<proxies>` section
 remain authoritative and bypass Maven exclusion validation. URLs and malformed
-exclusions still fail shared validation. Errors name the inheritance opt-out;
-unsupported exclusions are never silently dropped.
+exclusions still fail shared validation. Those errors name the inheritance
+opt-out. Unsupported exclusions are never dropped from a partial Maven proxy
+configuration: all automatic Maven proxy entries are skipped together.
 
 Maven settings preparation runs for every invocation, including images without
-Maven installed. A CIDR or port-specific exclusion therefore also stops a Go,
-Node.js or C# run unless Maven settings are explicitly supplied or inheritance
-is disabled. The harness does not infer future Maven use from installed tools;
-projects may use Maven wrappers or install tools during execution.
+Maven installed. Conversion failures do not stop the run or change Git proxy
+selection. Maven uses its supplied/default configuration, which may attempt
+direct access and fail later if a proxy is required. Supply explicit Maven proxy
+settings when automatic conversion is unsupported. No toolchain detection is
+required; wrappers and tools installed during execution use the same settings.
 
 Maven interpolates credential values containing `${` before authentication.
-Automatic proxy settings reject those identities with a sanitized setup error
-instead of silently changing the credentials. For such identities, supply an
-explicit Maven proxy section with encrypted credentials, or disable inheritance
-and provide tool-specific settings. Literal brace passwords are preserved;
+Automatic proxy conversion skips all inherited Maven proxy entries with a
+sanitized warning for those identities, preserving supplied settings and
+continuing the run. Supply an explicit Maven proxy section with encrypted
+credentials if needed. Literal brace passwords are preserved;
 the harness does not insert backslashes that would change their value.
 Maven may attempt to decrypt literal `{...}` values and report a decryption
 problem; Maven 3 retains the original value when decryption fails. Real builds

@@ -11,6 +11,10 @@ import (
 	"github.com/konveyor/migration-harness/internal/proxy"
 )
 
+// Only automatic proxy conversion is best-effort. Errors parsing supplied
+// Maven settings remain fatal so invalid settings cannot bypass validation.
+var errMavenProxyConversion = errors.New("Hub proxies cannot be represented in Maven settings")
+
 type mavenProxy struct {
 	ID            string `xml:"id"`
 	Active        bool   `xml:"active"`
@@ -82,7 +86,7 @@ func withMavenProxies(settings string, configs []proxy.Config) (string, error) {
 		// Maven interpolates settings before applying proxy authentication and
 		// provides no literal escape here. Never silently change a Hub secret.
 		if strings.Contains(c.Username, "${") || strings.Contains(c.Password, "${") {
-			return "", errors.New("Hub proxy credentials contain Maven interpolation syntax; supply explicit Maven proxy settings with encrypted credentials or set HARNESS_HUB_PROXY=off")
+			return "", fmt.Errorf("%w: credentials contain interpolation syntax", errMavenProxyConversion)
 		}
 		port := c.Port
 		if port == 0 {
@@ -100,7 +104,7 @@ func withMavenProxies(settings string, configs []proxy.Config) (string, error) {
 	}
 	data, err := xml.Marshal(section)
 	if err != nil {
-		return "", fmt.Errorf("encode Hub Maven proxy configuration: %w", err)
+		return "", fmt.Errorf("%w: proxy XML encoding failed", errMavenProxyConversion)
 	}
 	if strings.HasSuffix(settings[:rootEnd], "/>") {
 		return settings[:rootEnd-2] + ">" + string(data) + "</" + rootName + ">" + settings[rootEnd:], nil
@@ -126,7 +130,7 @@ func mavenNonProxyHosts(excluded []string) (string, error) {
 			continue
 		}
 		if strings.ContainsAny(h, "/:@?#| \\[]\t\r\n") {
-			return "", errors.New("Hub proxy exclusions cannot be represented in Maven settings; supply explicit Maven proxy settings or set HARNESS_HUB_PROXY=off")
+			return "", fmt.Errorf("%w: unsupported exclusion format", errMavenProxyConversion)
 		}
 		switch {
 		case strings.HasPrefix(h, "."):
