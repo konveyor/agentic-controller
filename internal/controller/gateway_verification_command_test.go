@@ -30,6 +30,19 @@ const (
 	// msgReachable is the models probe's success phrase, also asserted
 	// absent from failure messages.
 	msgReachable = "is reachable"
+
+	// The bedrock-runtime addresses the probe resolves to. bedrockEndpoint
+	// is the public regional host for testAWSRegion - what the sample
+	// Gateway carries, and what the probe builds from the Secret's region;
+	// bedrockVPCEndpoint is a PrivateLink address, which only reaches the
+	// probe through an endpoint override in the Secret.
+	bedrockEndpoint    = "https://bedrock-runtime.us-east-1.amazonaws.com"
+	bedrockVPCEndpoint = "https://vpce-0a1b.bedrock-runtime.us-east-1.vpce.amazonaws.com"
+
+	// Stand-in static SigV4 credential values. The access key is also
+	// asserted absent from the Job's command string and env values.
+	testAWSAccessKeyID = "AKIAEXAMPLE"
+	testAWSSecretKey   = "secret"
 )
 
 func TestGatewayVerificationCurlCommand(t *testing.T) {
@@ -286,30 +299,151 @@ func TestAWSEscapePathSegment(t *testing.T) {
 	}
 }
 
-// TestIsBedrockRuntimeEndpoint guards the gate that decides where the probe
-// is willing to send a signed AWS credential (#102). Anything that is not an
-// AWS-operated bedrock-runtime address must be refused, not probed.
-func TestIsBedrockRuntimeEndpoint(t *testing.T) {
+// TestBedrockProbeEndpoint guards where the probe sends a signed AWS
+// credential. It resolves the bedrock-runtime address the way the AWS SDK
+// does, and from the same input the run uses - the credential Secret - so the
+// probe calls the host the run will call.
+//
+// spec.endpoint is not an input here, on purpose, and that is what this test
+// pins. A Bedrock run ignores spec.endpoint (the SDK builds the host from
+// AWS_REGION), so a probe signing for it would both check a host no run talks
+// to and fail a working Gateway whenever the two regions disagree - AWS
+// rejects a signature whose credential scope does not match the endpoint it
+// reached. Deriving the host from the Secret also means there is no route at
+// all from an attacker-chosen spec.endpoint to a host the probe will sign for
+// (#102).
+func TestBedrockProbeEndpoint(t *testing.T) {
+	tests := []struct {
+		name   string
+		secret map[string][]byte
+		want   string
+	}{
+		{
+			name:   "the regional host is built from AWS_REGION",
+			secret: map[string][]byte{awsRegionEnv: []byte("eu-west-1")},
+			want:   "https://bedrock-runtime.eu-west-1.amazonaws.com",
+		},
+		{
+			name:   "the China partition takes its own DNS suffix",
+			secret: map[string][]byte{awsRegionEnv: []byte("cn-north-1")},
+			want:   "https://bedrock-runtime.cn-north-1.amazonaws.com.cn",
+		},
+		{
+			name:   "GovCloud is an ordinary regional host",
+			secret: map[string][]byte{awsRegionEnv: []byte("us-gov-west-1")},
+			want:   "https://bedrock-runtime.us-gov-west-1.amazonaws.com",
+		},
+		{
+			name:   "a trailing newline in AWS_REGION does not reach the host",
+			secret: map[string][]byte{awsRegionEnv: []byte("us-east-1\n")},
+			want:   bedrockEndpoint,
+		},
+		{
+			name: "the service-specific endpoint override wins, as it does for the SDK",
+			secret: map[string][]byte{
+				awsRegionEnv:             []byte("us-east-1"),
+				awsBedrockEndpointURLEnv: []byte(bedrockVPCEndpoint),
+				awsEndpointURLEnv:        []byte("https://generic.example.com"),
+			},
+			want: bedrockVPCEndpoint,
+		},
+		{
+			name: "the global override is used when there is no service-specific one",
+			secret: map[string][]byte{
+				awsRegionEnv:      []byte("us-east-1"),
+				awsEndpointURLEnv: []byte("https://bedrock-runtime-fips.us-gov-west-1.amazonaws.com"),
+			},
+			want: "https://bedrock-runtime-fips.us-gov-west-1.amazonaws.com",
+		},
+		{
+			name: "an empty override is not an override",
+			secret: map[string][]byte{
+				awsRegionEnv:             []byte("us-east-1"),
+				awsBedrockEndpointURLEnv: []byte("  "),
+			},
+			want: bedrockEndpoint,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			secret := &corev1.Secret{Data: tt.secret}
+			if got := bedrockProbeEndpoint(secret); got != tt.want {
+				t.Errorf("bedrockProbeEndpoint() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBedrockProbeEndpointIgnoresSpecEndpoint is the region-mismatch
+// regression in one assertion: the sample Gateway's us-east-1 endpoint with a
+// eu-west-1 credential must probe eu-west-1, which is where the run goes.
+func TestBedrockProbeEndpointIgnoresSpecEndpoint(t *testing.T) {
+	secret := &corev1.Secret{Data: map[string][]byte{
+		awsAccessKeyIDEnv:     []byte(testAWSAccessKeyID),
+		awsSecretAccessKeyEnv: []byte(testAWSSecretKey),
+		awsRegionEnv:          []byte("eu-west-1"),
+	}}
+	gateway := &konveyoriov1alpha1.Gateway{
+		Spec: konveyoriov1alpha1.GatewaySpec{
+			Provider: testProviderBedrock,
+			Endpoint: bedrockEndpoint,
+		},
+	}
+
+	if _, skipped := gatewayProbeSkip(gateway, probeBedrockConverse, secret); skipped {
+		t.Fatal("a credential in a different region from spec.endpoint must still be probed")
+	}
+	const want = "https://bedrock-runtime.eu-west-1.amazonaws.com"
+	if got := bedrockProbeEndpoint(secret); got != want {
+		t.Errorf("bedrockProbeEndpoint() = %q, want %q (the region the run signs with)", got, want)
+	}
+}
+
+// TestIsAWSRegionName guards the check on the one Secret value that reaches a
+// URL host and the SigV4 credential scope.
+func TestIsAWSRegionName(t *testing.T) {
 	cases := map[string]bool{
-		"https://bedrock-runtime.us-east-1.amazonaws.com":                true,
-		"https://bedrock-runtime-fips.us-gov-west-1.amazonaws.com":       true,
-		"https://bedrock-runtime.cn-north-1.amazonaws.com.cn":            true,
-		"https://vpce-0a1b.bedrock-runtime.us-east-1.vpce.amazonaws.com": true,
-		// Plain HTTP would send the signature in the clear.
+		"us-east-1":     true,
+		"cn-north-1":    true,
+		"us-gov-west-1": true,
+		"useast1":       true,
+		// Anything that could leave the host label it is written into.
+		"us-east-1/../evil":          false,
+		"us-east-1.evil.example":     false,
+		"us-east-1:443":              false,
+		"us-east-1 ":                 false,
+		"US-EAST-1":                  false,
+		"-us-east-1":                 false,
+		"us-east-1-":                 false,
+		"us_east_1":                  false,
+		"":                           false,
+		strings.Repeat("a", 65):      false,
+		"us-east-1\nx-injected: yes": false,
+	}
+	for region, want := range cases {
+		if got := isAWSRegionName(region); got != want {
+			t.Errorf("isAWSRegionName(%q) = %v, want %v", region, got, want)
+		}
+	}
+}
+
+// TestIsHTTPSURL guards the one thing still checked about an endpoint
+// override: the probe signs what it sends, so plain http would put a usable
+// signature on the wire in the clear.
+func TestIsHTTPSURL(t *testing.T) {
+	cases := map[string]bool{
+		bedrockEndpoint:    true,
+		bedrockVPCEndpoint: true,
 		"http://bedrock-runtime.us-east-1.amazonaws.com": false,
-		// A lookalike host that is not under an AWS domain.
-		"https://bedrock-runtime.us-east-1.amazonaws.com.evil.example": false,
-		"https://bedrock.example.com":                                  false,
-		// An OpenAI-compatible proxy in front of Bedrock is a different
-		// provider; signing an AWS credential for it is never right.
-		"https://llm-proxy.svc.cluster.local": false,
-		"https://169.254.169.254":             false,
-		"":                                    false,
-		"://not a url":                        false,
+		"bedrock-runtime.us-east-1.amazonaws.com":        false,
+		"https://":     false,
+		"":             false,
+		"://not a url": false,
 	}
 	for endpoint, want := range cases {
-		if got := isBedrockRuntimeEndpoint(endpoint); got != want {
-			t.Errorf("isBedrockRuntimeEndpoint(%q) = %v, want %v", endpoint, got, want)
+		if got := isHTTPSURL(endpoint); got != want {
+			t.Errorf("isHTTPSURL(%q) = %v, want %v", endpoint, got, want)
 		}
 	}
 }
@@ -326,8 +460,8 @@ func TestGatewayProbeSkip(t *testing.T) {
 		return &corev1.Secret{Data: data}
 	}
 	fullKeys := map[string]string{
-		awsAccessKeyIDEnv:     "AKIAEXAMPLE",
-		awsSecretAccessKeyEnv: "secret",
+		awsAccessKeyIDEnv:     testAWSAccessKeyID,
+		awsSecretAccessKeyEnv: testAWSSecretKey,
 		awsRegionEnv:          testAWSRegion,
 	}
 	withoutKey := func(drop string) map[string]string {
@@ -349,7 +483,6 @@ func TestGatewayProbeSkip(t *testing.T) {
 			},
 		}
 	}
-	const bedrockEndpoint = "https://bedrock-runtime.us-east-1.amazonaws.com"
 
 	tests := []struct {
 		name      string
@@ -397,11 +530,55 @@ func TestGatewayProbeSkip(t *testing.T) {
 			wantInMsg: awsRegionEnv,
 		},
 		{
-			name:      "bedrock pointed at a non-AWS host is never signed for",
-			gateway:   gateway(testProviderBedrock, "https://attacker.example.com"),
-			secret:    bedrockSecret(fullKeys),
+			// spec.endpoint is no longer an input to where the probe sends a
+			// signed credential, so an attacker-chosen one neither skips nor
+			// diverts it: the host comes from the Secret's AWS_REGION (#102,
+			// and see TestBedrockProbeEndpoint).
+			name:     "a non-AWS spec.endpoint neither skips nor redirects the probe",
+			gateway:  gateway(testProviderBedrock, "https://attacker.example.com"),
+			secret:   bedrockSecret(fullKeys),
+			wantSkip: false,
+		},
+		{
+			// AWS_REGION is written into a URL host and the SigV4 credential
+			// scope, so a value that is not a region name is skipped rather
+			// than interpolated.
+			name:    "bedrock with a region that is not a region name is skipped",
+			gateway: gateway(testProviderBedrock, bedrockEndpoint),
+			secret: bedrockSecret(map[string]string{
+				awsAccessKeyIDEnv:     testAWSAccessKeyID,
+				awsSecretAccessKeyEnv: testAWSSecretKey,
+				awsRegionEnv:          "us-east-1.attacker.example.com",
+			}),
 			wantSkip:  true,
-			wantInMsg: "will not sign an AWS credential for another host",
+			wantInMsg: "not an AWS region name",
+		},
+		{
+			// The probe signs what it sends; http would put a usable
+			// signature on the wire in the clear.
+			name:    "a plain-http endpoint override is skipped, not signed for",
+			gateway: gateway(testProviderBedrock, bedrockEndpoint),
+			secret: bedrockSecret(map[string]string{
+				awsAccessKeyIDEnv:        testAWSAccessKeyID,
+				awsSecretAccessKeyEnv:    testAWSSecretKey,
+				awsRegionEnv:             testAWSRegion,
+				awsBedrockEndpointURLEnv: "http://bedrock-runtime.us-east-1.amazonaws.com",
+			}),
+			wantSkip:  true,
+			wantInMsg: "not an https URL",
+		},
+		{
+			// A PrivateLink or FIPS address in the Secret is what the run
+			// uses, so the probe follows it rather than skipping.
+			name:    "an https endpoint override is probed",
+			gateway: gateway(testProviderBedrock, bedrockEndpoint),
+			secret: bedrockSecret(map[string]string{
+				awsAccessKeyIDEnv:        testAWSAccessKeyID,
+				awsSecretAccessKeyEnv:    testAWSSecretKey,
+				awsRegionEnv:             testAWSRegion,
+				awsBedrockEndpointURLEnv: bedrockVPCEndpoint,
+			}),
+			wantSkip: false,
 		},
 		{
 			name:     "openai is probed as before",

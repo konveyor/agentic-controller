@@ -29,9 +29,12 @@ mid-run as `-32000 Authentication required` (#304). `gcp-vertex-ai` keeps
 `reason=VerificationSkipped` — its probe needs an OAuth2 token minted from
 a service account, which the Job cannot do. So does a Bedrock Gateway
 whose Secret lacks the static SigV4 keys (IRSA and other SDK credential
-sources are working setups the probe cannot reproduce), or one whose
-endpoint is not an AWS `bedrock-runtime` host: the probe will not sign an
-AWS credential for an arbitrary `spec.endpoint` (#102). This refines the
+sources are working setups the probe cannot reproduce). The probe
+addresses `bedrock-runtime` the way the AWS SDK does — from the Secret's
+`AWS_REGION` and endpoint overrides — and not from `spec.endpoint`, which a
+Bedrock run ignores: that keeps the probe on the host the run uses, and
+leaves no route from an attacker-chosen `spec.endpoint` to somewhere the
+probe would sign an AWS credential for (#102). This refines the
 verification clause below; nothing else in the decision changes.
 
 **Update (2026-09-01):** `Agent.spec.gateways` becomes optional

@@ -80,6 +80,13 @@ const (
 	// model id travel as env vars, so nothing from the spec is interpolated
 	// into the command string.
 	//
+	// $LLM_ENDPOINT here is not spec.endpoint: it is the bedrock-runtime
+	// address the run itself will reach, derived from the credential Secret
+	// by bedrockProbeEndpoint. A Bedrock run ignores spec.endpoint entirely
+	// (the AWS SDK builds the host from AWS_REGION - see providerEnv in
+	// harness/internal/goose/lifecycle.go), so signing for spec.endpoint
+	// would probe a host no run talks to.
+	//
 	// $LLM_MODEL is percent-encoded by the controller
 	// (awsEscapePathSegment), because modelId is one path label and an
 	// inference-profile ARN contains slashes. Raw, those split the path and
@@ -103,6 +110,11 @@ const (
 	// already percent-encoded (see awsEscapePathSegment).
 	envLLMModel = "LLM_MODEL"
 
+	// envLLMEndpoint carries the address the probe calls: spec.endpoint for
+	// the models probe, and the resolved bedrock-runtime host for Bedrock
+	// (see bedrockProbeEndpoint).
+	envLLMEndpoint = "LLM_ENDPOINT"
+
 	// bedrockSigningService is the service name in the SigV4 credential
 	// scope for bedrock-runtime. The region comes from the credential
 	// Secret's AWS_REGION, which is what the run signs with too.
@@ -121,6 +133,22 @@ const (
 	awsAccessKeyIDEnv     = "AWS_ACCESS_KEY_ID"
 	awsSecretAccessKeyEnv = "AWS_SECRET_ACCESS_KEY"
 	awsRegionEnv          = "AWS_REGION"
+
+	// AWS SDK endpoint overrides, in the precedence the SDK applies them.
+	// A Secret carrying one of these is a Secret whose runs reach Bedrock
+	// somewhere other than the public regional host - a PrivateLink or
+	// FIPS address - so the probe has to follow it to probe what the run
+	// probes (see bedrockProbeEndpoint).
+	awsBedrockEndpointURLEnv = "AWS_ENDPOINT_URL_BEDROCK_RUNTIME"
+	awsEndpointURLEnv        = "AWS_ENDPOINT_URL"
+
+	// bedrockRuntimeHostPrefix and the AWS DNS suffixes are how the SDK
+	// builds a bedrock-runtime host from a region, and so how the probe
+	// does. The China partition uses its own suffix.
+	bedrockRuntimeHostPrefix = "bedrock-runtime."
+	awsDNSSuffix             = ".amazonaws.com"
+	awsDNSSuffixChina        = ".amazonaws.com.cn"
+	awsChinaRegionPrefix     = "cn-"
 
 	// verificationDetailLimit bounds the provider error text a probe copies
 	// into its termination message, which the kubelet caps at 4KiB.
@@ -283,7 +311,12 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// behind by a previous provider value and settle the Gateway as skipped.
 	probe := providerProbeKind(gateway.Spec.Provider)
 	if skipReason, skipped := gatewayProbeSkip(&gateway, probe, &secret); skipped {
-		if settled && readyCond.Reason == reasonVerificationSkipped {
+		// The message is compared along with the reason: a Gateway skipped by
+		// an older controller is settled against a wording that no longer
+		// says why, and on reason alone it would keep that stale sentence
+		// until its generation or credential changed.
+		if settled && readyCond.Reason == reasonVerificationSkipped &&
+			readyCond.Message == skipReason {
 			return ctrl.Result{}, nil
 		}
 		if err := r.deleteVerificationJobs(ctx, &gateway, ""); err != nil {
@@ -315,6 +348,16 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
+	// The address the probe will actually call. For every provider but
+	// Bedrock that is spec.endpoint; for Bedrock it comes from the credential
+	// Secret, because that is where a Bedrock run's endpoint comes from too
+	// (see bedrockProbeEndpoint). Status messages name this rather than
+	// spec.endpoint, so a failure points at the host that produced it.
+	probeEndpoint := gateway.Spec.Endpoint
+	if probe == probeBedrockConverse {
+		probeEndpoint = bedrockProbeEndpoint(&secret)
+	}
+
 	// Clean up verification Jobs from prior generations and prior credentials.
 	// If a Gateway spec changes or its credential rotates while verification is
 	// queued/running, the old Job is orphaned because completion events
@@ -332,7 +375,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.Get(ctx, jobKey, &job); err != nil {
 		if errors.IsNotFound(err) {
 			// No verification Job exists - create one.
-			if err := r.createVerificationJob(ctx, &gateway, jobName); err != nil {
+			if err := r.createVerificationJob(ctx, &gateway, jobName, probeEndpoint); err != nil {
 				logger.Error(err, "Failed to create verification Job")
 				return ctrl.Result{}, err
 			}
@@ -358,7 +401,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// transport error) survives on status. Falls back to a generic
 		// message when no diagnostic is available.
 		diag := r.verificationDiagnostic(ctx, gateway.Namespace, jobName, job.UID)
-		reason, message := gatewayVerifyReason(diag, gateway.Spec.Endpoint, jobName, succeeded, probe)
+		reason, message := gatewayVerifyReason(diag, probeEndpoint, jobName, succeeded, probe)
 
 		status := metav1.ConditionFalse
 		if succeeded {
@@ -471,11 +514,11 @@ var bedrockProbeSecretKeys = []string{
 //     setup the probe pod cannot reproduce, so a failure here would be the
 //     probe's, not the Gateway's. The message names the missing keys, which
 //     also catches the common case: a Secret missing AWS_REGION;
-//   - a Bedrock Gateway pointed somewhere other than bedrock-runtime. The
-//     probe signs with the AWS credential and sends a session token when one
-//     is present, so an arbitrary spec.endpoint would be handed usable
-//     credential material (#102). Refusing to sign for a non-AWS host keeps
-//     that out of reach.
+//   - a Bedrock Secret the probe cannot turn into a bedrock-runtime address:
+//     an AWS_REGION that is not a region name, or an endpoint override that
+//     is not an https URL. Both would otherwise put something unchecked from
+//     the Secret into the URL the probe signs for, and neither can be the
+//     Gateway's fault in a way a failure would help with.
 func gatewayProbeSkip(
 	gateway *konveyoriov1alpha1.Gateway,
 	probe gatewayProbeKind,
@@ -495,12 +538,19 @@ func gatewayProbeSkip(
 					"request; endpoint and credentials are unverified",
 				gateway.Spec.CredentialRef.SecretName, strings.Join(missing, ", ")), true
 		}
-		if !isBedrockRuntimeEndpoint(gateway.Spec.Endpoint) {
+		if override := bedrockEndpointOverride(secret); override != "" && !isHTTPSURL(override) {
 			return fmt.Sprintf(
-				"Endpoint %q is not an AWS bedrock-runtime endpoint, and the probe "+
-					"will not sign an AWS credential for another host; endpoint and "+
-					"credentials are unverified",
-				gateway.Spec.Endpoint), true
+				"Secret %q sets an endpoint override that is not an https URL (%q), "+
+					"and the probe will not send a signed AWS credential in the clear; "+
+					"endpoint and credentials are unverified",
+				gateway.Spec.CredentialRef.SecretName, override), true
+		}
+		if region := bedrockProbeRegion(secret); !isAWSRegionName(region) {
+			return fmt.Sprintf(
+				"Secret %q carries %s=%q, which is not an AWS region name, so the "+
+					"probe cannot address bedrock-runtime; endpoint and credentials "+
+					"are unverified",
+				gateway.Spec.CredentialRef.SecretName, awsRegionEnv, region), true
 		}
 	}
 
@@ -520,29 +570,88 @@ func missingSecretKeys(secret *corev1.Secret, want []string) []string {
 	return missing
 }
 
-// isBedrockRuntimeEndpoint reports whether the endpoint is an AWS-operated
-// bedrock-runtime address the probe may sign a request for. Deliberately
-// narrow: it is the gate that keeps a signed AWS credential - and the session
-// token the probe forwards with it - from reaching an endpoint someone put in
-// a Gateway spec. The shapes allowed are the public regional endpoints
-// (bedrock-runtime.<region>.amazonaws.com), their FIPS and China variants,
-// and PrivateLink addresses, all of which carry "bedrock" in a host under an
-// AWS domain.
-func isBedrockRuntimeEndpoint(endpoint string) bool {
-	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Scheme != "https" {
-		return false
+// bedrockProbeEndpoint returns the bedrock-runtime address the probe calls:
+// the one the run itself will reach, resolved the way the AWS SDK resolves it
+// and from the same input.
+//
+// spec.endpoint is deliberately not consulted. A Bedrock run never uses it -
+// the SDK builds the host from AWS_REGION (providerEnv in
+// harness/internal/goose/lifecycle.go), and getting-started says as much - so
+// a probe signing for spec.endpoint would check a host no run talks to, which
+// is the objection this PR raises against ListFoundationModels. Worse, it
+// could fail a Gateway that works: the credential scope comes from the
+// Secret's AWS_REGION while the host came from the spec, and AWS rejects a
+// signature whose scope region disagrees with the endpoint it reached
+// ("Credential should be scoped to a valid region"), so a Gateway left on the
+// sample's us-east-1 endpoint with a eu-west-1 Secret would be parked at
+// AuthenticationFailed with every referencing Agent held at
+// DependenciesNotReady - for a Gateway whose runs are fine.
+//
+// Deriving the host from the Secret also closes the #102 exfiltration path
+// outright rather than narrowing it: there is no longer any route from an
+// attacker-chosen spec.endpoint to a host the probe will sign an AWS
+// credential for. The only remaining input is the Secret, which is where the
+// credential already lives - whoever can write it holds the credential, and a
+// run already sends it wherever the Secret's endpoint override points.
+func bedrockProbeEndpoint(secret *corev1.Secret) string {
+	if override := bedrockEndpointOverride(secret); override != "" {
+		return override
 	}
-	host := strings.ToLower(parsed.Hostname())
-	if !strings.Contains(host, "bedrock") {
-		return false
+	region := bedrockProbeRegion(secret)
+	suffix := awsDNSSuffix
+	if strings.HasPrefix(region, awsChinaRegionPrefix) {
+		suffix = awsDNSSuffixChina
 	}
-	for _, suffix := range []string{".amazonaws.com", ".amazonaws.com.cn"} {
-		if strings.HasSuffix(host, suffix) {
-			return true
+	return "https://" + bedrockRuntimeHostPrefix + region + suffix
+}
+
+// bedrockEndpointOverride returns the endpoint the AWS SDK would use instead
+// of the regional host, in the SDK's own precedence: the service-specific
+// variable wins over the global one. A Secret that sets either is one whose
+// runs reach Bedrock through a PrivateLink or FIPS address, and the probe has
+// to follow it to be probing the same thing.
+func bedrockEndpointOverride(secret *corev1.Secret) string {
+	for _, key := range []string{awsBedrockEndpointURLEnv, awsEndpointURLEnv} {
+		if v := strings.TrimSpace(string(secret.Data[key])); v != "" {
+			return v
 		}
 	}
-	return false
+	return ""
+}
+
+// bedrockProbeRegion is the Secret's AWS_REGION, trimmed. This is the region
+// the probe signs with and, absent an override, the region whose host it
+// calls - the same single source of truth the run uses.
+func bedrockProbeRegion(secret *corev1.Secret) string {
+	return strings.TrimSpace(string(secret.Data[awsRegionEnv]))
+}
+
+// isAWSRegionName reports whether s has the shape of an AWS region name
+// (us-east-1, cn-north-1, us-gov-west-1). The probe puts this value in a URL
+// host and in the SigV4 credential scope, so it is checked rather than
+// trusted: anything else is skipped, not signed for.
+func isAWSRegionName(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		case c == '-' && i > 0 && i < len(s)-1:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isHTTPSURL reports whether s parses as an https URL with a host. The probe
+// signs the request it sends, so plain http would put a usable signature -
+// and the session token it forwards - on the wire in the clear.
+func isHTTPSURL(s string) bool {
+	parsed, err := url.Parse(s)
+	return err == nil && parsed.Scheme == "https" && parsed.Hostname() != ""
 }
 
 // normalizeProvider lowercases and converts hyphens to underscores so provider
@@ -742,11 +851,14 @@ func (r *GatewayReconciler) deleteVerificationJobs(
 }
 
 // createVerificationJob creates a Job that verifies connectivity to the
-// gateway endpoint using the agent base image.
+// gateway endpoint using the agent base image. probeEndpoint is the address
+// the probe calls: spec.endpoint for every provider but Bedrock, whose
+// endpoint comes from the credential Secret instead (bedrockProbeEndpoint).
 func (r *GatewayReconciler) createVerificationJob(
 	ctx context.Context,
 	gateway *konveyoriov1alpha1.Gateway,
 	jobName string,
+	probeEndpoint string,
 ) error {
 	image := r.VerificationImage
 	if image == "" {
@@ -771,18 +883,25 @@ func (r *GatewayReconciler) createVerificationJob(
 			"provider", gateway.Spec.Provider,
 		)
 	}
-	env := []corev1.EnvVar{{Name: "LLM_ENDPOINT", Value: gateway.Spec.Endpoint}}
+	env := []corev1.EnvVar{{Name: envLLMEndpoint, Value: probeEndpoint}}
 	var envFrom []corev1.EnvFromSource
 	switch {
 	case probe == probeBedrockConverse:
 		// The whole Secret, with its own keys as the variable names - the
 		// same shape the run gets (see the Gateway credential block in
 		// buildSandboxEnv), so the probe signs with exactly what goose will.
+		// AWS_REGION arrives this way too, which is what makes the signing
+		// scope and the host above the same region by construction: both are
+		// this Secret's AWS_REGION.
+		//
 		// The model id is spec data rather than a credential, but it travels
 		// as an env var too so the command string stays free of anything
 		// user-supplied. It is percent-encoded here, not in the shell: it is
 		// one path label, and an inference-profile ARN's slashes would
-		// otherwise break the route (see awsEscapePathSegment).
+		// otherwise break the route (see awsEscapePathSegment). LLM_ENDPOINT
+		// and LLM_MODEL are set in Env rather than EnvFrom, which is also
+		// what keeps a same-named Secret key from redefining either: Env
+		// wins over EnvFrom.
 		env = append(env, corev1.EnvVar{
 			Name:  envLLMModel,
 			Value: awsEscapePathSegment(gateway.Spec.Model.Name),

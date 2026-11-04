@@ -690,6 +690,62 @@ var _ = Describe("Gateway Controller", func() {
 		})
 	})
 
+	// The skip wording changed with this probe, and a Gateway skipped by an
+	// older controller is settled against the old sentence. On the reason
+	// alone it would keep saying "/v1/models" - a surface that no longer
+	// decides anything - until its generation or credential changed.
+	Context("when a skipped Gateway carries an older controller's wording", func() {
+		It("should refresh the skip message in place", func() {
+			const (
+				name       = "llm-ctrl-vertex-wording"
+				secretName = "llm-secret-vertex-wording"
+			)
+			secret, gateway := newVertexGatewayFixture(name, secretName)
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
+
+			gwKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			const staleMessage = "Provider \"gcp-vertex-ai\" has no OpenAI-compatible " +
+				"/v1/models to probe; endpoint and credentials are unverified"
+
+			By("letting it settle, then rewriting the message an older controller wrote")
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
+				g.Expect(readyCond).NotTo(BeNil())
+				g.Expect(readyCond.Reason).To(Equal(reasonVerificationSkipped))
+			}, timeout, interval).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+				meta.SetStatusCondition(&fetched.Status.Conditions, metav1.Condition{
+					Type:               ConditionTypeReady,
+					Status:             metav1.ConditionTrue,
+					ObservedGeneration: fetched.Generation,
+					Reason:             reasonVerificationSkipped,
+					Message:            staleMessage,
+				})
+				g.Expect(k8sClient.Status().Update(ctx, &fetched)).To(Succeed())
+			}, timeout, interval).Should(Succeed())
+
+			By("verifying the reconcile replaces it with the current wording")
+			Eventually(func(g Gomega) {
+				var fetched konveyoriov1alpha1.Gateway
+				g.Expect(k8sClient.Get(ctx, gwKey, &fetched)).To(Succeed())
+				readyCond := meta.FindStatusCondition(fetched.Status.Conditions, ConditionTypeReady)
+				g.Expect(readyCond).NotTo(BeNil())
+				g.Expect(readyCond.Reason).To(Equal(reasonVerificationSkipped))
+				g.Expect(readyCond.Message).NotTo(Equal(staleMessage))
+				g.Expect(readyCond.Message).To(ContainSubstring("no API surface"))
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+		})
+	})
+
 	// A native aws-bedrock Gateway gets a SigV4 ConverseStream probe (#304),
 	// so bad credentials are caught here rather than mid-run as a bare
 	// "Authentication required".
@@ -715,6 +771,12 @@ var _ = Describe("Gateway Controller", func() {
 			Expect(container.EnvFrom[0].SecretRef.Name).To(Equal(secretName))
 			Expect(container.Env).To(ContainElement(corev1.EnvVar{
 				Name: envLLMModel, Value: testLLMModelName,
+			}))
+			// The host is the one the run reaches: built from the Secret's
+			// AWS_REGION, the same value the signature is scoped to.
+			Expect(container.Env).To(ContainElement(corev1.EnvVar{
+				Name:  envLLMEndpoint,
+				Value: "https://bedrock-runtime." + testAWSRegion + ".amazonaws.com",
 			}))
 			for _, e := range container.Env {
 				Expect(e.Value).NotTo(ContainSubstring("AKIAEXAMPLE"))
@@ -755,6 +817,36 @@ var _ = Describe("Gateway Controller", func() {
 			Expect(model).NotTo(ContainSubstring("/"))
 			Expect(model).NotTo(Equal(modelARN))
 			Expect(model).To(Equal(awsEscapePathSegment(modelARN)))
+
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+		})
+
+		// A Bedrock run ignores spec.endpoint - the AWS SDK builds the host
+		// from AWS_REGION - so the probe must too. Signing with the Secret's
+		// region against a host taken from the spec is how a working Gateway
+		// gets parked at AuthenticationFailed: AWS rejects a signature whose
+		// credential scope does not match the endpoint it reached, and every
+		// Agent referencing the Gateway then sits at DependenciesNotReady.
+		It("should probe the credential's region, not the endpoint's", func() {
+			const (
+				name       = "llm-ctrl-bedrock-region"
+				secretName = "llm-secret-bedrock-region"
+			)
+			secret, gateway := newBedrockGatewayFixture(name, secretName)
+			// The sample's endpoint, left alone, with a credential elsewhere.
+			secret.StringData[awsRegion] = "eu-west-1"
+			gateway.Spec.Endpoint = "https://bedrock-runtime.us-east-1.amazonaws.com"
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
+
+			By("verifying the probe is still run, and against eu-west-1")
+			job := awaitVerificationJob(name)
+			container := job.Spec.Template.Spec.Containers[0]
+			Expect(container.Env).To(ContainElement(corev1.EnvVar{
+				Name:  envLLMEndpoint,
+				Value: "https://bedrock-runtime.eu-west-1.amazonaws.com",
+			}))
 
 			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
@@ -943,9 +1035,9 @@ func newBedrockGatewayFixture(name, secretName string) (*corev1.Secret, *konveyo
 			Namespace: testNamespace,
 		},
 		StringData: map[string]string{
-			awsKeyID:                "AKIAEXAMPLE",
-			"AWS_SECRET_ACCESS_KEY": "secret",
-			awsRegion:               testAWSRegion,
+			awsKeyID:              "AKIAEXAMPLE",
+			awsSecretAccessKeyEnv: testAWSSecretKey,
+			awsRegion:             testAWSRegion,
 		},
 	}
 	gateway := &konveyoriov1alpha1.Gateway{

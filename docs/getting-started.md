@@ -336,12 +336,18 @@ kubectl create secret generic bedrock-credentials -n "$KONVEYOR_NS" \
 kubectl apply -f config/samples/gateway_aws_bedrock.yaml -n "$KONVEYOR_NS"
 ```
 
-`AWS_REGION` is what goose actually uses to reach Bedrock — the harness
-derives the Bedrock endpoint from it and ignores the Gateway `endpoint`,
-which only feeds the controller's connectivity check. Keep the Gateway
-`endpoint` in the same region as `AWS_REGION` so that check stays
-meaningful. The model's `us.` prefix is a **cross-region inference
-profile** spanning the US regions (us-east-1/us-east-2/us-west-2), so
+`AWS_REGION` is what actually reaches Bedrock: the harness derives the
+Bedrock endpoint from it and ignores the Gateway `endpoint`, and so does the
+controller's verification probe, which addresses `bedrock-runtime` from this
+same value. The Gateway `endpoint` is required by the CRD and worth keeping
+accurate for readers of `kubectl get gateway`, but nothing resolves it — a
+stale region there changes nothing. If the Secret sets
+`AWS_ENDPOINT_URL_BEDROCK_RUNTIME` (or `AWS_ENDPOINT_URL`) to reach Bedrock
+through PrivateLink or a FIPS address, the probe follows that instead, since
+that is where the run goes.
+
+The model's `us.` prefix is a **cross-region inference profile** spanning
+the US regions (us-east-1/us-east-2/us-west-2), so
 switching between US regions needs no model change — only moving to
 another geo (`eu.`, `apac.`) requires a new prefix.
 
@@ -669,9 +675,12 @@ kubectl get gateway.konveyor.io <name> -n "$KONVEYOR_NS" \
 A Bedrock Gateway still shows `VerificationSkipped` when the probe cannot
 run at all: when the Secret does not carry all three keys above (an IRSA or
 other SDK credential source is a working setup the probe cannot reproduce —
-the message names what is missing), or when `spec.endpoint` is not an AWS
-`bedrock-runtime` host, since the probe will not sign an AWS credential for
-anything else. A credential fixed outside the cluster does not re-trigger
+the message names what is missing), when `AWS_REGION` is not a region name,
+or when an `AWS_ENDPOINT_URL*` override in the Secret is not an `https` URL,
+since the probe will not put a signed AWS credential on the wire in the
+clear. `spec.endpoint` is not consulted either way — a mismatched region
+there neither skips nor fails verification. A credential fixed outside the
+cluster does not re-trigger
 verification on its own; editing the Secret does, because the Gateway is
 re-verified when its credential changes
 ([#246](https://github.com/konveyor/agentic-controller/issues/246) tracks
