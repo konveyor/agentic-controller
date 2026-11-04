@@ -1,0 +1,8 @@
+kind: bugfix
+description: >
+  Add a final check to the verify stage skill: after the last edit, re-measure the
+  build, the tests and the runtime checks on the final tree and report those
+  results — so a lint, format or test-stage edit that breaks the build can no
+  longer be handed off as "Build: passed" from an earlier round. A build that
+  cannot be fixed without changing business logic ends the stage as
+  "Status: failed" rather than looping on it.
