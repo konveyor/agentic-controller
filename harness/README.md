@@ -213,6 +213,10 @@ selection. Maven uses its supplied/default configuration, which may attempt
 direct access and fail later if a proxy is required. Supply explicit Maven proxy
 settings when automatic conversion is unsupported. No toolchain detection is
 required; wrappers and tools installed during execution use the same settings.
+The warning appears in pod logs and as a console notice once the ACP tee is
+available. It is also retained as `mavenProxyWarning` in
+`AgentRun.status.terminationData`, including when setup fails before the console
+connection is established.
 
 Maven interpolates credential values containing `${` before authentication.
 Automatic proxy conversion skips all inherited Maven proxy entries with a

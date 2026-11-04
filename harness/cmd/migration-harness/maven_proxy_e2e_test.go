@@ -182,7 +182,7 @@ func TestMavenProxyBuild(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = prepareMavenSettings(hub.NewClient(clientServer.URL, "test-token"), "42", newRedactor(), policy.HubProxies()...)
+			_, err = prepareMavenSettings(hub.NewClient(clientServer.URL, "test-token"), "42", newRedactor(), policy.HubProxies()...)
 			if fallback {
 				if err != nil {
 					t.Fatalf("unsupported proxy conversion must not stop settings preparation: %v", err)

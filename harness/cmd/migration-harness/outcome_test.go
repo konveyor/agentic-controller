@@ -323,6 +323,28 @@ func TestWriteTerminationLogHandlesLargeBlob(t *testing.T) {
 	}
 }
 
+func TestWriteTerminationLogRetainsMavenProxyWarningWhenTrimming(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "termination-log")
+	warning := "Maven proxy configuration skipped: unsupported exclusion format " + strings.Repeat("x", maxTerminationLogBytes+500)
+	writeTerminationLog(path, terminationBlob{
+		ExitCode: 1, Outcome: "failed", MavenProxyWarning: warning,
+	})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > maxTerminationLogBytes {
+		t.Fatalf("termination data exceeds kubelet limit: %d", len(data))
+	}
+	var got terminationBlob
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.MavenProxyWarning == "" || !strings.HasPrefix(warning, got.MavenProxyWarning) || got.ExitCode != 1 || got.Outcome != "failed" {
+		t.Errorf("minimal termination data lost warning or outcome: %+v", got)
+	}
+}
+
 func TestWriteTerminationLogBoundsOversizedBlob(t *testing.T) {
 	// Proves writeTerminationLog guarantees valid JSON <= 4096 bytes when blob exceeds ceiling.
 	path := filepath.Join(t.TempDir(), "termination-log")
