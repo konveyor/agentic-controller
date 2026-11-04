@@ -714,11 +714,47 @@ var _ = Describe("Gateway Controller", func() {
 			Expect(container.EnvFrom).To(HaveLen(1))
 			Expect(container.EnvFrom[0].SecretRef.Name).To(Equal(secretName))
 			Expect(container.Env).To(ContainElement(corev1.EnvVar{
-				Name: "LLM_MODEL", Value: testLLMModelName,
+				Name: envLLMModel, Value: testLLMModelName,
 			}))
 			for _, e := range container.Env {
 				Expect(e.Value).NotTo(ContainSubstring("AKIAEXAMPLE"))
 			}
+
+			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
+		})
+
+		// Regression from review: an inference-profile ARN contains slashes,
+		// and raw in the path they split it so bedrock-runtime stops routing
+		// to ConverseStream - it answers HTTP 200 with a coral
+		// UnknownOperationException, which the probe recorded as verified.
+		It("should encode an inference-profile ARN model id as one path segment", func() {
+			const (
+				name       = "llm-ctrl-bedrock-arn"
+				secretName = "llm-secret-bedrock-arn"
+				modelARN   = "arn:aws:bedrock:us-east-1:123456789012:" +
+					"inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+			)
+			secret, gateway := newBedrockGatewayFixture(name, secretName)
+			gateway.Spec.Model.Name = modelARN
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
+
+			job := awaitVerificationJob(name)
+			container := job.Spec.Template.Spec.Containers[0]
+
+			var model string
+			for _, e := range container.Env {
+				if e.Name == envLLMModel {
+					model = e.Value
+				}
+			}
+			// One path label: no separator survives, and the raw ARN - the
+			// thing that produced the false pass - is not what we send.
+			Expect(model).NotTo(BeEmpty())
+			Expect(model).NotTo(ContainSubstring("/"))
+			Expect(model).NotTo(Equal(modelARN))
+			Expect(model).To(Equal(awsEscapePathSegment(modelARN)))
 
 			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())

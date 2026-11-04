@@ -26,6 +26,10 @@ const (
 
 	// testCredSecretName is the credentialRef secret name in table fixtures.
 	testCredSecretName = "creds"
+
+	// msgReachable is the models probe's success phrase, also asserted
+	// absent from failure messages.
+	msgReachable = "is reachable"
 )
 
 func TestGatewayVerificationCurlCommand(t *testing.T) {
@@ -220,6 +224,9 @@ func TestGatewayVerificationBedrockCommand(t *testing.T) {
 		"'auth code=%s detail=%s\\n'",
 		"'http code=%s detail=%s\\n'",
 		diagUnreachable,
+		// A 2xx carrying an AWS error must not be recorded as a pass.
+		"'errorbody code=%s detail=%s\\n'",
+		bedrockErrorBodyPattern,
 		// A session token is part of an STS credential, and an empty one
 		// must not be signed and sent.
 		`if [ -n "$AWS_SESSION_TOKEN" ];`,
@@ -237,6 +244,45 @@ func TestGatewayVerificationBedrockCommand(t *testing.T) {
 		if strings.Contains(cmd, notWant) {
 			t.Errorf("did not expect %q in bedrock probe command %q", notWant, cmd)
 		}
+	}
+}
+
+// TestAWSEscapePathSegment guards that a model id is encoded as a single path
+// label. The regression this exists for: an inference-profile ARN contains
+// slashes, and raw they split the path so bedrock-runtime no longer routes to
+// ConverseStream - it answers HTTP 200 with a coral UnknownOperationException,
+// which a plain 2xx check reads as "verified" for a Gateway that cannot work.
+// Confirmed against bedrock-runtime: raw ARN -> 200 UnknownOperationException,
+// escaped ARN -> 403 on the credential, as it should be.
+func TestAWSEscapePathSegment(t *testing.T) {
+	const arn = "arn:aws:bedrock:us-east-1:123456789012:" +
+		"inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+
+	cases := map[string]string{
+		// An ARN: every colon and, crucially, the slash.
+		arn: "arn%3Aaws%3Abedrock%3Aus-east-1%3A123456789012%3A" +
+			"inference-profile%2Fus.anthropic.claude-sonnet-4-5-20250929-v1%3A0",
+		// A bare inference profile id: the colon encodes, the dots and
+		// hyphens are unreserved and stay.
+		"us.anthropic.claude-sonnet-4-5-20250929-v1:0": "us.anthropic.claude-sonnet-4-5-20250929-v1%3A0",
+		// Nothing to do.
+		"test-model": "test-model",
+		"":           "",
+		// Uppercase hex, and no byte left unescaped that AWS's UriEncode
+		// would escape.
+		"a b":  "a%20b",
+		"~_.-": "~_.-",
+		"/":    "%2F",
+	}
+	for in, want := range cases {
+		if got := awsEscapePathSegment(in); got != want {
+			t.Errorf("awsEscapePathSegment(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	// The escaped form must be usable as one path label: no separator left.
+	if strings.Contains(awsEscapePathSegment(arn), "/") {
+		t.Errorf("escaped ARN still contains a path separator: %q", awsEscapePathSegment(arn))
 	}
 }
 
@@ -398,10 +444,10 @@ func TestGatewayVerifyReason(t *testing.T) {
 		notInMsg   string
 	}{
 		{"success with code", "ok code=200", true, probeModels, reasonConnectionVerified, "HTTP 200", ""},
-		{"success no diag", "", true, probeModels, reasonConnectionVerified, "is reachable", "HTTP"},
+		{"success no diag", "", true, probeModels, reasonConnectionVerified, msgReachable, "HTTP"},
 		// A success verdict with a non-"ok" diagnostic must not quote the code,
 		// or we'd report "is reachable (HTTP 401)".
-		{"success mismatched diag", "auth code=401", true, probeModels, reasonConnectionVerified, "is reachable", "HTTP"},
+		{"success mismatched diag", "auth code=401", true, probeModels, reasonConnectionVerified, msgReachable, "HTTP"},
 		{"auth 401", "auth code=401", false, probeModels, reasonAuthenticationFailed, "HTTP 401", ""},
 		{"auth 403", "auth code=403", false, probeModels, reasonAuthenticationFailed, "API key", ""},
 		{"other non-2xx", "http code=500", false, probeModels, reasonConnectionFailed, "HTTP 500", ""},
@@ -446,6 +492,23 @@ func TestGatewayVerifyReason(t *testing.T) {
 			"bedrock throttling is a plain non-2xx",
 			`http code=429 detail={"message":"Too many requests"}`,
 			false, probeBedrockConverse, reasonConnectionFailed, "HTTP 429", "",
+		},
+		// The regression from review: a raw ARN model id broke the route and
+		// bedrock-runtime answered 200 with a coral exception, which the
+		// probe recorded as verified. The encoding closes the trigger; this
+		// closes the shape, and the message must not read like a success.
+		{
+			"bedrock 200 carrying an AWS error is not verified",
+			`errorbody code=200 detail={"Output":{"__type":` +
+				`"com.amazon.coral.service#UnknownOperationException"},"Version":"1.0"}`,
+			false, probeBedrockConverse, reasonConnectionFailed,
+			"never reached the model", msgReachable,
+		},
+		{
+			"bedrock errorbody keeps the AWS type in the message",
+			`errorbody code=200 detail={"__type":"UnknownOperationException"}`,
+			false, probeBedrockConverse, reasonConnectionFailed,
+			"UnknownOperationException", "",
 		},
 		{
 			"bedrock unreachable", "unreachable rc=6", false, probeBedrockConverse,

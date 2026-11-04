@@ -79,7 +79,29 @@ const (
 	// (bedrock:InvokeModelWithResponseStream). Both the endpoint and the
 	// model id travel as env vars, so nothing from the spec is interpolated
 	// into the command string.
+	//
+	// $LLM_MODEL is percent-encoded by the controller
+	// (awsEscapePathSegment), because modelId is one path label and an
+	// inference-profile ARN contains slashes. Raw, those split the path and
+	// bedrock-runtime no longer recognizes the route - answering HTTP 200
+	// with a coral UnknownOperationException body, which a plain 2xx check
+	// reads as a pass.
 	endpointBedrockConverseProbe = "$LLM_ENDPOINT/model/$LLM_MODEL/converse-stream"
+
+	// bedrockErrorBodyPattern marks a response body as an AWS error even
+	// when the status line said 2xx: "__type" is how the coral stack names
+	// an exception, and every AWS error type ends in "Exception". A real
+	// ConverseStream success is an application/vnd.amazon.eventstream whose
+	// events carry neither. This is the second guard on the false pass
+	// above: the encoding closes the known trigger, and this closes the
+	// shape of it. A one-token completion that happened to be the word
+	// "Exception" would fail the probe instead, which is the safe direction
+	// to be wrong in.
+	bedrockErrorBodyPattern = `__type|Exception`
+
+	// envLLMModel carries the probed model id into the verification pod,
+	// already percent-encoded (see awsEscapePathSegment).
+	envLLMModel = "LLM_MODEL"
 
 	// bedrockSigningService is the service name in the SigV4 credential
 	// scope for bedrock-runtime. The region comes from the credential
@@ -539,6 +561,38 @@ func gatewayVerificationCommand(probe gatewayProbeKind, provider string, include
 	return gatewayVerificationCurlCommand(provider, includeAuth)
 }
 
+// awsEscapePathSegment percent-encodes s for use as a single path label,
+// following AWS's own UriEncode: every byte except the RFC 3986 unreserved
+// characters is escaped, with uppercase hex digits.
+//
+// A Bedrock modelId is one path label, and it can be an inference-profile ARN
+// (arn:aws:bedrock:<region>:<account>:inference-profile/<id>). Its slashes must
+// not become path separators: raw, bedrock-runtime answers HTTP 200 carrying a
+// coral UnknownOperationException instead of routing to ConverseStream, so the
+// probe would record a Gateway that cannot work as verified.
+//
+// This also keeps the signature right. curl canonicalizes the path it was given
+// by encoding it once, and AWS does the same to the path it receives, so the
+// two agree whatever escaping is already in the URL - verified against
+// bedrock-runtime, where an escaped ARN is rejected on its credential (HTTP 403)
+// rather than on its signature.
+func awsEscapePathSegment(s string) string {
+	const unreserved = "-._~"
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9',
+			strings.IndexByte(unreserved, c) >= 0:
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
+}
+
 // gatewayVerificationBedrockCommand builds the shell command for the
 // aws-bedrock probe: a SigV4-signed ConverseStream capped at one output
 // token. curl 8 signs with --aws-sigv4 (the verification image ships 8.12),
@@ -550,6 +604,8 @@ func gatewayVerificationCommand(probe gatewayProbeKind, provider string, include
 //   - "ok code=<n>"                      a 2xx - the credential invoked the model
 //   - "auth code=<n> detail=<body>"      401/403 - rejected or denied by IAM/SCP
 //   - "http code=<n> detail=<body>"      any other non-2xx
+//   - "errorbody code=<n> detail=<body>" a 2xx carrying an AWS error, which
+//     means the request never reached the model (see bedrockErrorBodyPattern)
 //   - "unreachable rc=<n>"               curl transport error
 //
 // Carrying the body is the point of the whole change: an SCP denial answers
@@ -579,8 +635,14 @@ if [ -n "$AWS_SESSION_TOKEN" ]; then set -- -H "x-amz-security-token: $AWS_SESSI
 resp=$(` + curl + `); rc=$?
 if [ "$rc" -ne 0 ]; then echo "unreachable rc=$rc" > /dev/termination-log; exit 1; fi
 code=$(printf '%s' "$resp" | tail -n1)
-if echo "$code" | grep -qE '` + verificationHTTPCodePattern + `'; then echo "ok code=$code" > /dev/termination-log; exit 0; fi
-detail=$(printf '%s' "$resp" | sed '$d' | tr -d '\r' | tr '\n' ' ' | cut -c1-` + strconv.Itoa(verificationDetailLimit) + `)
+body=$(printf '%s' "$resp" | sed '$d')
+detail=$(printf '%s' "$body" | tr -d '\r' | tr '\n' ' ' | cut -c1-` + strconv.Itoa(verificationDetailLimit) + `)
+if echo "$code" | grep -qE '` + verificationHTTPCodePattern + `'; then
+  if printf '%s' "$body" | grep -qE '` + bedrockErrorBodyPattern + `'; then
+    printf 'errorbody code=%s detail=%s\n' "$code" "$detail" > /dev/termination-log; exit 1
+  fi
+  echo "ok code=$code" > /dev/termination-log; exit 0
+fi
 case "$code" in
 401|403) printf 'auth code=%s detail=%s\n' "$code" "$detail" > /dev/termination-log ;;
 *) printf 'http code=%s detail=%s\n' "$code" "$detail" > /dev/termination-log ;;
@@ -718,8 +780,13 @@ func (r *GatewayReconciler) createVerificationJob(
 		// buildSandboxEnv), so the probe signs with exactly what goose will.
 		// The model id is spec data rather than a credential, but it travels
 		// as an env var too so the command string stays free of anything
-		// user-supplied.
-		env = append(env, corev1.EnvVar{Name: "LLM_MODEL", Value: gateway.Spec.Model.Name})
+		// user-supplied. It is percent-encoded here, not in the shell: it is
+		// one path label, and an inference-profile ARN's slashes would
+		// otherwise break the route (see awsEscapePathSegment).
+		env = append(env, corev1.EnvVar{
+			Name:  envLLMModel,
+			Value: awsEscapePathSegment(gateway.Spec.Model.Name),
+		})
 		envFrom = []corev1.EnvFromSource{{
 			SecretRef: &corev1.SecretEnvSource{
 				LocalObjectReference: corev1.LocalObjectReference{
@@ -1010,6 +1077,16 @@ func gatewayVerifyReason(
 			if code != "" {
 				return reasonConnectionFailed, fmt.Sprintf(
 					"%s returned HTTP %s%s", probeSurface(probe, endpoint), code, detail)
+			}
+		case "errorbody":
+			// A 2xx is not a pass when the body is an AWS error: the request
+			// did not reach the model. Said plainly, because "returned HTTP
+			// 200" on a failed verification reads like a contradiction.
+			if code != "" {
+				return reasonConnectionFailed, fmt.Sprintf(
+					"%s answered HTTP %s with an AWS error body, so the request "+
+						"never reached the model%s",
+					probeSurface(probe, endpoint), code, detail)
 			}
 		case "unreachable":
 			return reasonEndpointUnreachable, fmt.Sprintf(
