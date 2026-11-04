@@ -657,8 +657,11 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	default:
 		// creds.Branch, not HEAD: the branch is what the final push sends
 		// (#281), so it is the only commit a result may claim to describe.
-		verified = runPlanVerification(ctx, repo, cloneDir, creds.Branch, cfg.VerifyTimeout, red)
+		verified = runPlanVerification(ctx, repo, cloneDir, creds.Branch, cfg.VerifyTimeout, cfg.VerifyTotalTimeout, red)
 	}
+	// Measured on every stage; acted on only where the plan's verification
+	// is meant to hold by now. See enforceVerification.
+	enforceVerify := enforceVerification(cfg, verified)
 	if verified.unmet() {
 		// The console viewer has no pod log; this is the only place a
 		// person watching is told the tree does not do what it claims, or
@@ -668,7 +671,8 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		} else {
 			emitNotice("the harness could not finish verifying this stage — %s", verified.Reason)
 		}
-		if cfg.VerifyEnforce {
+		switch {
+		case enforceVerify:
 			// Opt-in (HARNESS_VERIFY_ENFORCE=on): the measurement, not the
 			// agent's account of it, decides the stage. An incomplete
 			// measurement counts, because under enforcement the stage must
@@ -679,7 +683,11 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			// pre-empt it.
 			logging.Err("verification %s and HARNESS_VERIFY_ENFORCE=on — failing the stage", verified.Status)
 			stageOutcome, limit = outcomeFailed, limitNone
-		} else {
+		case cfg.VerifyEnforce:
+			logging.Warn("verification %s, but this is an intermediate workflow stage — the plan's "+
+				"verification is not expected to hold until the last one, so the result is recorded "+
+				"and the stage keeps its outcome", verified.Status)
+		default:
 			logging.Warn("verification %s but enforcement is off — the stage keeps its outcome; "+
 				"the result is recorded in the termination data (HARNESS_VERIFY_ENFORCE=on to fail the stage)",
 				verified.Status)
@@ -702,7 +710,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			Verification:  verified,
 		}
 		switch {
-		case cfg.VerifyEnforce && verified.unmet():
+		case enforceVerify:
 			// Enforcement turned the measurement into the outcome, so it
 			// is also the reason — "end_turn" describes the agent's turn,
 			// not why the stage failed.
@@ -814,10 +822,10 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			emitOutcome("run cancelled by viewer — no commits to push")
 		case providerRejected:
 			emitOutcome("stage failed — the model provider rejected the call; no work was done")
-		case cfg.VerifyEnforce && verified.unmet() && pushed:
+		case enforceVerify && pushed:
 			emitOutcome("stage failed — the harness's own verification %s (%s); work pushed to branch %s",
 				verified.Status, verified.Reason, creds.Branch)
-		case cfg.VerifyEnforce && verified.unmet():
+		case enforceVerify:
 			emitOutcome("stage failed — the harness's own verification %s (%s); no commits to push",
 				verified.Status, verified.Reason)
 		case pushed:
@@ -833,7 +841,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			logging.Err("stage failed: the model provider rejected the call — %s", providerSummary)
 			return 1, fmt.Errorf("stage failed: provider error: %s", providerSummary)
 		}
-		if cfg.VerifyEnforce && verified.unmet() {
+		if enforceVerify {
 			logging.Err("stage failed: verification %s — %s", verified.Status, verified.Reason)
 			return 1, fmt.Errorf("stage failed: verification %s: %s", verified.Status, verified.Reason)
 		}
@@ -987,6 +995,26 @@ func workflowStagePosition(cfg *config.Config) (stage, count uint64, ok bool) {
 func isIntermediateWorkflowStage(cfg *config.Config) bool {
 	stage, count, ok := workflowStagePosition(cfg)
 	return ok && stage < count
+}
+
+// enforceVerification reports whether an unmet verification should decide
+// this stage's outcome.
+//
+// The pass measures every stage, because a recorded exit code is worth having
+// wherever it comes from. Failing the run on one is different: `docs/plan.md`
+// describes the state of the tree AFTER the migration, so an intermediate
+// stage is not expected to satisfy it yet. The execute stage hands a
+// half-migrated tree on by design, and the verify skill's own Step 1 is a
+// build fix loop ("Build fails: enter fix loop ... keep going until it
+// compiles") — a non-zero exit at the end of execute is the workflow working.
+// Enforcing there would fail the stage and stop the run (ADR 0018) before the
+// stage whose job is to fix exactly that ever started.
+//
+// So enforcement waits for the last stage. A standalone run is its own last
+// stage, and metadata that does not describe a position does not get to
+// silently disable the switch the operator turned on.
+func enforceVerification(cfg *config.Config, v *verification) bool {
+	return cfg.VerifyEnforce && v.unmet() && !isIntermediateWorkflowStage(cfg)
 }
 
 // planPrepRung is the first rung of the plan ladder: what the workspace

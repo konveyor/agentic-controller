@@ -929,3 +929,61 @@ func TestModelDisplayName(t *testing.T) {
 		}
 	}
 }
+
+// docs/plan.md describes the tree AFTER the migration, so an intermediate
+// workflow stage is not expected to satisfy it: the execute stage hands a
+// half-migrated tree on by design, and the verify skill's own first step is a
+// build fix loop. Enforcing there would fail the stage and stop the run
+// before the stage whose job is to fix exactly that ever started. The result
+// is still measured and recorded on every stage.
+func TestEnforceVerificationWaitsForTheLastStage(t *testing.T) {
+	failed := &verification{Status: verificationFailed, Reason: "Build failed: mvn clean compile"}
+	notRun := &verification{Status: verificationNotRun, Reason: "no plan"}
+	cases := []struct {
+		name string
+		cfg  *config.Config
+		v    *verification
+		want bool
+	}{
+		{
+			name: "enforcement off",
+			cfg:  &config.Config{},
+			v:    failed,
+		},
+		{
+			name: "standalone run is its own last stage",
+			cfg:  &config.Config{VerifyEnforce: true},
+			v:    failed,
+			want: true,
+		},
+		{
+			name: "last stage of a workflow",
+			cfg:  &config.Config{VerifyEnforce: true, WorkflowStage: "3", WorkflowStageCount: "3"},
+			v:    failed,
+			want: true,
+		},
+		{
+			name: "intermediate stage records without failing",
+			cfg:  &config.Config{VerifyEnforce: true, WorkflowStage: "2", WorkflowStageCount: "3"},
+			v:    failed,
+		},
+		{
+			name: "metadata that describes no position does not disable the switch",
+			cfg:  &config.Config{VerifyEnforce: true, WorkflowStage: "nonsense", WorkflowStageCount: "3"},
+			v:    failed,
+			want: true,
+		},
+		{
+			name: "nothing to measure never fails a stage",
+			cfg:  &config.Config{VerifyEnforce: true},
+			v:    notRun,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := enforceVerification(tc.cfg, tc.v); got != tc.want {
+				t.Errorf("enforceVerification = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

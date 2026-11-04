@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -88,9 +89,15 @@ func commitPlan(t *testing.T, dir string, repo *gogit.Repository, content string
 	return sha
 }
 
-// runPlan is runPlanVerification over a fixture built by writePlan.
+// runPlan is runPlanVerification over a fixture built by writePlan, with the
+// default pass budget.
 func runPlan(ctx context.Context, dir string, repo *gogit.Repository, timeout time.Duration, red *redactor) *verification {
-	return runPlanVerification(ctx, repo, dir, verifyBranch, timeout, red)
+	return runPlanVerification(ctx, repo, dir, verifyBranch, timeout, 0, red)
+}
+
+// runPlanBudget is runPlan with an explicit budget for the whole pass.
+func runPlanBudget(ctx context.Context, dir string, repo *gogit.Repository, timeout, total time.Duration, red *redactor) *verification {
+	return runPlanVerification(ctx, repo, dir, verifyBranch, timeout, total, red)
 }
 
 func TestParsePlanVerification(t *testing.T) {
@@ -803,5 +810,184 @@ func TestVerificationUnmet(t *testing.T) {
 	var none *verification
 	if none.unmet() {
 		t.Error("a nil verification must not read as unmet")
+	}
+}
+
+// The plan skill asks for Blackbox as "steps to start the app and verify key
+// business flows still work", and a model that writes those steps as
+// sub-bullets gives each one a label. Read on its own, `Start the app` is a
+// command — and `mvn quarkus:dev` never exits, so the harness would spend a
+// whole timeout on it and record a measured failure over a plan whose every
+// scorable command passed.
+func TestParsePlanVerificationNestedProseStepsAreNotCommands(t *testing.T) {
+	content := "## Verification\n" +
+		"- Build: mvn -q clean compile\n" +
+		"- Blackbox:\n" +
+		"  - Start the app: mvn quarkus:dev\n" +
+		"  - Check the endpoint: curl -sf localhost:8080/q/health\n" +
+		"- Test: mvn test\n"
+
+	steps, _, found := parsePlanVerification(content)
+
+	if !found {
+		t.Fatal("found = false, want the section")
+	}
+	if len(steps) != 5 {
+		t.Fatalf("got %d steps %+v, want 5", len(steps), steps)
+	}
+	for _, i := range []int{2, 3} {
+		if steps[i].runnable() {
+			t.Errorf("step %d = %+v, want it skipped as part of the Blackbox steps", i, steps[i])
+		}
+		if !strings.Contains(steps[i].Skip, "Blackbox") {
+			t.Errorf("step %d skip = %q, want it to name the prose line it belongs to", i, steps[i].Skip)
+		}
+	}
+	// A sibling back at the parent's indentation closes the block: the
+	// nesting is what makes a line prose, not where it sits in the list.
+	if steps[4].Command != "mvn test" {
+		t.Errorf("step 4 = %+v, want the un-nested Test line still read as a command", steps[4])
+	}
+}
+
+// Tab-indented sub-bullets nest like space-indented ones.
+func TestParsePlanVerificationNestedWithTabs(t *testing.T) {
+	steps, _, _ := parsePlanVerification("## Verification\n- Blackbox:\n\t- Start the app: npm start\n")
+	if len(steps) != 2 {
+		t.Fatalf("got %d steps %+v, want 2", len(steps), steps)
+	}
+	if steps[1].runnable() {
+		t.Errorf("step 1 = %+v, want it skipped as part of the Blackbox steps", steps[1])
+	}
+}
+
+// The cap dropping EVERY command is the same gap as the cap dropping one, and
+// the first cut read it as notRun — "there was nothing to measure" — which
+// enforcement ignores by design. A section that named commands the harness
+// never ran is incomplete.
+func TestRunPlanVerificationCapDroppingEveryCommandIsIncomplete(t *testing.T) {
+	requireShell(t)
+	dir, repo := writePlan(t, "## Verification\n"+
+		strings.Repeat("- Blackbox: start the app and click around\n", verifyMaxSteps)+
+		"- Build: exit 7\n")
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status != verificationIncomplete {
+		t.Fatalf("status = %q, want %q — the section named a command the cap dropped", v.Status, verificationIncomplete)
+	}
+	if !v.unmet() {
+		t.Error("unmet() = false, want true — enforcement must be able to act on a section that went unmeasured")
+	}
+	if !strings.Contains(v.Reason, "not run") {
+		t.Errorf("reason = %q, want it to say the rest were not run", v.Reason)
+	}
+}
+
+// The per-command timeout bounds one command; without a budget for the pass a
+// plan naming a dozen slow ones spends hours after the agent's turn, with the
+// final push and the termination blob behind it.
+func TestRunPlanVerificationPassBudgetLeavesAGap(t *testing.T) {
+	requireShell(t)
+	dir, repo := writePlan(t, "## Verification\n- Build: true\n- Test: sleep 30\n- Lint: true\n")
+
+	// Per-command timeout far above the budget, so what stops the pass is
+	// the budget and nothing else.
+	v := runPlanBudget(context.Background(), dir, repo, time.Minute, 400*time.Millisecond, newRedactor())
+
+	if v.Status != verificationIncomplete {
+		t.Fatalf("status = %q, want %q", v.Status, verificationIncomplete)
+	}
+	if !strings.Contains(v.Reason, "budget") {
+		t.Errorf("reason = %q, want it to name the pass budget", v.Reason)
+	}
+	if len(v.Commands) != 3 {
+		t.Fatalf("got %d commands %+v, want 3", len(v.Commands), v.Commands)
+	}
+	if v.Commands[0].Status != verifyStepPassed {
+		t.Errorf("Build = %+v, want it recorded as it exited", v.Commands[0])
+	}
+	// The budget is the harness running out of its own clock, not the
+	// command failing to exit: recorded as a gap, never as a timeout,
+	// which settle would count as a measured failure.
+	for _, i := range []int{1, 2} {
+		if v.Commands[i].Status != verifyStepAborted {
+			t.Errorf("command %d = %+v, want %q", i, v.Commands[i], verifyStepAborted)
+		}
+		if !strings.Contains(v.Commands[i].Reason, "budget") {
+			t.Errorf("command %d reason = %q, want it to name the budget", i, v.Commands[i].Reason)
+		}
+	}
+}
+
+// The agent appends its handoff section as its last act — the verify skill
+// makes it mandatory, after the commit of the work, and #241 reads it straight
+// from the worktree for that reason. Counting it as uncommitted input would
+// make every clean verify stage report incomplete over a file no build
+// compiles.
+func TestRunPlanVerificationIgnoresTheUncommittedHandoff(t *testing.T) {
+	requireShell(t)
+	dir, repo := writePlan(t, "## Verification\n- Build: true\n")
+	if err := os.MkdirAll(filepath.Join(dir, ".konveyor"), 0o755); err != nil {
+		t.Fatalf("mkdir .konveyor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, handoffPath), []byte("## Verify\n- Status: passed\n"), 0o644); err != nil {
+		t.Fatalf("write handoff: %v", err)
+	}
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status != verificationPassed {
+		t.Fatalf("status = %q (%s), want %q", v.Status, v.Reason, verificationPassed)
+	}
+}
+
+// The exemption is by exact path: anything else the agent leaves under
+// .konveyor/ counts like any other uncommitted file.
+func TestRunPlanVerificationCountsOtherKonveyorFiles(t *testing.T) {
+	requireShell(t)
+	dir, repo := writePlan(t, "## Verification\n- Build: true\n")
+	if err := os.MkdirAll(filepath.Join(dir, ".konveyor"), 0o755); err != nil {
+		t.Fatalf("mkdir .konveyor: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".konveyor/scratch.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write scratch: %v", err)
+	}
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status != verificationIncomplete {
+		t.Fatalf("status = %q, want %q", v.Status, verificationIncomplete)
+	}
+	if !strings.Contains(v.Reason, "scratch.json") {
+		t.Errorf("reason = %q, want it to name the uncommitted file", v.Reason)
+	}
+}
+
+// verification.reason survives to the last rung of the termination blob's trim
+// ladder, so a git error quoting a credentialed remote must not travel in it.
+func TestIncompleteRedactsItsReason(t *testing.T) {
+	red := &redactor{secrets: []string{"ghp_supersecrettoken"}}
+
+	v := incomplete(red, "resolve branch %s: %v", "main",
+		errors.New("remote https://ghp_supersecrettoken@github.com/o/r.git not found"))
+
+	if strings.Contains(v.Reason, "ghp_supersecrettoken") {
+		t.Errorf("reason = %q, want the secret redacted", v.Reason)
+	}
+}
+
+// The pod log is the only copy of a failing command's output that outlives the
+// pod, and the interesting part of a build's output is where it stopped.
+func TestClipVerifyTailKeepsTheEnd(t *testing.T) {
+	output := strings.Repeat("progress\n", 500) + "ERROR: 45 problems"
+
+	got := clipVerifyTail(output, 40)
+
+	if !strings.Contains(got, "ERROR: 45 problems") {
+		t.Errorf("clipVerifyTail = %q, want the end of the output", got)
+	}
+	if len([]rune(got)) > 40 {
+		t.Errorf("clipVerifyTail returned %d runes, want at most 40", len([]rune(got)))
 	}
 }
