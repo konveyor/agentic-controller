@@ -2,7 +2,7 @@ module github.com/konveyor/agentic-controller/api
 
 go 1.26.2
 
-toolchain go1.26.6
+toolchain go1.26.10
 
 require (
 	gopkg.in/yaml.v3 v3.0.1
