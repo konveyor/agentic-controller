@@ -1,0 +1,8 @@
+kind: bugfix
+
+description: >
+  Raise the pinned build toolchain from Go 1.26.6 to Go 1.26.10 across the
+  root, api and harness modules, picking up the standard library fixes for
+  the net/http HTTP/2 flow-control, trailer and framing CVEs. The reported
+  call sites use stdlib net/http rather than golang.org/x/net, so the
+  toolchain pin and not the module requirement governs them.
