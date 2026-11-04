@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/konveyor/migration-harness/internal/proxy"
+	"github.com/konveyor/migration-harness/internal/redaction"
 )
 
 func TestProxyUsernamesPreserveDiagnostics(t *testing.T) {
@@ -42,7 +43,7 @@ func TestProxyUsernamesPreserveDiagnostics(t *testing.T) {
 						if got := red.redact(password); got != "[redacted]" {
 							t.Errorf("short password leaked: %q", got)
 						}
-						if len(username) >= minSecretLen && red.redact(username) != "[redacted]" {
+						if len(username) >= redaction.MinSecretLen && red.redact(username) != "[redacted]" {
 							t.Error("long proxy username leaked")
 						}
 					} else if got := red.redact(username); got != "[redacted]" {
