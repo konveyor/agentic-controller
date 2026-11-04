@@ -2,7 +2,7 @@ module github.com/konveyor/migration-harness
 
 go 1.26.2
 
-toolchain go1.26.6
+toolchain go1.26.10
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
