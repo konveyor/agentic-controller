@@ -13,12 +13,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/konveyor/migration-harness/internal/redaction"
+
 	"golang.org/x/net/http/httpproxy"
 )
-
-// Match the harness redactor's heuristic for ordinary short usernames.
-// Passwords and username-only tokens have no minimum length.
-const minUsernameSecretLen = 8
 
 // Config is an enabled Hub proxy, including its decrypted identity.
 // Kind is the destination protocol; Hub uses HTTP forward proxies for both.
@@ -144,7 +142,7 @@ func (p *Policy) addSecrets(u *url.URL) {
 	}
 	password, _ := u.User.Password()
 	username := u.User.Username()
-	if password != "" && len(username) < minUsernameSecretLen {
+	if password != "" && len(username) < redaction.MinSecretLen {
 		// A short ordinary username is not a token. Mask combined forms
 		// below without replacing words such as "proxy" in diagnostics.
 		username = ""
