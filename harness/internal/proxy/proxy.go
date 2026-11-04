@@ -16,6 +16,10 @@ import (
 	"golang.org/x/net/http/httpproxy"
 )
 
+// Match the harness redactor's heuristic for ordinary short usernames.
+// Passwords and username-only tokens have no minimum length.
+const minUsernameSecretLen = 8
+
 // Config is an enabled Hub proxy, including its decrypted identity.
 // Kind is the destination protocol; Hub uses HTTP forward proxies for both.
 type Config struct {
@@ -39,7 +43,7 @@ func New(configs []Config, lookup func(string) (string, bool)) (*Policy, error) 
 	p := &Policy{urls: make(map[string]*url.URL), env: make(map[string]string)}
 	for _, c := range configs {
 		if c.Kind != "http" && c.Kind != "https" {
-			return nil, fmt.Errorf("unsupported Hub proxy kind")
+			return nil, fmt.Errorf("unsupported Hub proxy kind %q (expected http or https)", c.Kind)
 		}
 		if _, found := p.urls[c.Kind]; found {
 			return nil, fmt.Errorf("multiple enabled Hub proxies for %s", c.Kind)
@@ -139,7 +143,13 @@ func (p *Policy) addSecrets(u *url.URL) {
 		return
 	}
 	password, _ := u.User.Password()
-	for _, value := range []string{u.User.Username(), password} {
+	username := u.User.Username()
+	if password != "" && len(username) < minUsernameSecretLen {
+		// A short ordinary username is not a token. Mask combined forms
+		// below without replacing words such as "proxy" in diagnostics.
+		username = ""
+	}
+	for _, value := range []string{username, password} {
 		if value == "" {
 			continue
 		}
