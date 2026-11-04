@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -118,8 +119,8 @@ func TestMavenProxyRejectsInterpolationCredentials(t *testing.T) {
 		{Kind: "https", Host: "proxy", Username: "private-${env.USER}"},
 	} {
 		_, err := withMavenProxies("<settings/>", []proxy.Config{config})
-		if err == nil || !strings.Contains(err.Error(), "HARNESS_HUB_PROXY=off") {
-			t.Errorf("expected actionable rejection of credentials Maven would interpolate, got %v", err)
+		if !errors.Is(err, errMavenProxyConversion) {
+			t.Errorf("expected conversion failure for credentials Maven would interpolate, got %v", err)
 		}
 		if err != nil && strings.Contains(err.Error(), "private-") {
 			t.Error("error revealed credential content")
@@ -141,8 +142,8 @@ func TestGeneratedMavenProxiesRejectUnsupportedExclusions(t *testing.T) {
 			}
 			for _, source := range []string{"", "<settings><servers/></settings>"} {
 				_, err := withMavenProxies(source, policy.HubProxies())
-				if err == nil || !strings.Contains(err.Error(), "Maven") || !strings.Contains(err.Error(), "HARNESS_HUB_PROXY=off") {
-					t.Errorf("expected actionable Maven generation failure, got %v", err)
+				if !errors.Is(err, errMavenProxyConversion) {
+					t.Errorf("expected Maven conversion failure, got %v", err)
 				}
 			}
 		})
@@ -154,5 +155,91 @@ func TestMavenExclusionTranslation(t *testing.T) {
 	const want = "example.com|*.example.com|*.corp.example|git*.example|10.1.2.3|2001:db8::1|[2001:db8::1]"
 	if err != nil || got != want {
 		t.Fatalf("nonProxyHosts = %q, %v; want %q", got, err, want)
+	}
+}
+
+func TestPrepareMavenSettingsSkipsUnsupportedProxyConversion(t *testing.T) {
+	const supplied = `<settings><servers><server><password>repository-secret</password><passphrase>s3!</passphrase></server></servers><!-- preserve --><profiles><profile><id>custom</id></profile></profiles></settings>`
+	for _, tt := range []struct {
+		name, username, password string
+		excluded                 []string
+	}{
+		{name: "CIDR", excluded: []string{"10.0.0.0/8"}},
+		{name: "IPv6 CIDR", excluded: []string{"2001:db8::/32"}},
+		{name: "host port", excluded: []string{"private.example:8443"}},
+		{name: "IPv6 port", excluded: []string{"[2001:db8::1]:443"}},
+		{name: "password interpolation", username: "user", password: "private-${env.HOME}"},
+		{name: "username interpolation", username: "private-${env.USER}"},
+	} {
+		for _, source := range []string{"absent", "assigned", "default"} {
+			t.Run(tt.name+"/"+source, func(t *testing.T) {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					if source == "absent" || (source == "default" && r.URL.Path == "/applications/42/identities") {
+						_, _ = w.Write([]byte(`[]`))
+						return
+					}
+					_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 7, "settings": supplied}})
+				}))
+				defer server.Close()
+				// A valid first proxy must not be installed when the second
+				// cannot be converted: the entire automatic addition is skipped.
+				policy, err := proxy.New([]proxy.Config{
+					{Kind: "http", Host: "proxy.example", Username: "user", Password: "first-secret"},
+					{Kind: "https", Host: "proxy2.example", Username: tt.username, Password: tt.password, Excluded: tt.excluded},
+				}, func(string) (string, bool) { return "", false })
+				if err != nil {
+					t.Fatal(err)
+				}
+				red := newRedactor()
+				if err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", red, policy.HubProxies()...); err != nil {
+					t.Fatalf("automatic proxy conversion stopped setup: %v", err)
+				}
+				request, _ := http.NewRequest(http.MethodGet, "http://git.example/repo.git", nil)
+				gitProxy, err := policy.GitProxy(request)
+				if err != nil || gitProxy == nil || gitProxy.Hostname() != "proxy.example" {
+					t.Fatalf("Maven fallback changed Git routing: %v, %v", gitProxy, err)
+				}
+				path := filepath.Join(home, ".m2", "settings.xml")
+				data, err := os.ReadFile(path)
+				if source == "absent" {
+					if !os.IsNotExist(err) {
+						t.Errorf("proxy-only fallback must not create a settings file: %v", err)
+					}
+					return
+				}
+				if err != nil || string(data) != supplied {
+					t.Fatalf("fallback changed supplied Maven settings: %v", err)
+				}
+				if got := red.redact("repository-secret s3!"); got != "[redacted] [redacted]" {
+					t.Errorf("fallback lost Maven credential redaction: %q", got)
+				}
+				if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+					t.Errorf("fallback settings must remain private: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestMavenProxyFallbackDoesNotIgnoreMalformedSuppliedSettings(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 7, "settings": `<settings><servers><server><password>private-settings-password</server>`}})
+	}))
+	defer server.Close()
+	err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor(), proxy.Config{Kind: "http", Host: "proxy", Excluded: []string{"10.0.0.0/8"}})
+	if err == nil || errors.Is(err, errMavenProxyConversion) {
+		t.Fatalf("malformed supplied settings must remain an error: %v", err)
+	}
+	if strings.Contains(err.Error(), "private-settings-password") {
+		t.Error("supplied settings leaked into diagnostics")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".m2", "settings.xml")); !os.IsNotExist(err) {
+		t.Errorf("malformed supplied settings were written: %v", err)
 	}
 }

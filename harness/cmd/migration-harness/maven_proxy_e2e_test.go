@@ -62,10 +62,11 @@ func TestMavenProxyBuild(t *testing.T) {
 		artifact + ".jar": archive.Bytes(),
 		artifact + ".pom": []byte(`<project><modelVersion>4.0.0</modelVersion><groupId>org.konveyor</groupId><artifactId>proxy-fixture</artifactId><version>1.0</version></project>`),
 	}
-	for _, mode := range []string{"authenticated proxy-only repository", "IPv6 proxy", "literal brace password", "embedded brace password", "literal expression password", "excluded direct repository", "bare domain exclusion", "leading-dot domain exclusion", "HTTPS exclusion blocks HTTP fallback"} {
+	for _, mode := range []string{"authenticated proxy-only repository", "IPv6 proxy", "literal brace password", "embedded brace password", "literal expression password", "unsupported exclusion fallback", "excluded direct repository", "bare domain exclusion", "leading-dot domain exclusion", "HTTPS exclusion blocks HTTP fallback"} {
 		t.Run(mode, func(t *testing.T) {
 			domain := strings.Contains(mode, "domain exclusion")
-			excluded := mode == "excluded direct repository" || mode == "HTTPS exclusion blocks HTTP fallback" || domain
+			fallback := mode == "literal expression password" || mode == "unsupported exclusion fallback"
+			excluded := mode == "excluded direct repository" || mode == "HTTPS exclusion blocks HTTP fallback" || domain || fallback
 			https := mode == "HTTPS exclusion blocks HTTP fallback"
 			password := "proxy-password"
 			if mode == "literal brace password" {
@@ -146,6 +147,9 @@ func TestMavenProxyBuild(t *testing.T) {
 			if mode == "IPv6 proxy" {
 				configs[0].Host = "::1"
 			}
+			if mode == "unsupported exclusion fallback" {
+				configs[0].Excluded = []string{"10.0.0.0/8"}
+			}
 			if domain {
 				exclusion := "corp.example"
 				if mode == "leading-dot domain exclusion" {
@@ -179,14 +183,14 @@ func TestMavenProxyBuild(t *testing.T) {
 				t.Fatal(err)
 			}
 			err = prepareMavenSettings(hub.NewClient(clientServer.URL, "test-token"), "42", newRedactor(), policy.HubProxies()...)
-			if mode == "literal expression password" {
-				if err == nil || !strings.Contains(err.Error(), "HARNESS_HUB_PROXY=off") {
-					t.Fatalf("expected actionable startup rejection instead of Maven silently changing the password: %v", err)
+			if fallback {
+				if err != nil {
+					t.Fatalf("unsupported proxy conversion must not stop settings preparation: %v", err)
 				}
-				if _, err := os.Stat(filepath.Join(work, "home/.m2/settings.xml")); !os.IsNotExist(err) {
-					t.Error("unsupported password produced a settings file")
+				data, err := os.ReadFile(filepath.Join(work, "home/.m2/settings.xml"))
+				if err != nil || string(data) != settings {
+					t.Fatalf("unsupported proxy conversion must preserve the supplied repository settings: %v", err)
 				}
-				return
 			}
 			if err != nil {
 				t.Fatal(err)

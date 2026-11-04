@@ -78,7 +78,7 @@ func TestRunStageProxyOptOutAndFailures(t *testing.T) {
 		{name: "forbidden lookup", status: http.StatusForbidden, body: `{"password":"must-not-appear-in-errors"}`, wantFailure: true},
 		{name: "forbidden identity", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","identity":{"id":7}}]`, wantFailure: true},
 		{name: "CIDR with existing Maven settings", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","excluded":["10.0.0.0/8"]}]`, existingMaven: true},
-		{name: "unsupported generated Maven exclusion", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","excluded":["10.0.0.0/8"]}]`, wantFailure: true},
+		{name: "unsupported Maven exclusion continues to clone", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","excluded":["10.0.0.0/8"]}]`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
