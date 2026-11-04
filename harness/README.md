@@ -200,18 +200,30 @@ remain authoritative and bypass Maven exclusion validation. URLs and malformed
 exclusions still fail shared validation. Errors name the inheritance opt-out;
 unsupported exclusions are never silently dropped.
 
+Maven settings preparation runs for every invocation, including images without
+Maven installed. A CIDR or port-specific exclusion therefore also stops a Go,
+Node.js or C# run unless Maven settings are explicitly supplied or inheritance
+is disabled. The harness does not infer future Maven use from installed tools;
+projects may use Maven wrappers or install tools during execution.
+
 Maven interpolates credential values containing `${` before authentication.
 Automatic proxy settings reject those identities with a sanitized setup error
 instead of silently changing the credentials. For such identities, supply an
 explicit Maven proxy section with encrypted credentials, or disable inheritance
 and provide tool-specific settings. Literal brace passwords are preserved;
 the harness does not insert backslashes that would change their value.
+Maven may attempt to decrypt literal `{...}` values and report a decryption
+problem; Maven 3 retains the original value when decryption fails. Real builds
+with Maven 3.9.11 cover both `{s3cret}` and `p{a}ss` passwords.
 
 Hub proxy values are private to go-git's HTTP transport and generated Maven
 settings; they are not exported to the runtime environment or written to Git
 config. Maven can read its proxy credentials from its private settings file.
-Proxy usernames, passwords and encoded URL/XML forms are registered with the harness
-redactor. Proxy lookup errors omit response bodies. Git push credentials stay
+Proxy passwords, username-only tokens and encoded URL/XML forms are registered
+with the harness redactor. Short usernames paired with a password are masked
+inside complete URLs and userinfo, while their bare values retain the existing
+eight-character minimum to preserve ordinary diagnostics. Proxy lookup errors
+omit response bodies. Git push credentials stay
 in the harness. Hub connectivity, Gateway verification and skill loading
 retain their existing proxy behavior.
 
