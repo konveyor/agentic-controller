@@ -118,20 +118,31 @@ Every step above can edit the tree, and a fix made for one check can break
 another — a lint or formatting edit is as capable of breaking the build as a
 build fix is, and nothing in Steps 2 and 3 sends you back to the build.
 
-After your last edit, run every command in the `docs/plan.md` Verification
-section again, in order, on the tree as it now stands. Record each command's
-exit code.
+After your last edit, re-measure every result on the tree as it now stands,
+in this order:
 
-- **The build command fails**: go back to Step 1's fix loop, then start this
-  step again from the top
-- **Any other command's result differs from what you recorded earlier**:
-  replace the earlier result with this run's
+1. Run the build command from `docs/plan.md`'s Verification section
+2. Run the test command, if the Verification section has one
+3. Redo Step 3's runtime checks — start the application, health check, smoke
+   tests, startup time, log scan, clean shutdown
+
+Then:
+
+- **The build passes**: every result from this run replaces what you recorded
+  earlier, and you go to `Write Output`
+- **The build fails and the error can be fixed**: go back to Step 1's fix loop,
+  then start this step again from the top
+- **The build fails and the error genuinely cannot be fixed without changing
+  business logic**: stop here — do not re-enter the fix loop for the same
+  error. Go to `Write Output` and record `Build: failed` with that error,
+  `Tests: skipped`, `Runtime: skipped` and `Status: failed`, so the stage hands
+  off a failure instead of retrying one it cannot fix
 
 The results you write in the next step come from this run. A command that
 passed in an earlier round does not count, however late that round was: if you
 edited a file afterwards, that result describes a tree that no longer exists.
 If you touch a source file again after this run — including something you spot
-while writing up — run the section again first.
+while writing up — run this step again first.
 
 ---
 
@@ -147,7 +158,11 @@ summary. Every line describes the tree as Step 4 left it, which is the tree
 being handed on: `Build: passed` means the build command passed after your last
 edit, not that it passed at the end of Step 1's fix loop. Overall status is
 `passed` only if the build passed on that final run — test and runtime failures
-are documented but do not block the stage. The harness reads that line:
+are documented but do not block the stage. If Step 4 ended on a build that
+cannot be fixed without changing business logic, that is `Status: failed`, with
+`Tests: skipped` and `Runtime: skipped`: neither can be measured on a tree that
+does not compile. `rounds` counts every build run in the stage — Step 1's
+fix-loop rounds plus each Step 4 run. The harness reads the status line:
 `failed` ends the run as refused and stops the workflow, with the `Summary`
 line as the reason.
 
@@ -175,8 +190,9 @@ line as the reason.
 - Fix build errors until it compiles, but never change business logic
 - Document test failures, do not fix them
 - Stop the application after runtime checks — do not leave it running
-- Re-run the whole Verification section after your last edit — every result you
-  record comes from that run, never from an earlier round
+- Re-measure every result after your last edit — never report one from an
+  earlier round
 - Do NOT write `Status: passed` unless you have seen the build pass after your
-  last edit
+  last edit; a build you cannot fix is `Status: failed`, not another trip
+  through the fix loop
 - You MUST append your `## Verify` section to `.konveyor/handoff.md` before finishing
