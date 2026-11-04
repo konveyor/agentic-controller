@@ -71,6 +71,8 @@ func TestRunStageProxyOptOutAndFailures(t *testing.T) {
 		status                  int
 		existingMaven           bool
 		wantFailure             bool
+		wantMavenWarning        bool
+		wantRedactedWarning     bool
 	}{
 		{name: "opt-out bypasses forbidden lookup", switchValue: "off", status: http.StatusForbidden},
 		{name: "absent", body: `[]`},
@@ -78,7 +80,8 @@ func TestRunStageProxyOptOutAndFailures(t *testing.T) {
 		{name: "forbidden lookup", status: http.StatusForbidden, body: `{"password":"must-not-appear-in-errors"}`, wantFailure: true},
 		{name: "forbidden identity", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","identity":{"id":7}}]`, wantFailure: true},
 		{name: "CIDR with existing Maven settings", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","excluded":["10.0.0.0/8"]}]`, existingMaven: true},
-		{name: "unsupported Maven exclusion continues to clone", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","excluded":["10.0.0.0/8"]}]`},
+		{name: "unsupported Maven exclusion continues to clone", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","excluded":["10.0.0.0/8"]}]`, wantMavenWarning: true},
+		{name: "fallback warning redacts username-only token", body: `[{"id":1,"enabled":true,"kind":"http","host":"proxy.example","identity":{"id":8},"excluded":["10.0.0.0/8"]}]`, wantMavenWarning: true, wantRedactedWarning: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -106,6 +109,8 @@ func TestRunStageProxyOptOutAndFailures(t *testing.T) {
 				case "/identities/7":
 					w.WriteHeader(http.StatusForbidden)
 					_, _ = w.Write([]byte(`{"password":"must-not-appear-in-errors"}`))
+				case "/identities/8":
+					_, _ = w.Write([]byte(`{"id":8,"user":"Maven","password":""}`))
 				default:
 					_, _ = w.Write([]byte(`[]`))
 				}
@@ -138,6 +143,16 @@ func TestRunStageProxyOptOutAndFailures(t *testing.T) {
 				t.Error("absent, disabled or opted-out proxy settings should not create Maven settings")
 			}
 			termination, _ := os.ReadFile(filepath.Join(home, "termination-log"))
+			var term terminationBlob
+			if err := json.Unmarshal(termination, &term); err != nil {
+				t.Fatal(err)
+			}
+			if (term.MavenProxyWarning != "") != tt.wantMavenWarning {
+				t.Errorf("termination data Maven proxy warning = %q; expected present: %v", term.MavenProxyWarning, tt.wantMavenWarning)
+			}
+			if tt.wantRedactedWarning && strings.Contains(term.MavenProxyWarning, "Maven") {
+				t.Error("username-only token was not redacted from the persisted warning")
+			}
 			if strings.Contains(err.Error(), "must-not-appear-in-errors") || strings.Contains(string(termination), "must-not-appear-in-errors") {
 				t.Error("proxy identity response leaked into diagnostics")
 			}

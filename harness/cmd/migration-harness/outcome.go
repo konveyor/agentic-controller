@@ -212,14 +212,17 @@ type terminationBlob struct {
 	Outcome      string `json:"outcome"`
 	LimitReached string `json:"limitReached,omitempty"`
 	StopReason   string `json:"stopReason,omitempty"`
-	Usage        *usage `json:"usage,omitempty"`
+	// MavenProxyWarning records skipped automatic proxy conversion even when
+	// setup fails before the console connection is available.
+	MavenProxyWarning string `json:"mavenProxyWarning,omitempty"`
+	Usage             *usage `json:"usage,omitempty"`
 }
 
 // executeErrorTerminationBlob builds the termination-log blob for an error
 // returned directly by rootCmd.Execute() — a failure outside runStage's own
 // deferred writeTerminationLog (e.g. a cobra flag-parsing error, so RunE
-// never ran). StopReason is the only free-text field the documented schema
-// offers, so the go error text goes there rather than being written as a
+// never ran). StopReason carries this failure diagnostic, so the go error
+// text goes there rather than being written as a
 // raw, potentially invalid-JSON string (issue #189).
 func executeErrorTerminationBlob(err error, exitCode int) terminationBlob {
 	return terminationBlob{
@@ -269,11 +272,13 @@ func writeTerminationLog(path string, term terminationBlob) {
 		}
 		data, err = json.Marshal(term)
 		if err != nil || len(data) > maxTerminationLogBytes {
-			// Fall back to minimal valid JSON preserving exitCode, outcome, and limitReached.
+			// Fall back to minimal valid JSON preserving the outcome and Maven
+			// setup warning, which explains missing proxy configuration.
 			term = terminationBlob{
-				ExitCode:     term.ExitCode,
-				Outcome:      term.Outcome,
-				LimitReached: term.LimitReached,
+				ExitCode:          term.ExitCode,
+				Outcome:           term.Outcome,
+				LimitReached:      term.LimitReached,
+				MavenProxyWarning: truncateRuneSafe(term.MavenProxyWarning, 200),
 			}
 			data, _ = json.Marshal(term)
 		}

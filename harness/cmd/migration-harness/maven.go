@@ -17,83 +17,85 @@ import (
 // prepareMavenSettings runs in every invocation, independently of skills or
 // workflow stage. An existing user settings file (including a Secret mount)
 // takes precedence over Hub's assigned or default Maven credential. Broken
-// symlinks fail setup instead of falling back to a Hub credential.
-func prepareMavenSettings(client *hub.Client, appID string, red *redactor, proxies ...proxy.Config) error {
+// symlinks fail setup instead of falling back to a Hub credential. The returned
+// warning explains skipped proxy conversion for viewer and termination reporting.
+func prepareMavenSettings(client *hub.Client, appID string, red *redactor, proxies ...proxy.Config) (warning string, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("resolve home directory: %w", err)
+		return warning, fmt.Errorf("resolve home directory: %w", err)
 	}
 	path := filepath.Join(home, ".m2", "settings.xml")
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
 			info, err = os.Stat(path)
 			if err != nil {
-				return fmt.Errorf("inspect Maven user settings: %w", err)
+				return warning, fmt.Errorf("inspect Maven user settings: %w", err)
 			}
 		}
 		if !info.Mode().IsRegular() {
-			return fmt.Errorf("Maven user settings path %s is not a regular file", path)
+			return warning, fmt.Errorf("Maven user settings path %s is not a regular file", path)
 		}
 		settings, err := os.ReadFile(path)
 		if err != nil {
-			return fmt.Errorf("read Maven user settings for secret redaction: %w", err)
+			return warning, fmt.Errorf("read Maven user settings for secret redaction: %w", err)
 		}
 		if err := red.addMavenSettings(string(settings)); err != nil {
-			return err
+			return warning, err
 		}
 		logging.Info("using existing Maven user settings at %s", path)
-		return nil
+		return warning, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect Maven user settings: %w", err)
+		return warning, fmt.Errorf("inspect Maven user settings: %w", err)
 	}
 
 	id, err := hub.ParseAppID(appID)
 	if err != nil {
-		return fmt.Errorf("invalid APP_ID: %w", err)
+		return warning, fmt.Errorf("invalid APP_ID: %w", err)
 	}
 	identity, err := client.FetchMavenCreds(id)
 	if err != nil {
-		return fmt.Errorf("fetch Maven credential: %w", err)
+		return warning, fmt.Errorf("fetch Maven credential: %w", err)
 	}
 	if identity == nil && len(proxies) == 0 {
-		return nil
+		return warning, nil
 	}
 	settings := ""
 	if identity != nil {
 		if strings.TrimSpace(identity.Settings) == "" {
-			return fmt.Errorf("Maven credential %d has empty settings", identity.ID)
+			return warning, fmt.Errorf("Maven credential %d has empty settings", identity.ID)
 		}
 		settings = identity.Settings
 	}
 	generated, err := withMavenProxies(settings, proxies)
 	if errors.Is(err, errMavenProxyConversion) {
-		logging.Warn("skipping automatic Maven proxy configuration: %v; continuing with supplied/default Maven settings; supply explicit Maven proxy settings if needed", err)
+		warning = fmt.Sprintf("skipping automatic Maven proxy configuration: %v; continuing with supplied/default Maven settings; supply explicit Maven proxy settings if needed", err)
+		logging.Warn("%s", red.redact(warning))
 		if identity == nil {
-			return nil
+			return warning, nil
 		}
 	} else if err != nil {
-		return err
+		return warning, err
 	} else {
 		settings = generated
 	}
 	if err := red.addMavenSettings(settings); err != nil {
-		return err
+		return warning, err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create Maven settings directory: %w", err)
+		return warning, fmt.Errorf("create Maven settings directory: %w", err)
 	}
 	// Exclusive creation also preserves a file or symlink created while the
 	// Hub request was in flight. Settings can contain repository passwords.
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return fmt.Errorf("create Maven user settings: %w", err)
+		return warning, fmt.Errorf("create Maven user settings: %w", err)
 	}
 	if err := writeMavenSettings(f, path, settings); err != nil {
-		return err
+		return warning, err
 	}
 	logging.Ok("Maven settings prepared at %s", path)
-	return nil
+	return warning, nil
 }
 
 // addMavenSettings registers both decoded and literal XML credential values so

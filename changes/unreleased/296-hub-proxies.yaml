@@ -3,5 +3,6 @@ description: >
   Honor enabled Hub HTTP/HTTPS proxies for harness Git operations and generated
   Maven settings in standalone runs and every workflow stage, preserving
   explicit configuration and credential isolation with shared exclusions and a
-  HARNESS_HUB_PROXY=off opt-out, while warning and preserving supplied settings
-  when automatic Maven proxy conversion is unsupported.
+  HARNESS_HUB_PROXY=off opt-out, preserving supplied settings and reporting a
+  warning in console notices and termination data when automatic Maven proxy
+  conversion is unsupported.

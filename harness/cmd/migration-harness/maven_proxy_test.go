@@ -71,8 +71,12 @@ func TestPrepareMavenSettingsWithProxies(t *testing.T) {
 				t.Fatal(err)
 			}
 			red := newRedactor()
-			if err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", red, policy.HubProxies()...); err != nil {
+			warning, err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", red, policy.HubProxies()...)
+			if err != nil {
 				t.Fatal(err)
+			}
+			if warning != "" {
+				t.Fatalf("supported or explicit settings produced a warning: %s", warning)
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
@@ -194,8 +198,12 @@ func TestPrepareMavenSettingsSkipsUnsupportedProxyConversion(t *testing.T) {
 					t.Fatal(err)
 				}
 				red := newRedactor()
-				if err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", red, policy.HubProxies()...); err != nil {
+				warning, err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", red, policy.HubProxies()...)
+				if err != nil {
 					t.Fatalf("automatic proxy conversion stopped setup: %v", err)
+				}
+				if !strings.Contains(warning, "skipping automatic Maven proxy configuration") || strings.Contains(warning, "private-") {
+					t.Errorf("fallback must return a sanitized warning for viewer/status reporting: %q", warning)
 				}
 				request, _ := http.NewRequest(http.MethodGet, "http://git.example/repo.git", nil)
 				gitProxy, err := policy.GitProxy(request)
@@ -232,7 +240,7 @@ func TestMavenProxyFallbackDoesNotIgnoreMalformedSuppliedSettings(t *testing.T) 
 		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 7, "settings": `<settings><servers><server><password>private-settings-password</server>`}})
 	}))
 	defer server.Close()
-	err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor(), proxy.Config{Kind: "http", Host: "proxy", Excluded: []string{"10.0.0.0/8"}})
+	_, err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor(), proxy.Config{Kind: "http", Host: "proxy", Excluded: []string{"10.0.0.0/8"}})
 	if err == nil || errors.Is(err, errMavenProxyConversion) {
 		t.Fatalf("malformed supplied settings must remain an error: %v", err)
 	}

@@ -110,6 +110,7 @@ func main() {
 
 func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	red := newRedactor()
+	var mavenProxyWarning string
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -127,6 +128,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			term.StopReason = err.Error()
 		}
 		term.StopReason = red.redact(term.StopReason)
+		term.MavenProxyWarning = red.redact(mavenProxyWarning)
 		if err != nil {
 			if safe := red.redact(err.Error()); safe != err.Error() {
 				err = errors.New(safe)
@@ -205,7 +207,8 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	restoreGitProxy := git.ConfigureProxy(proxyPolicy.GitProxy)
 	defer restoreGitProxy()
 
-	if err := prepareMavenSettings(hubClient, cfg.AppID, red, proxyPolicy.HubProxies()...); err != nil {
+	mavenProxyWarning, err = prepareMavenSettings(hubClient, cfg.AppID, red, proxyPolicy.HubProxies()...)
+	if err != nil {
 		return 1, fmt.Errorf("Maven settings: %w", err)
 	}
 
@@ -430,6 +433,9 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// Workspace prep all happened before the tee existed; publish it as
 	// already done so a viewer's first glance shows the ladder.
 	emitPlan("completed", "pending", "pending")
+	if mavenProxyWarning != "" {
+		emitNotice("%s", red.redact(mavenProxyWarning))
+	}
 
 	// 7. Build prompt from context layers
 	stagePrompt := prompt.Build(prompt.Layers{
