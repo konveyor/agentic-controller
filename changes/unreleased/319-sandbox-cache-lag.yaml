@@ -1,0 +1,5 @@
+kind: bugfix
+description: >
+  An AgentRun is no longer failed with SandboxNotFound when its Sandbox is
+  merely missing from the manager cache; the controller confirms the Sandbox
+  is really gone against the API server before ending the run.
