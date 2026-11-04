@@ -4,10 +4,10 @@ title: "Harness as Thin Single-Stage Runner with SkillCard-Based Skills"
 description: "Defines the harness as a thin, single-stage runner responsible for git lifecycle, skill delivery, and agent runtime lifecycle."
 status: accepted
 date: "2026-07-21"
-last_updated: "2026-11-03"
+last_updated: "2026-11-04"
 authors:
   - "Savitha Raghunathan"
-last_reviewed: "2026-11-03"
+last_reviewed: "2026-11-04"
 implementation_status: amended
 review_note: "Harness setup resolves shared Hub proxies for Git and generated Maven settings; explicit configuration and the inheritance opt-out preserve workarounds. Deployed MTA 8.3 token scopes and image verification remain a release check."
 ---
@@ -70,6 +70,16 @@ The Hub `release-0.11` source grants `agentic.harness` the `addon` role, includi
 and [role](https://github.com/konveyor/tackle2-hub/blob/59f079ecf59bb89e4d51b2831ffaa3784ce41c9f/internal/auth/seed/roles.yaml#L603).
 This supports retaining strict lookup failures. Deployed MTA 8.3 token and image
 verification remain release checks.
+
+**Update (2026-11-04):** Short ordinary proxy usernames paired with a password
+use the existing eight-character redaction heuristic so words such as `proxy`
+remain readable in diagnostics. Passwords and username-only tokens remain
+masked regardless of length, as do complete credential URLs and userinfo.
+Real Maven 3.9.11 builds verify raw IPv6 proxy hosts and both whole and embedded
+brace passwords. Maven may report failed decryption of brace values while
+retaining the original credential. Setup remains independent of installed
+toolchains: generated Maven proxy incompatibilities also stop non-Java runs,
+with explicit settings or `HARNESS_HUB_PROXY=off` as the supplied workarounds.
 
 
 ## Context

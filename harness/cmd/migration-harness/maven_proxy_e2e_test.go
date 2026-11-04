@@ -62,7 +62,7 @@ func TestMavenProxyBuild(t *testing.T) {
 		artifact + ".jar": archive.Bytes(),
 		artifact + ".pom": []byte(`<project><modelVersion>4.0.0</modelVersion><groupId>org.konveyor</groupId><artifactId>proxy-fixture</artifactId><version>1.0</version></project>`),
 	}
-	for _, mode := range []string{"authenticated proxy-only repository", "literal brace password", "literal expression password", "excluded direct repository", "bare domain exclusion", "leading-dot domain exclusion", "HTTPS exclusion blocks HTTP fallback"} {
+	for _, mode := range []string{"authenticated proxy-only repository", "IPv6 proxy", "literal brace password", "embedded brace password", "literal expression password", "excluded direct repository", "bare domain exclusion", "leading-dot domain exclusion", "HTTPS exclusion blocks HTTP fallback"} {
 		t.Run(mode, func(t *testing.T) {
 			domain := strings.Contains(mode, "domain exclusion")
 			excluded := mode == "excluded direct repository" || mode == "HTTPS exclusion blocks HTTP fallback" || domain
@@ -70,6 +70,8 @@ func TestMavenProxyBuild(t *testing.T) {
 			password := "proxy-password"
 			if mode == "literal brace password" {
 				password = "{s3cret}"
+			} else if mode == "embedded brace password" {
+				password = "p{a}ss"
 			} else if mode == "literal expression password" {
 				password = "password-${env.HOME}"
 			}
@@ -104,7 +106,7 @@ func TestMavenProxyBuild(t *testing.T) {
 				direct = httptest.NewServer(repository)
 			}
 			defer direct.Close()
-			forward := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			forward := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				proxyCalls.Add(1)
 				if r.Header.Get("Proxy-Authorization") != "Basic "+base64.StdEncoding.EncodeToString([]byte("proxy-user:"+password)) {
 					w.Header().Set("Proxy-Authenticate", `Basic realm="fixture"`)
@@ -113,6 +115,14 @@ func TestMavenProxyBuild(t *testing.T) {
 				}
 				repository.ServeHTTP(w, r)
 			}))
+			if mode == "IPv6 proxy" {
+				_ = forward.Listener.Close()
+				forward.Listener, err = net.Listen("tcp6", "[::1]:0")
+				if err != nil {
+					t.Fatalf("IPv6 fixture listener: %v", err)
+				}
+			}
+			forward.Start()
 			defer forward.Close()
 			repoURL := "http://maven.proxy-only.invalid"
 			if excluded {
@@ -133,6 +143,9 @@ func TestMavenProxyBuild(t *testing.T) {
 				t.Setenv(key, "")
 			}
 			configs := []proxy.Config{{Kind: "http", Host: "127.0.0.1", Port: forward.Listener.Addr().(*net.TCPAddr).Port, Username: "proxy-user", Password: password, Excluded: []string{"127.0.0.1"}}}
+			if mode == "IPv6 proxy" {
+				configs[0].Host = "::1"
+			}
 			if domain {
 				exclusion := "corp.example"
 				if mode == "leading-dot domain exclusion" {
