@@ -7,4 +7,8 @@ description: >
   verified, and a harness that reported nothing are each visibly not a pass, and
   none of them changes the run's phase. Where the harness names the commit it
   measured, the condition message names it too. The per-command evidence stays
-  in status.terminationData.
+  in status.terminationData. A finished run's terminal facts are now read from
+  the API server when the Pod cache has not caught up with the Sandbox's
+  Finished condition, so a measured verdict is not permanently recorded as
+  unreported — and a run that exited 2 or 3 is no longer reported as a plain
+  success — when the cache lags.

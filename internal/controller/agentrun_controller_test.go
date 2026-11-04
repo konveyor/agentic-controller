@@ -1073,7 +1073,7 @@ var _ = Describe("AgentRun Controller", func() {
 			sandbox.Status.Conditions = append(sandbox.Status.Conditions, metav1.Condition{
 				Type:               sandboxConditionFinished,
 				Status:             metav1.ConditionTrue,
-				Reason:             "PodFailed",
+				Reason:             testSandboxFinishedReasonFailed,
 				Message:            "pod failed",
 				LastTransitionTime: metav1.Now(),
 			})
