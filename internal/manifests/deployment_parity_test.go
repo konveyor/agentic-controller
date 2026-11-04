@@ -90,16 +90,20 @@ func managerContainer(t *testing.T, path string, stripJinja bool) corev1.Contain
 	}
 	if stripJinja {
 		// These defaults match roles/tackle/defaults/main.yml in the operator.
-		// Require resource and diagnostics variables so hardcoding a setting
-		// cannot silently remove its Tackle CR override.
+		// Require the resource, diagnostics and image-override variables so
+		// hardcoding a setting cannot silently remove its Tackle CR override.
 		templateDefaults := map[string]string{
-			"agentic_container_limits_cpu":                                                "500m",
-			"agentic_container_limits_memory":                                             "400Mi",
-			"agentic_container_requests_cpu":                                              "10m",
-			"agentic_container_requests_memory":                                           "64Mi",
-			"agentic_metrics_bind_address":                                                ":8443",
-			"agentic_pprof_bind_address":                                                  "0",
-			"agentic_memory_log_interval":                                                 "30s",
+			"agentic_container_limits_cpu":      "500m",
+			"agentic_container_limits_memory":   "400Mi",
+			"agentic_container_requests_cpu":    "10m",
+			"agentic_container_requests_memory": "64Mi",
+			"agentic_metrics_bind_address":      ":8443",
+			"agentic_pprof_bind_address":        "0",
+			"agentic_memory_log_interval":       "30s",
+			// Optional image override: unset in the operator role, so it
+			// renders empty and the controller keeps its built-in default,
+			// matching the empty value in manager.yaml.
+			"agentic_verification_image | default('')":                                    "",
 			"(not (openshift_cluster | bool and agentic_metrics_enabled | bool)) | lower": "true",
 		}
 		raw = jinjaExpr.ReplaceAllFunc(raw, func(expr []byte) []byte {
@@ -195,4 +199,30 @@ func mustYAML(t *testing.T, v any) string {
 		t.Fatalf("marshal for diff: %v", err)
 	}
 	return string(out)
+}
+
+// TestVerificationImageEnvDeclared pins the shipped default for the Gateway
+// verification image: the manager declares VERIFICATION_IMAGE so it can be
+// patched or `kubectl set env`-ed without a rebuild, and ships it empty so the
+// controller falls back to DefaultVerificationImage. Giving it a value here
+// would change the image every install runs, which is a release decision, not
+// a manifest tidy-up.
+func TestVerificationImageEnvDeclared(t *testing.T) {
+	c := managerContainer(t, managerManifest, false)
+	for _, env := range c.Env {
+		if env.Name != "VERIFICATION_IMAGE" {
+			continue
+		}
+		if env.Value != "" {
+			t.Errorf("%s sets VERIFICATION_IMAGE=%q; it must ship empty so the "+
+				"controller keeps its built-in default", managerManifest, env.Value)
+		}
+		if env.ValueFrom != nil {
+			t.Errorf("%s sets VERIFICATION_IMAGE from a reference; a plain "+
+				"optional value keeps the fallback readable", managerManifest)
+		}
+		return
+	}
+	t.Errorf("%s does not declare VERIFICATION_IMAGE; the Gateway verification "+
+		"image has to be settable without rebuilding the controller", managerManifest)
 }

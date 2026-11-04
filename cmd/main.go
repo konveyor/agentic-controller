@@ -259,6 +259,13 @@ func main() {
 	if err := (&controller.GatewayReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		// The verification Job runs the agent image, which is a different
+		// image from the manager's own, so nothing can derive it the way
+		// SKILL_LOADER_IMAGE tracks the controller build. Optional: empty
+		// falls back to controller.DefaultVerificationImage. Set it to
+		// reach a mirror, a private registry, or a locally built arm64
+		// agent image.
+		VerificationImage: os.Getenv("VERIFICATION_IMAGE"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Gateway")
 		os.Exit(1)

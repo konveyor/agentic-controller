@@ -24,7 +24,9 @@ AgentRun to trigger execution.
   the controller and `agentic-controller-agent`. Each fails on arm64 with
   *no match for platform in manifest*, in three places — the manager
   Deployment, the `skill-loader` init container (which runs the
-  controller image) and the Gateway verification Job. The skill bundle is
+  controller image) and the Gateway verification Job — each redirectable
+  to a local build (`IMG=` for the first two, `VERIFICATION_IMAGE` for
+  the third). The skill bundle is
   no longer one of them: `quay.io/konveyor/skills:latest` carries
   `linux/arm64` as of
   [#306](https://github.com/konveyor/agentic-controller/pull/306), so the
@@ -276,20 +278,30 @@ extra step. That init container is where both inputs meet — it *runs*
 the controller image you just built and *mounts* the skill bundle as an
 image volume — and the bundle half now needs nothing from you.
 
-Gateway verification (step 4) is the one image you cannot redirect: the
-controller holds it as a constant with no env var or flag to override it
-([#305](https://github.com/konveyor/agentic-controller/issues/305)). The
-Job runs `imagePullPolicy: IfNotPresent`, so the way through is to put an
-arm64 build on every node under that exact tag:
+Gateway verification (step 4) runs the agent image, which `make deploy`
+does not touch, so point the controller at your own build with
+`VERIFICATION_IMAGE` on the manager Deployment. Empty or unset keeps the
+published `quay.io/konveyor/agentic-controller-agent:latest`:
 
 ```bash
-make controller-agent-build \
-  CONTROLLER_AGENT_IMG=quay.io/konveyor/agentic-controller-agent:latest
-minikube image load quay.io/konveyor/agentic-controller-agent:latest
+make controller-agent-push \
+  CONTROLLER_AGENT_IMG=$REG/agentic-controller-agent:dev
+kubectl set env deployment/agentic-controller-controller-manager \
+  -n agentic-controller-system \
+  VERIFICATION_IMAGE=$REG/agentic-controller-agent:dev
 ```
 
-`hack/setup-e2e.sh` does the same for the Kind path — it builds the agent
-image, retags it `:latest` and loads it before deploying.
+Run that after `make deploy`, not before: a redeploy reapplies the
+manifest's empty value and puts the default back.
+
+To skip the registry, `make controller-agent-build` under a `:dev` tag,
+load it onto the nodes (`minikube image load`, `kind load docker-image`)
+and set `VERIFICATION_IMAGE` to that tag — the Job runs
+`imagePullPolicy: IfNotPresent`, so a loaded image is used as-is.
+
+`hack/setup-e2e.sh` takes the older route on the Kind path: it builds the
+agent image, retags it `:latest` and loads it before deploying, so the
+built-in default resolves locally.
 
 **If you pin an older bundle tag.** The arm64 bundle starts at
 `:latest`; the published tags that predate it — `v0.11.0` with its alphas
