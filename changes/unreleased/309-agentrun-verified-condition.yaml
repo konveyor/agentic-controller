@@ -1,0 +1,14 @@
+kind: feature
+description: >
+  Report the harness's independent verification of a run's pushed tree as a new
+  Verified condition on AgentRun.status, so a verified pass is distinguishable
+  from one the agent merely claimed. True only from a measured pass: a failed
+  verification, one the harness could not finish, a run where nothing was
+  verified, and a harness that reported nothing are each visibly not a pass, and
+  none of them changes the run's phase. Where the harness names the commit it
+  measured, the condition message names it too. The per-command evidence stays
+  in status.terminationData. A finished run's terminal facts are now read from
+  the API server when the Pod cache has not caught up with the Sandbox's
+  Finished condition, so a measured verdict is not permanently recorded as
+  unreported — and a run that exited 2 or 3 is no longer reported as a plain
+  success — when the cache lags.

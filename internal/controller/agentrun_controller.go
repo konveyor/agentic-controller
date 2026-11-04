@@ -197,13 +197,15 @@ type AgentRunReconciler struct {
 
 	// apiReader reads directly from the API server, bypassing the manager
 	// cache. It is used where a cache miss would otherwise be acted on
-	// irreversibly: the best-effort pod termination-message lookup (a direct
-	// read avoids surfacing a stale generic message when the label-restricted
-	// Pod cache, see SandboxPodCacheOptions, lags the Sandbox "Finished"
-	// condition), the orphan sweep, and confirming that a Sandbox really is
-	// gone before failing its run. Routine reads stay on the cache-backed
-	// client, so the controller keeps watching sandbox pods. Set by
-	// SetupWithManager.
+	// irreversibly: the terminal facts of a finished run (see terminalPod —
+	// exit code, termination blob, start time — read before the run goes
+	// terminal and stops being revisited), the best-effort pod
+	// termination-message lookup (a direct read avoids surfacing a stale
+	// generic message when the label-restricted Pod cache, see
+	// SandboxPodCacheOptions, lags the Sandbox "Finished" condition), the
+	// orphan sweep, and confirming that a Sandbox really is gone before
+	// failing its run. Routine reads stay on the cache-backed client, so
+	// the controller keeps watching sandbox pods. Set by SetupWithManager.
 	apiReader client.Reader
 }
 
@@ -1505,6 +1507,53 @@ func skillLoaderContainer(image string, sources *skillSources, mounts []corev1.V
 	return c
 }
 
+// terminalPod returns the pod to derive a finished run's terminal facts
+// from: its exit code (hence phase and the Succeeded reason), its
+// termination blob (hence terminationData and the Verified condition),
+// and its start time.
+//
+// All of those come from the agent container's terminated state, and the
+// label-restricted Pod cache (see SandboxPodCacheOptions) can lag the
+// Sandbox's Finished condition — the race the apiReader field exists for.
+// A terminal run then takes the TTL shortcut at the top of Reconcile and
+// is never revisited, so a cached pod that has not caught up does not
+// merely delay those facts, it loses them: an exit 2 or 3 reported as a
+// plain success, and a measured verification verdict permanently
+// recorded as VerificationNotReported.
+//
+// So when the cached pod does not record the termination, read the pod
+// directly. A direct read that still shows no terminated container means
+// there is nothing to wait for — the pod was deleted, or the Sandbox
+// finished for a reason outside the container — and the caller falls back
+// to the Sandbox's own reason as before. Best-effort by design: a failed
+// read leaves the cached pod in place rather than blocking the terminal
+// status update.
+func (r *AgentRunReconciler) terminalPod(
+	ctx context.Context,
+	cached *corev1.Pod,
+	sandbox *sandboxv1beta1.Sandbox,
+) *corev1.Pod {
+	if agentContainerTermination(cached) != nil || r.apiReader == nil {
+		return cached
+	}
+	// Agent Sandbox names the pod after the Sandbox.
+	key := types.NamespacedName{Namespace: sandbox.Namespace, Name: sandbox.Name}
+	var fresh corev1.Pod
+	if err := r.apiReader.Get(ctx, key, &fresh); err != nil {
+		if !errors.IsNotFound(err) {
+			log.FromContext(ctx).V(1).Info("direct read of the terminal pod failed",
+				"pod", key.String(), "error", err)
+		}
+		return cached
+	}
+	if agentContainerTermination(&fresh) == nil && cached != nil {
+		// Neither records a termination; keep the pod the caller already
+		// has rather than swapping in one that says no more.
+		return cached
+	}
+	return &fresh
+}
+
 // updatePhaseFromSandbox updates the AgentRun phase and ACPReady condition
 // from the Sandbox, its pod, and the Sandbox's Ready condition.
 //
@@ -1527,6 +1576,12 @@ func (r *AgentRunReconciler) updatePhaseFromSandbox(
 	// Check Sandbox conditions for Finished state.
 	for _, cond := range sandbox.Status.Conditions {
 		if cond.Type == sandboxConditionFinished && cond.Status == metav1.ConditionTrue {
+			// Every terminal fact below is read off the agent container's
+			// terminated state, and the Pod cache can still be behind the
+			// Sandbox's Finished condition. Resolve the pod against the
+			// API server before deriving any of them.
+			pod = r.terminalPod(ctx, pod, sandbox)
+
 			stampCompletion(run, pod, sandbox)
 			meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
 				Type:               konveyoriov1alpha1.AgentRunConditionACPReady,
@@ -1537,15 +1592,22 @@ func (r *AgentRunReconciler) updatePhaseFromSandbox(
 			})
 
 			// Capture the harness's opaque termination data (usage/cost
-			// report). Stored verbatim, never interpreted (ADR 0018).
+			// report). Stored verbatim (ADR 0018).
 			if td := terminationDataFromPod(pod); td != nil {
 				run.Status.TerminationData = td
 			}
 
+			// Derive the Verified condition from the one key of that blob
+			// the controller reads — verification.status (#300/#302). Set
+			// unconditionally on the terminal path, including when no blob
+			// arrived, so a run that reported nothing is Unknown rather
+			// than silently indistinguishable from a verified pass.
+			setRunVerified(run, run.Status.TerminationData)
+
 			// The harness may also write a human-readable failure message to
 			// the termination log (e.g. a non-git source, #143); surface it
 			// on the failure outcome, preferring it over the generic reason.
-			r.setTerminalOutcome(run, pod, cond.Reason, r.lookupTerminationMessage(ctx, run))
+			r.setTerminalOutcome(run, pod, cond.Reason, agentTerminationMessage(pod))
 			return 0
 		}
 	}
@@ -1866,39 +1928,21 @@ func podStartTime(pod *corev1.Pod, fallback metav1.Time) metav1.Time {
 	return fallback
 }
 
-// lookupTerminationMessage lists the run's pods and returns the agent
-// container's terminated-state message, or "" if none is available. Errors
-// listing pods are swallowed — the termination payload is best-effort detail
-// and must never block the phase update.
-func (r *AgentRunReconciler) lookupTerminationMessage(
-	ctx context.Context,
-	run *konveyoriov1alpha1.AgentRun,
-) string {
-	var pods corev1.PodList
-	if err := r.apiReader.List(ctx, &pods,
-		client.InNamespace(run.Namespace),
-		client.MatchingLabels{labelAgentRun: run.Name},
-	); err != nil {
-		log.FromContext(ctx).V(1).Info("listing pods for termination message failed",
-			"agentRun", run.Name, "error", err)
-		return ""
-	}
-	return podTerminationMessage(pods.Items)
-}
-
-// podTerminationMessage returns the "agent" container's terminated-state
-// message across the given pods, or "" if no such terminated container is
-// found. It is a pure function to keep the extraction logic unit-testable.
-func podTerminationMessage(pods []corev1.Pod) string {
-	for i := range pods {
-		for _, cs := range pods[i].Status.ContainerStatuses {
-			if cs.Name != agentContainerName {
-				continue
-			}
-			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
-				return cs.State.Terminated.Message
-			}
-		}
+// agentTerminationMessage returns the agent container's terminated-state
+// message, or "" when the pod is absent or its agent has not terminated.
+//
+// Read off the pod terminalPod already resolved, so the message, the exit
+// code and the termination blob all come from one record. It used to be
+// its own uncached list of the run's pods, which was how the message
+// reached past a lagging cache before terminalPod existed; keeping that
+// list would now mean a second direct read per terminal reconcile, and
+// one that selected by label where terminalPod selects by name — so a
+// run with more than one labelled pod could pair one pod's message with
+// another pod's exit code. Best-effort as before: no pod, or no
+// termination on it, leaves the caller on the Sandbox's own reason.
+func agentTerminationMessage(pod *corev1.Pod) string {
+	if term := agentContainerTermination(pod); term != nil {
+		return term.Message
 	}
 	return ""
 }

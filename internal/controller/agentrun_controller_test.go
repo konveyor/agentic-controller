@@ -1048,7 +1048,9 @@ var _ = Describe("AgentRun Controller", func() {
 			const terminationMsg = `source repository "https://svn.example/repo" uses SCM kind "subversion"; only git is supported`
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      name + "-pod",
+					// Agent Sandbox names the pod after the Sandbox, which
+					// is how the controller reads a finished run's pod.
+					Name:      fetchedRun.Status.SandboxName,
 					Namespace: testNamespace,
 					Labels:    map[string]string{labelAgentRun: name},
 				},
@@ -1073,7 +1075,7 @@ var _ = Describe("AgentRun Controller", func() {
 			sandbox.Status.Conditions = append(sandbox.Status.Conditions, metav1.Condition{
 				Type:               sandboxConditionFinished,
 				Status:             metav1.ConditionTrue,
-				Reason:             "PodFailed",
+				Reason:             testSandboxFinishedReasonFailed,
 				Message:            "pod failed",
 				LastTransitionTime: metav1.Now(),
 			})
@@ -1088,6 +1090,120 @@ var _ = Describe("AgentRun Controller", func() {
 				g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 				g.Expect(cond.Reason).To(Equal(konveyoriov1alpha1.AgentRunReasonFailed))
 				g.Expect(cond.Message).To(Equal(terminationMsg))
+			}, timeout, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, pod)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, run)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, agent)).To(Succeed())
+		})
+	})
+
+	// #302: the run the dogfooding found — the agent finished cleanly and
+	// its handoff claimed a passing build, while the harness's own re-run
+	// of the plan's Verification commands recorded a type check failing.
+	// The two facts must be visible side by side.
+	Context("when a cleanly finished run carries a failed harness verification", func() {
+		const (
+			name       = "ar-ctrl-verified"
+			agentName  = "ar-ctrl-agent-verified"
+			gwName     = "ar-prov-verified"
+			secretName = "ar-secret-verified"
+		)
+
+		It("should report Succeeded=True alongside Verified=False", func() {
+			cleanup := makeReadyGateway(gwName, secretName)
+			defer cleanup()
+
+			agent := &konveyoriov1alpha1.Agent{
+				ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: testNamespace},
+				Spec: konveyoriov1alpha1.AgentSpec{
+					Image:    testAgentImage,
+					Gateways: []konveyoriov1alpha1.AgentGatewayRef{{Ref: gwName}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+			waitForAgentReady(agentName)
+
+			run := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+				Spec:       konveyoriov1alpha1.AgentRunSpec{AgentRef: agentName, Gateway: gwName},
+			}
+			Expect(k8sClient.Create(ctx, run)).To(Succeed())
+
+			runKey := types.NamespacedName{Name: name, Namespace: testNamespace}
+			var fetchedRun konveyoriov1alpha1.AgentRun
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, runKey, &fetchedRun)).To(Succeed())
+				g.Expect(fetchedRun.Status.SandboxName).NotTo(BeEmpty())
+			}, timeout, interval).Should(Succeed())
+
+			By("simulating an agent pod that exited 0 with a failed verification record")
+			const terminationMsg = `{"exitCode":0,"outcome":"succeeded","handoffStatus":"passed",` +
+				`"verification":{"status":"failed","reason":"Build failed: npm run tsc -w client",` +
+				`"commit":"4f2a1c9e7b3041d8a6c25e90b17f3ac4d8e6b215",` +
+				`"commands":[{"label":"Build","command":"npm run tsc -w client","status":"failed",` +
+				`"exitCode":2,"seconds":41.2,"output":"45 errors"},` +
+				`{"label":"Test","command":"npm run test -w client","status":"passed","exitCode":0}]}}`
+			// terminationData is read from the pod the controller resolves
+			// by Sandbox name, so the pod must carry it (Agent Sandbox
+			// names the pod after the Sandbox).
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fetchedRun.Status.SandboxName,
+					Namespace: testNamespace,
+					Labels:    map[string]string{labelAgentRun: name},
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers:    []corev1.Container{{Name: agentContainerName, Image: testAgentImage}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+				Name: agentContainerName,
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{Message: terminationMsg, ExitCode: 0},
+				},
+			}}
+			Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+
+			By("marking the Sandbox Finished successfully")
+			var sandbox sandboxv1beta1.Sandbox
+			sandboxKey := types.NamespacedName{Name: fetchedRun.Status.SandboxName, Namespace: testNamespace}
+			Expect(k8sClient.Get(ctx, sandboxKey, &sandbox)).To(Succeed())
+			sandbox.Status.Conditions = append(sandbox.Status.Conditions, metav1.Condition{
+				Type:               sandboxConditionFinished,
+				Status:             metav1.ConditionTrue,
+				Reason:             sandboxFinishedReasonSucceeded,
+				Message:            "pod succeeded",
+				LastTransitionTime: metav1.Now(),
+			})
+			Expect(k8sClient.Status().Update(ctx, &sandbox)).To(Succeed())
+
+			By("verifying the run succeeds but is not verified")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, runKey, &fetchedRun)).To(Succeed())
+				g.Expect(fetchedRun.Status.Phase).To(Equal(konveyoriov1alpha1.AgentRunPhaseSucceeded))
+
+				succeeded := meta.FindStatusCondition(fetchedRun.Status.Conditions,
+					konveyoriov1alpha1.AgentRunConditionSucceeded)
+				g.Expect(succeeded).NotTo(BeNil())
+				g.Expect(succeeded.Status).To(Equal(metav1.ConditionTrue))
+
+				verified := meta.FindStatusCondition(fetchedRun.Status.Conditions,
+					konveyoriov1alpha1.AgentRunConditionVerified)
+				g.Expect(verified).NotTo(BeNil())
+				g.Expect(verified.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(verified.Reason).To(Equal(konveyoriov1alpha1.AgentRunReasonVerificationFailed))
+				g.Expect(verified.Message).To(ContainSubstring("npm run tsc -w client"))
+				// The verdict names the commit it describes (#308), so a
+				// reader can check it against the branch that was pushed.
+				g.Expect(verified.Message).To(ContainSubstring("on commit 4f2a1c9e7b30"))
+
+				// The evidence survives the round trip through the API
+				// server, uninterpreted, for the console to drill into.
+				g.Expect(fetchedRun.Status.TerminationData).NotTo(BeNil())
+				g.Expect(string(fetchedRun.Status.TerminationData.Raw)).To(ContainSubstring(`"exitCode":2`))
 			}, timeout, interval).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, pod)).To(Succeed())

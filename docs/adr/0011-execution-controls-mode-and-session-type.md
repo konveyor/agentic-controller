@@ -4,7 +4,7 @@ title: "Execution Controls and Mode on CRDs"
 description: "Defines runtime-agnostic execution limits and supervision mode on CRDs, with enforcement and translation in the harness."
 status: proposed
 date: "2026-08-05"
-last_updated: "2026-09-24"
+last_updated: "2026-11-04"
 authors:
   - "David Zager"
 last_reviewed: "2026-08-31"
@@ -24,6 +24,15 @@ as decision history.
 **Update (2026-09-24):** Exit code 3 (refused: the stage's own handoff
 records `Status: failed`) joins the contract; ADR 0018 carries its status
 mapping. The rule below that any non-zero exit stops a workflow holds.
+
+**Update (2026-11-04):** `terminationData` is no longer wholly
+uninterpreted. The controller reads the `verification` verdict the
+harness writes there (#300) and maps it onto AgentRun's `Verified`
+condition (#302); ADR 0018 carries that exception and names the keys it
+covers. The statements below that the controller "does not interpret"
+the blob remain as decision history — they still hold for everything
+else in it, the per-command verification evidence included, which stays
+opaque and is served to platform-specific UIs verbatim.
 
 ## Context
 

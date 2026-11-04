@@ -22,7 +22,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-func TestPodTerminationMessage(t *testing.T) {
+func TestAgentTerminationMessage(t *testing.T) {
 	const msg = `{"reason":"UnsupportedSourceSCM","message":"only git is supported"}`
 
 	terminatedAgent := corev1.Pod{
@@ -59,19 +59,18 @@ func TestPodTerminationMessage(t *testing.T) {
 
 	tests := []struct {
 		name string
-		pods []corev1.Pod
+		pod  *corev1.Pod
 		want string
 	}{
-		{"terminated agent container", []corev1.Pod{terminatedAgent}, msg},
-		{"running agent container", []corev1.Pod{runningAgent}, ""},
-		{"terminated non-agent container ignored", []corev1.Pod{terminatedOther}, ""},
-		{"no pods", nil, ""},
-		{"agent found among several pods", []corev1.Pod{runningAgent, terminatedAgent}, msg},
+		{"terminated agent container", &terminatedAgent, msg},
+		{"running agent container", &runningAgent, ""},
+		{"terminated non-agent container ignored", &terminatedOther, ""},
+		{"no pod", nil, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := podTerminationMessage(tt.pods); got != tt.want {
-				t.Errorf("podTerminationMessage() = %q, want %q", got, tt.want)
+			if got := agentTerminationMessage(tt.pod); got != tt.want {
+				t.Errorf("agentTerminationMessage() = %q, want %q", got, tt.want)
 			}
 		})
 	}
