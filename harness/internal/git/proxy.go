@@ -15,7 +15,11 @@ import (
 // Git configuration never receive Hub proxy credentials.
 func ConfigureProxy(selectProxy func(*http.Request) (*url.URL, error)) func() {
 	oldHTTP, oldHTTPS := client.Protocols["http"], client.Protocols["https"]
-	tr := http.DefaultTransport.(*http.Transport).Clone()
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	tr := base.Clone()
 	tr.Proxy = selectProxy
 	transport := gitHTTP.NewClient(&http.Client{Transport: tr})
 	client.InstallProtocol("http", transport)
