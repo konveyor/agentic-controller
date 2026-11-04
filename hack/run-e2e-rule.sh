@@ -359,7 +359,9 @@ echo "--- The claim ---"
 assert_marker "${RUN_ON}"  present "with the rule"
 assert_marker "${RUN_OFF}" absent  "without the rule"
 
-if kc logs "$(run_pod rule-on)" -c agent 2>/dev/null | grep -q "always-loaded rules:.*rule-e2e-house-rules"; then
+# Consume the full log stream in this assertion: grep -q can close the pipe
+# early, making kubectl fail with SIGPIPE and pipefail report a false negative.
+if kc logs "$(run_pod rule-on)" -c agent 2>/dev/null | grep "always-loaded rules:.*rule-e2e-house-rules" >/dev/null; then
     pass "the harness reported the rule as always-loaded"
 else
     fail "the harness never reported the rule, so it did not read it back from the manifest"
