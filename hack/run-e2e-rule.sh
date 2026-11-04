@@ -23,8 +23,7 @@
 # hack/install-konveyor.sh, plus an agent-base image built and loaded under the
 # tag AGENT_IMAGE names below -- which is not the Makefile's default:
 #
-#   make agent-base-build AGENT_BASE_IMG=quay.io/konveyor/agent-base:e2e
-#   kind load docker-image quay.io/konveyor/agent-base:e2e --name agentic-controller-e2e
+#   ./hack/load-agent-base.sh
 #
 # Environment:
 #   E2E_TIMEOUT   how long to wait on any one condition (default 300s)
@@ -360,7 +359,9 @@ echo "--- The claim ---"
 assert_marker "${RUN_ON}"  present "with the rule"
 assert_marker "${RUN_OFF}" absent  "without the rule"
 
-if kc logs "$(run_pod rule-on)" -c agent 2>/dev/null | grep -q "always-loaded rules:.*rule-e2e-house-rules"; then
+# Consume the full log stream in this assertion: grep -q can close the pipe
+# early, making kubectl fail with SIGPIPE and pipefail report a false negative.
+if kc logs "$(run_pod rule-on)" -c agent 2>/dev/null | grep "always-loaded rules:.*rule-e2e-house-rules" >/dev/null; then
     pass "the harness reported the rule as always-loaded"
 else
     fail "the harness never reported the rule, so it did not read it back from the manifest"
@@ -381,10 +382,16 @@ if [ "${FAIL}" -gt 0 ]; then
     echo ""
     echo "--- Debug info ---"
     kc get agentruns,agents,skillcards,gateways -o wide 2>/dev/null || true
+    conditions_tmpl='{range .status.conditions[*]}    condition {.type}={.status} {.reason}: {.message}{"\n"}{end}'
     for r in rule-on rule-off; do
         pod="$(run_pod "${r}")"
+        echo "--- ${r} (${pod:-no sandbox}) phase=$(phase "${r}")"
+        # The run's own conditions first. A Failed phase carries its reason
+        # here and nowhere else, and a run that failed before its Sandbox
+        # existed has no pod to describe — without this the phase is all we
+        # would see.
+        kc get agentrun "${r}" -o jsonpath="${conditions_tmpl}" 2>/dev/null || true
         [ -n "${pod}" ] || continue
-        echo "--- ${r} (${pod}) phase=$(phase "${r}")"
         # Events, not just logs: a container that never started has no logs,
         # and the reason it did not (ErrImagePull, scheduling) lives here.
         kc describe pod "${pod}" 2>/dev/null | sed -n '/^Events:/,$p' | sed 's/^/    /' || true

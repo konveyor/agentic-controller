@@ -1,0 +1,14 @@
+kind: feature
+
+description: >
+  Publish each plan rung's facts as data, not only as a sentence. The three
+  rungs the harness broadcasts — prep, task, push — said everything they knew
+  in English prose, so a viewer that wanted the turn count, the stage
+  position, the model, or the number of commits had to parse the sentence
+  back apart. Each entry now also carries those values as fields, under
+  `_meta["konveyor.io/plan"]`: ACP reserves the root of a specification type
+  for future protocol versions, and `_meta` is the sanctioned place for an
+  implementation to add its own. The prose is unchanged and the two
+  renderings are built from the same helpers off the same counter reads, so
+  the sentence and the fields cannot disagree. A field that is absent means
+  the harness does not know the value, which is not the same as zero.

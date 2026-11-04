@@ -196,15 +196,16 @@ type AgentRunReconciler struct {
 	DefaultStartupDeadline *time.Duration
 
 	// apiReader reads directly from the API server, bypassing the manager
-	// cache. The label-restricted Pod cache (see SandboxPodCacheOptions)
-	// can lag the Sandbox "Finished" condition, and a terminal run is not
-	// revisited, so every fact read off a finished pod goes through a
-	// direct read when the cached pod has not caught up: the terminal pod
-	// itself (see terminalPod — exit code, termination blob, start time)
-	// and the best-effort termination-message lookup. It also confirms a
-	// vanished AgentRun before the orphan sweep deletes its children. The
-	// cache-backed client still serves the phase=Running read, so the
-	// controller keeps watching sandbox pods. Set by SetupWithManager.
+	// cache. It is used where a cache miss would otherwise be acted on
+	// irreversibly: the terminal facts of a finished run (see terminalPod —
+	// exit code, termination blob, start time — read before the run goes
+	// terminal and stops being revisited), the best-effort pod
+	// termination-message lookup (a direct read avoids surfacing a stale
+	// generic message when the label-restricted Pod cache, see
+	// SandboxPodCacheOptions, lags the Sandbox "Finished" condition), the
+	// orphan sweep, and confirming that a Sandbox really is gone before
+	// failing its run. Routine reads stay on the cache-backed client, so
+	// the controller keeps watching sandbox pods. Set by SetupWithManager.
 	apiReader client.Reader
 }
 
@@ -384,6 +385,21 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	sandboxKey := types.NamespacedName{Namespace: run.Namespace, Name: run.Status.SandboxName}
 	if err := r.Get(ctx, sandboxKey, &sandbox); err != nil {
 		if errors.IsNotFound(err) {
+			// Failing here is terminal and the run's spec is immutable, so a
+			// cache miss alone is not enough to declare the Sandbox deleted.
+			// The reconcile that records SandboxName is triggered by our own
+			// status patch, which can outrun the Sandbox informer, and
+			// Sandbox events are not ordered against AgentRun events. Confirm
+			// against the uncached API before failing the run.
+			if r.apiReader != nil {
+				if err := r.apiReader.Get(ctx, sandboxKey, &sandbox); err == nil {
+					// It exists; the cache is only behind. Requeue and read it
+					// again rather than act on this reconcile's stale view.
+					return ctrl.Result{Requeue: true}, nil
+				} else if !errors.IsNotFound(err) {
+					return ctrl.Result{}, err
+				}
+			}
 			run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
 			setRunSucceeded(&run, metav1.ConditionFalse, "SandboxNotFound",
 				fmt.Sprintf("Sandbox %q was deleted", run.Status.SandboxName))

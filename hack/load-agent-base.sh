@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the agent image and load it into the Kind cluster.
+# Build the agent image and load it into the cluster.
 #
 # Separate from setup-e2e.sh because only the rule e2e needs it and it is
 # roughly a gigabyte, so the main e2e job should not pay for it.
@@ -15,8 +15,14 @@
 #   E2E_AGENT_IMAGE   image to build (default agent-base:e2e)
 #   GOOSE_IMAGE       prebuilt goose image, skips the ~35 minute compile
 #   KIND_CLUSTER      cluster to load into (default agentic-controller-e2e)
+#   CLUSTER_TOOL      kind (default), minikube, or none; see hack/lib/cluster.sh
+#   CLUSTER_NAME      Cluster/profile name (default: $KIND_CLUSTER)
+#   LOAD_IMAGE_HOOK   Script taking image refs (implies CLUSTER_TOOL=none)
 
 set -euo pipefail
+
+# shellcheck source=hack/lib/cluster.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cluster.sh"
 
 if [ -z "${CONTAINER_TOOL:-}" ]; then
     if command -v podman >/dev/null 2>&1; then
@@ -53,12 +59,5 @@ make agent-base-build \
     CONTAINER_TOOL="${CONTAINER_TOOL}" \
     GOOSE_IMAGE="${GOOSE_IMAGE:-}"
 
-echo "=== Loading into Kind cluster '${KIND_CLUSTER}' ==="
-if [ "${CONTAINER_TOOL}" = "podman" ]; then
-    TMP=$(mktemp -d)
-    trap 'rm -rf "${TMP}"' EXIT
-    "${CONTAINER_TOOL}" save "${E2E_AGENT_IMAGE}" -o "${TMP}/agent-base.tar"
-    kind load image-archive "${TMP}/agent-base.tar" --name "${KIND_CLUSTER}"
-else
-    kind load docker-image "${E2E_AGENT_IMAGE}" --name "${KIND_CLUSTER}"
-fi
+echo "=== Loading into cluster '$(cluster_name)' ==="
+cluster_load_images "${E2E_AGENT_IMAGE}"
