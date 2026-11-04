@@ -626,12 +626,16 @@ func parsePlanVerification(content string) (steps []planStep, truncated, found b
 	proseIndent, proseParent := -1, ""
 	for _, line := range handoffProse(content) {
 		if m := sectionHeading.FindStringSubmatch(line); m != nil {
+			// Any heading closes an open manual list. A deeper one keeps us
+			// in the section, but nothing under it belongs to a list that
+			// ended above it — and a sub-bullet that stays nested is a
+			// skipped command, so leaving the block open reads as a pass.
+			proseIndent, proseParent = -1, ""
 			switch {
 			case verificationHeading.MatchString(line):
 				// A second Verification heading restarts the section:
 				// later wins, as it does for the handoff's verdict.
 				inSection, found, steps, truncated = true, true, nil, false
-				proseIndent, proseParent = -1, ""
 			case len(m[1]) <= 2:
 				inSection = false
 			}

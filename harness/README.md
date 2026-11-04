@@ -214,7 +214,9 @@ What is **not** run, recorded line by line with a reason rather than dropped:
   sub-bullets with labels of their own — `- Start the app: mvn quarkus:dev` —
   and read on its own that is a command the harness would start and wait out,
   for a plan whose every scorable command passed. The indentation is the only
-  thing that says those lines belong to the prose above them.
+  thing that says those lines belong to the prose above them. A sibling back at
+  the parent's indentation closes the block, and so does any heading — a
+  sub-bullet under a later `### Automated checks` is scored, not skipped.
 - An unfilled template placeholder (`<build command, …>`), an explicit `none` /
   `n/a` / `-`, or a value too long to be a command.
 

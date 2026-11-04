@@ -850,6 +850,32 @@ func TestParsePlanVerificationNestedProseStepsAreNotCommands(t *testing.T) {
 	}
 }
 
+// A subsection heading ends an open manual list. Without that, proseIndent
+// survives the heading and the first indented item under the new subsection
+// reads as another of Blackbox's manual steps — so a plan whose only real
+// command sits under a "### Automated checks" heading passes having run
+// nothing but the lines above it.
+func TestParsePlanVerificationHeadingEndsTheManualList(t *testing.T) {
+	content := "## Verification\n" +
+		"- Build: true\n" +
+		"- Blackbox: manually check the application\n" +
+		"\n" +
+		"### Automated checks\n" +
+		"  - Test: exit 7\n"
+
+	steps, _, found := parsePlanVerification(content)
+
+	if !found {
+		t.Fatal("found = false, want the section")
+	}
+	if len(steps) != 3 {
+		t.Fatalf("got %d steps %+v, want 3", len(steps), steps)
+	}
+	if !steps[2].runnable() || steps[2].Command != "exit 7" {
+		t.Errorf("step 2 = %+v, want the command under the new subsection still scored", steps[2])
+	}
+}
+
 // Tab-indented sub-bullets nest like space-indented ones.
 func TestParsePlanVerificationNestedWithTabs(t *testing.T) {
 	steps, _, _ := parsePlanVerification("## Verification\n- Blackbox:\n\t- Start the app: npm start\n")
