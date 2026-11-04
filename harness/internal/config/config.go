@@ -17,6 +17,13 @@ const (
 	// MaxHITLTimeoutSeconds caps HARNESS_HITL_TIMEOUT_SECONDS (10 min).
 	MaxHITLTimeoutSeconds = 600
 
+	// MinVerifyTimeoutSeconds / MaxVerifyTimeoutSeconds clamp
+	// HARNESS_VERIFY_TIMEOUT_SECONDS. The floor keeps a typo from making
+	// every build "time out" instantly; the ceiling (1h) keeps one hung
+	// command from holding the pod to its deadline.
+	MinVerifyTimeoutSeconds = 30
+	MaxVerifyTimeoutSeconds = 3600
+
 	// Default git commit identity used when the Agent/AgentRun does not
 	// configure one. Preserves the historical hardcoded author.
 	DefaultGitAuthorName  = "migration-agent"
@@ -84,6 +91,24 @@ type Config struct {
 	// HubProxy inherits Hub proxies for Git and generated Maven settings.
 	// HARNESS_HUB_PROXY=off skips lookup and leaves supplied settings in control.
 	HubProxy bool
+
+	// Verify: after the agent's turn and before the final push, the
+	// harness runs the commands in the `## Verification` section of
+	// docs/plan.md itself and records each exit code, independently of
+	// what the handoff claims about them (#300). Default on;
+	// HARNESS_VERIFY=off is for runs whose plan names commands the
+	// sandbox cannot afford to re-run.
+	Verify bool
+	// VerifyEnforce: a verification command that exits non-zero fails the
+	// stage. Default OFF — recording is the whole fix, and the recorded
+	// result is what surfaces on AgentRun.status (#302); a reviewer acts
+	// on it. Turning it on makes the harness's own measurement, not the
+	// agent's account of it, decide the stage. HARNESS_VERIFY_ENFORCE=on.
+	VerifyEnforce bool
+	// VerifyTimeout bounds a single verification command; 0 means the
+	// harness default (HARNESS_VERIFY_TIMEOUT_SECONDS, clamped to
+	// [MinVerifyTimeoutSeconds, MaxVerifyTimeoutSeconds]).
+	VerifyTimeout time.Duration
 
 	// Prompt context layers, composed by internal/prompt.
 	AgentPrompt       string
@@ -210,6 +235,16 @@ func LoadFromEnv() (*Config, error) {
 		!envSwitchedOff("HARNESS_HITL_ASK")
 	cfg.GitWriteCheck = !envSwitchedOff("HARNESS_GIT_WRITE_CHECK")
 	cfg.HubProxy = !envSwitchedOff("HARNESS_HUB_PROXY")
+	// Verification is default-ON for the same reason the push pre-flight
+	// is: the cost of running it is one build, and the cost of not
+	// running it is a green run on a tree that does not compile (#300).
+	// Enforcement is separately OFF, because deciding the stage on it is
+	// a change in what an exit code means, not just a new measurement.
+	cfg.Verify = !envSwitchedOff("HARNESS_VERIFY")
+	cfg.VerifyEnforce = envSwitchedOn("HARNESS_VERIFY_ENFORCE")
+	if n, err := strconv.Atoi(os.Getenv("HARNESS_VERIFY_TIMEOUT_SECONDS")); err == nil && n > 0 {
+		cfg.VerifyTimeout = time.Duration(min(max(n, MinVerifyTimeoutSeconds), MaxVerifyTimeoutSeconds)) * time.Second
+	}
 	if n, err := strconv.Atoi(os.Getenv("HARNESS_HITL_TIMEOUT_SECONDS")); err == nil && n > 0 {
 		// Ceiling: a single ask parking the run for hours isn't HITL,
 		// it's abandonment — the pod deadline should not be spent inside

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"time"
@@ -878,5 +879,102 @@ func TestPushAsksTheBranchNotHEAD(t *testing.T) {
 	}
 	if outcome, err := Push(ctx, cred, repo, "still-at-base", baseSHA); err != nil || outcome != PushSkipped {
 		t.Errorf("Push of a branch still at the base = %s, %v; want skipped, nil", outcome, err)
+	}
+}
+
+func TestBranchTipSHAAndUncommittedPaths(t *testing.T) {
+	dir, repo, first := initRepoWithCommit(t)
+
+	if err := repo.CreateBranch(&gogitcfg.Branch{Name: "target", Remote: "", Merge: ""}); err != nil {
+		t.Fatalf("create branch config: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	if err := wt.Checkout(&gogit.CheckoutOptions{Branch: plumbing.NewBranchReferenceName("target"), Create: true}); err != nil {
+		t.Fatalf("checkout target: %v", err)
+	}
+	commitFile(t, repo, dir, "on-target.txt")
+
+	tip, err := BranchTipSHA(repo, "target")
+	if err != nil {
+		t.Fatalf("BranchTipSHA: %v", err)
+	}
+	head, err := HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+	if tip != head {
+		t.Fatalf("tip %s != head %s while on the branch", tip, head)
+	}
+	if tip == first {
+		t.Fatal("the branch tip should have moved past the first commit")
+	}
+
+	// Detaching HEAD at the base must separate the two: anything reporting
+	// on the push has to ask the branch, not HEAD.
+	if err := wt.Checkout(&gogit.CheckoutOptions{Hash: plumbing.NewHash(first), Force: true}); err != nil {
+		t.Fatalf("detach: %v", err)
+	}
+	head, err = HeadSHA(repo)
+	if err != nil {
+		t.Fatalf("HeadSHA: %v", err)
+	}
+	if head == tip {
+		t.Error("HEAD should no longer equal the branch tip after detaching")
+	}
+	if again, err := BranchTipSHA(repo, "target"); err != nil || again != tip {
+		t.Errorf("BranchTipSHA = %q, %v — the branch must not follow HEAD", again, err)
+	}
+
+	if _, err := BranchTipSHA(repo, "no-such-branch"); err == nil {
+		t.Error("BranchTipSHA should fail for a branch that does not exist")
+	}
+
+	// An uncommitted source file counts: a build reading it can pass in the
+	// working directory while the commit being pushed does not contain it.
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write untracked: %v", err)
+	}
+	changed, err := UncommittedPaths(repo)
+	if err != nil {
+		t.Fatalf("UncommittedPaths: %v", err)
+	}
+	if len(changed) != 1 || changed[0] != "untracked.txt" {
+		t.Errorf("UncommittedPaths = %v, want [untracked.txt]", changed)
+	}
+
+	// So does editing a tracked file, and the two come back sorted together.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("changed"), 0o644); err != nil {
+		t.Fatalf("modify tracked file: %v", err)
+	}
+	changed, err = UncommittedPaths(repo)
+	if err != nil {
+		t.Fatalf("UncommittedPaths: %v", err)
+	}
+	if len(changed) != 2 || changed[0] != "README.md" || changed[1] != "untracked.txt" {
+		t.Errorf("UncommittedPaths = %v, want [README.md untracked.txt]", changed)
+	}
+
+	// What the project ignores does not count: git excludes it, so a
+	// repository's build output is not uncommitted input.
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("ignored-out/\n"), 0o644); err != nil {
+		t.Fatalf("write gitignore: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "ignored-out"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ignored-out", "App.class"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write build output: %v", err)
+	}
+	changed, err = UncommittedPaths(repo)
+	if err != nil {
+		t.Fatalf("UncommittedPaths: %v", err)
+	}
+	for _, p := range changed {
+		if strings.HasPrefix(p, "ignored-out/") {
+			t.Errorf("UncommittedPaths = %v, want no gitignored path", changed)
+		}
 	}
 }
