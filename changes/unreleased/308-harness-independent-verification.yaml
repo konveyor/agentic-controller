@@ -10,9 +10,9 @@ description: >
   independent of anything the agent wrote. Commands run through /bin/sh -c in
   the clone directory with the harness process environment — the same workspace
   and toolchain the agent used, less the Hub credentials already cleared from
-  it. Blackbox and other prose lines, unfilled plan-template placeholders and
-  explicit "none" values are recorded as skipped with a reason rather than
-  guessed at. The result names the commit it describes — the tip of the branch
+  it. Blackbox and other prose lines, the sub-bullets a model nests under
+  them, unfilled plan-template placeholders and explicit "none" values are
+  recorded as skipped with a reason rather than guessed at. The result names the commit it describes — the tip of the branch
   being pushed, confirmed before any command runs to be what the working tree
   holds and nothing it does not, since the push sends that branch whatever HEAD
   points at and a command passing in the working directory can be compiling a
@@ -20,12 +20,16 @@ description: >
   distinguishes a pass and a failure from "notRun" (there was nothing to
   measure: no plan, no or command-less Verification section, a disabled pass, a
   stage that never claimed success) and "incomplete" (there was, and the harness
-  could not finish: the run was cancelled part way, the step cap left commands
-  unrun, or the working tree was not the commit being pushed). Every non-passing
+  could not finish: the run was cancelled part way, the step cap or the pass
+  budget left commands unrun, or the working tree was not the commit being
+  pushed). Every non-passing
   status carries a reason, so neither silence nor a partly measured run is read
   as a pass. Each command is bounded by a timeout
   (HARNESS_VERIFY_TIMEOUT_SECONDS, default 600s) and killed as a process group,
+  the pass as a whole by HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS (default 1800s),
   and captured output is tailed. By default the result is recorded without
   changing the stage's phase; set HARNESS_VERIFY_ENFORCE=on to fail the stage on
-  a failed or incomplete verification, or HARNESS_VERIFY=off to skip the pass
+  a failed or incomplete verification — on the last stage of a workflow, since
+  the plan describes the tree after the migration and an intermediate stage is
+  not expected to satisfy it yet — or HARNESS_VERIFY=off to skip the pass
   entirely.
