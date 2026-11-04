@@ -91,6 +91,7 @@ Configuration comes from two sources: environment variables (required and option
 | `HARNESS_VERIFY` | `on` | `off` skips the harness's own verification pass (the commands in `docs/plan.md`'s `## Verification` section, re-run on the final tree) |
 | `HARNESS_VERIFY_ENFORCE` | `off` | `on` fails the stage (exit `1`) when verification comes back `failed` or `incomplete`. Default off: the result is recorded either way |
 | `HARNESS_VERIFY_TIMEOUT_SECONDS` | `600` | Per-command timeout for the verification pass; clamped to 30–3600 |
+| `HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS` | `1800` | Budget for the whole verification pass, not one command; clamped to 60–14400. Commands it leaves unrun are recorded as a gap, so the verdict is `incomplete` |
 
 ### Parameters (`/run/konveyor/params.json`)
 
@@ -184,10 +185,14 @@ pass records the verified SHA in `verification.commit`:
 
 Ignored paths do not count, because git does not count them: go-git's `Status`
 honours `.gitignore`, so a project's `node_modules`, `target` or `dist` does not
-show up while a stray source file does. The single exemption is
-`.konveyor/analysis.json`, which the harness writes into the workspace itself —
-it is not the agent's uncommitted work. Any other file under `.konveyor/` counts
-like anything else.
+show up while a stray source file does. Two paths are exempt, by exact name,
+because neither is an input to a build and so neither can change what a command
+measures: `.konveyor/analysis.json`, which the harness writes into the workspace
+itself, and `.konveyor/handoff.md`, which the agent appends to as its last act —
+the verify skill makes that append mandatory, *after* the commit of the work,
+and the handoff verdict is read straight from the worktree for the same reason.
+Counting it would have every clean verify stage report `incomplete` over a file
+no build compiles. Any other file under `.konveyor/` counts like anything else.
 
 The plan skill specifies that section as `- Build: <command>`,
 `- Test: <command>`, `- Blackbox: <steps>`. The harness parses those lines and
@@ -204,6 +209,14 @@ What is **not** run, recorded line by line with a reason rather than dropped:
 - **Blackbox** (and `Manual`, `Notes`, `Steps`) — prose steps for a person,
   with no single exit code to record. The harness does not guess a command from
   them.
+- Anything **nested under** one of those lines. A model asked for "steps to
+  start the app and verify key business flows still work" often writes them as
+  sub-bullets with labels of their own — `- Start the app: mvn quarkus:dev` —
+  and read on its own that is a command the harness would start and wait out,
+  for a plan whose every scorable command passed. The indentation is the only
+  thing that says those lines belong to the prose above them. A sibling back at
+  the parent's indentation closes the block, and so does any heading — a
+  sub-bullet under a later `### Automated checks` is scored, not skipped.
 - An unfilled template placeholder (`<build command, …>`), an explicit `none` /
   `n/a` / `-`, or a value too long to be a command.
 
@@ -215,7 +228,7 @@ four values, and the difference between the last two is the point:
 | `passed` | Every command the plan named ran on the pushed commit and exited 0 |
 | `failed` | A command exited non-zero, timed out, or could not be started |
 | `notRun` | There was **nothing to measure**: no `docs/plan.md`, no `## Verification` section, no runnable command in it, `HARNESS_VERIFY=off`, or a stage that never claimed success |
-| `incomplete` | There **was** something to measure and the harness could not finish, or could not attribute the result to the pushed commit: the run was cancelled part way, the step cap left commands unrun, HEAD was not the branch tip, or the working tree held paths the commit does not |
+| `incomplete` | There **was** something to measure and the harness could not finish, or could not attribute the result to the pushed commit: the run was cancelled part way, the step cap or the pass budget left commands unrun, HEAD was not the branch tip, or the working tree held paths the commit does not |
 
 Every non-`passed` status carries a `reason`, and the field is never simply
 absent while the harness reached the end of a turn. `incomplete` is not a pass:
@@ -226,10 +239,18 @@ since it is the actionable finding.
 
 Bounds: each command gets `HARNESS_VERIFY_TIMEOUT_SECONDS` (default 10 min) and
 is killed as a process group, so a hung build does not survive its own timeout;
-output is captured as a bounded 64 KiB tail, logged to the pod log, and carried
-into the termination blob only for a command that did not pass, as a short
-excerpt. At most 12 Verification lines are run — the cap bounds the work, not
-the honesty about it, so a plan that exceeds it verdicts `incomplete`.
+the pass as a whole gets `HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS` (default 30
+min), because twelve commands at the per-command timeout would be two hours
+spent after the agent's turn with the final push and the termination blob
+behind them. Output is captured as a bounded 64 KiB tail, the end of it logged
+to the pod log, and carried into the termination blob only for a command that
+did not pass, as a short excerpt. At most 12 Verification lines are run.
+
+Every one of those bounds the work, not the honesty about it: a command the
+step cap dropped, or one the budget left unrun, is a gap, and a gap verdicts
+`incomplete`. A pass budget that runs out under a command is recorded as that
+gap too, never as the command timing out — the harness running out of its own
+clock is not a measurement of the tree.
 
 By default a non-zero exit **does not** change the stage's phase — it is
 recorded, and surfacing it on `AgentRun.status` is #302.
@@ -237,6 +258,14 @@ recorded, and surfacing it on `AgentRun.status` is #302.
 (exit `1`): under enforcement the stage must be verified, and a partial
 measurement is not verification. `notRun` never fails the stage — a run with no
 plan must not fail for having nothing to check.
+
+Enforcement applies on the **last** stage of a workflow, and on a standalone
+run. `docs/plan.md` describes the tree after the migration, so an intermediate
+stage is not expected to satisfy it yet: the execute stage hands a
+half-migrated tree on by design, and the verify skill's own first step is a
+build fix loop. Failing an intermediate stage on the plan's verification would
+stop the run (ADR 0018) before the stage whose job is to fix exactly that ever
+started. The result is measured and recorded on every stage either way.
 
 ```json
 "verification": {

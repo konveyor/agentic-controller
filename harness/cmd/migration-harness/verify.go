@@ -190,6 +190,13 @@ const (
 // waiting on stdin cannot hold the pod until its deadline.
 const DefaultVerifyTimeout = 10 * time.Minute
 
+// DefaultVerifyTotalTimeout bounds the pass as a whole: enough for the
+// handful of commands a real plan lists, each with a cold build's worth of
+// time, and well short of verifyMaxSteps × DefaultVerifyTimeout — which is
+// the two hours a plan with twelve slow commands would otherwise spend after
+// the agent's turn, with the final push and the termination blob behind it.
+const DefaultVerifyTotalTimeout = 30 * time.Minute
+
 var (
 	// verificationHeading matches the plan's `## Verification` heading.
 	verificationHeading = regexp.MustCompile(`(?i)^ {0,3}#{2,}\s+\**verification\**\s*:?\s*$`)
@@ -247,9 +254,21 @@ func (s planStep) runnable() bool { return s.Command != "" }
 // own shell had: the harness is the process that started the runtime in this
 // container, so the runtime's environment is this process's environment, less
 // the Hub credentials the harness cleared before the agent ever ran.
-func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, branch string, timeout time.Duration, red *redactor) *verification {
+func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, branch string, timeout, total time.Duration, red *redactor) *verification {
 	if timeout <= 0 {
 		timeout = DefaultVerifyTimeout
+	}
+	// timeout bounds one command; total bounds the pass. Without the
+	// second, a plan naming verifyMaxSteps slow commands adds that many
+	// timeouts between the watcher stopping and the final push — hours,
+	// on a pod whose own deadline then kills the harness before it pushes
+	// or writes the termination blob, which is a worse outcome than the
+	// unverified green this file exists to prevent. A budget shorter than
+	// one command's timeout is honoured as configured: it cuts the pass
+	// short, and the commands it left unrun are recorded as a gap that
+	// names the budget, so a mis-set one is loud rather than silent.
+	if total <= 0 {
+		total = DefaultVerifyTotalTimeout
 	}
 	logging.Header("Verification")
 
@@ -268,6 +287,15 @@ func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, 
 		return notRun("the ## Verification section of %s is empty", planPath)
 	}
 	if !slices.ContainsFunc(steps, planStep.runnable) {
+		// Unless the cap is the reason there is none. A section whose
+		// commands all sit past the cap DID name commands to run, and
+		// the harness ran none of them: that is a gap, not an absent
+		// measurement, and notRun here would be the step cap quietly
+		// passing the stage again — the thing truncatedGap exists to
+		// stop, one branch earlier than it was wired in.
+		if truncated {
+			return incomplete(red, "%s", truncatedGap(truncated))
+		}
 		return notRun("the ## Verification section of %s names no command to run", planPath)
 	}
 
@@ -275,21 +303,29 @@ func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, 
 	// measuring all of it is incomplete, never notRun and never a pass.
 	target, mismatch := verifyTarget(repo, branch)
 	if mismatch != "" {
-		return incomplete("%s", mismatch)
+		return incomplete(red, "%s", mismatch)
 	}
 
 	// Measured before the commands run, so artefacts this pass creates
 	// cannot be mistaken for the agent's uncommitted work.
 	gap, err := worktreeGap(repo, target)
 	if err != nil {
-		return incomplete("inspect the working tree: %v", red.redact(err.Error()))
+		return incomplete(red, "inspect the working tree: %v", err)
 	}
 	if gap != "" {
 		logging.Warn("verification: %s", gap)
 	}
 
+	// The pass gets its own deadline, separate from each command's. A
+	// command cut short by it records as a gap, which settles the verdict
+	// to incomplete — the budget bounds the work, not the honesty about
+	// it, exactly as the step cap does.
+	passCtx, cancelPass := context.WithTimeout(ctx, total)
+	defer cancelPass()
+
 	v := &verification{Status: verificationPassed, Commit: target}
-	logging.Info("verification: checking commit %s, the tip of branch %s", shortSHA(target), branch)
+	logging.Info("verification: checking commit %s, the tip of branch %s (%s per command, %s for the pass)",
+		shortSHA(target), branch, timeout, total)
 	for _, step := range steps {
 		if !step.runnable() {
 			logging.Info("verification: %s skipped — %s", step.Label, step.Skip)
@@ -300,21 +336,33 @@ func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, 
 			})
 			continue
 		}
-		if ctx.Err() != nil {
-			logging.Warn("verification: %s not run — the run was cancelled", step.Label)
+		if passCtx.Err() != nil {
+			stopped := passStopped(passCtx, total)
+			logging.Warn("verification: %s not run — %s", step.Label, stopped)
 			v.Commands = append(v.Commands, verificationStep{
 				Label:   step.Label,
 				Command: clipVerify(red.redact(step.Command), verifyCommandLen),
 				Status:  verifyStepAborted,
-				Reason:  "run cancelled before this command",
+				Reason:  stopped + " before this command",
 			})
 			continue
 		}
-		v.Commands = append(v.Commands, runVerifyStep(ctx, cloneDir, timeout, step, red))
+		v.Commands = append(v.Commands, runVerifyStep(passCtx, cloneDir, timeout, total, step, red))
 	}
 
 	v.settle(red, gap, truncatedGap(truncated))
 	return v
+}
+
+// passStopped says why the pass stopped before or during a command: the run
+// was cancelled, or the pass used up its whole-pass budget. Both are gaps
+// rather than measurements, and they settle the same way, but they are not
+// the same gap and the record says which.
+func passStopped(passCtx context.Context, total time.Duration) string {
+	if errors.Is(passCtx.Err(), context.DeadlineExceeded) {
+		return fmt.Sprintf("the verification pass ran out of its %s budget", total)
+	}
+	return "the run was cancelled"
 }
 
 // truncatedGap renders the step cap as a gap, or "" when it did not bite.
@@ -416,12 +464,24 @@ func verifyTarget(repo *gogit.Repository, branch string) (commit, mismatch strin
 	return tip, ""
 }
 
-// harnessOwnPaths are the uncommitted files the harness itself puts in the
-// workspace. They are not the agent's uncommitted work and say nothing about
-// whether the commit being pushed is complete, so they do not count against
-// it. Everything else does.
-var harnessOwnPaths = map[string]bool{
+// verifyIgnoredPaths are the two stage-bookkeeping files whose uncommitted
+// state cannot change what a verification command measures. Everything else
+// counts, by exact path — any other file under .konveyor/ included.
+//
+//   - analysis.json the harness writes into the workspace itself, before the
+//     agent runs, and never commits.
+//   - handoff.md the agent appends to as its last act, which the verify
+//     skill makes mandatory ("You MUST append your ## Verify section ...")
+//     and which therefore lands AFTER the commit of the work. #241 reads it
+//     straight from the worktree for that reason. Counting it would make
+//     every clean verify stage report `incomplete` over a file no build
+//     compiles — the harness refusing its own pass for doing as it asked.
+//
+// Neither is an input to a build, which is what separates them from the
+// untracked source file this check exists to catch.
+var verifyIgnoredPaths = map[string]bool{
 	".konveyor/analysis.json": true,
+	handoffPath:               true,
 }
 
 // worktreeGap reports what the working tree holds that the commit being
@@ -442,7 +502,7 @@ func worktreeGap(repo *gogit.Repository, commit string) (string, error) {
 	}
 	kept := make([]string, 0, len(paths))
 	for _, path := range paths {
-		if !harnessOwnPaths[path] {
+		if !verifyIgnoredPaths[path] {
 			kept = append(kept, path)
 		}
 	}
@@ -473,7 +533,7 @@ func shortSHA(sha string) string {
 }
 
 // runVerifyStep runs one command and records what it exited with.
-func runVerifyStep(ctx context.Context, dir string, timeout time.Duration, step planStep, red *redactor) verificationStep {
+func runVerifyStep(ctx context.Context, dir string, timeout, total time.Duration, step planStep, red *redactor) verificationStep {
 	recorded := verificationStep{
 		Label:   step.Label,
 		Command: clipVerify(red.redact(step.Command), verifyCommandLen),
@@ -507,14 +567,22 @@ func runVerifyStep(ctx context.Context, dir string, timeout time.Duration, step 
 
 	var exitErr *exec.ExitError
 	switch {
+	case ctx.Err() != nil:
+		// The pass itself stopped — cancelled, or out of its whole-pass
+		// budget. Checked BEFORE the command's own deadline, because
+		// cmdCtx inherits whichever deadline is earlier: a pass budget
+		// that ran out under a command would otherwise be recorded as
+		// that command timing out, and settle counts a timeout as a
+		// measured failure. The harness would be failing a tree over a
+		// clock it ran out of itself.
+		stopped := passStopped(ctx, total)
+		recorded.Status = verifyStepAborted
+		recorded.Reason = stopped + " during this command"
+		logging.Warn("verification: %s aborted — %s", step.Label, stopped)
 	case errors.Is(cmdCtx.Err(), context.DeadlineExceeded):
 		recorded.Status = verifyStepTimedOut
 		recorded.Reason = fmt.Sprintf("no exit after %s", timeout)
 		logging.Err("verification: %s TIMED OUT after %s — %s", step.Label, timeout, recorded.Command)
-	case ctx.Err() != nil:
-		recorded.Status = verifyStepAborted
-		recorded.Reason = "run cancelled during this command"
-		logging.Warn("verification: %s aborted — the run was cancelled", step.Label)
 	case errors.As(err, &exitErr):
 		code := exitErr.ExitCode()
 		recorded.Status, recorded.ExitCode = verifyStepFailed, &code
@@ -531,8 +599,12 @@ func runVerifyStep(ctx context.Context, dir string, timeout time.Duration, step 
 	if recorded.Status != verifyStepPassed && output != "" {
 		// The pod log is the durable copy and the only place the actual
 		// compiler errors survive the pod; the blob gets a pointer to it.
-		logging.Info("verification: %s output (last %d bytes):\n%s",
-			step.Label, len(output), clipVerify(output, verifyOutputLog))
+		// The TAIL, not the head: out is already a 64 KiB tail, and for
+		// the #300 case most of that is npm progress with the 45 errors
+		// at the end. Clipping from the front kept the progress and
+		// dropped the errors from the one copy that outlives the pod.
+		logging.Info("verification: %s output (tail of %d captured bytes):\n%s",
+			step.Label, len(output), clipVerifyTail(output, verifyOutputLog))
 		recorded.Output = clipVerify(lastLines(output), verifyOutputBlob)
 	}
 	return recorded
@@ -549,8 +621,16 @@ func runVerifyStep(ctx context.Context, dir string, timeout time.Duration, step 
 // template's own `<build command>` placeholder.
 func parsePlanVerification(content string) (steps []planStep, truncated, found bool) {
 	inSection := false
+	// The indentation of the prose line whose sub-bullets we are inside,
+	// and its label. -1 when we are not inside one. See proseChild.
+	proseIndent, proseParent := -1, ""
 	for _, line := range handoffProse(content) {
 		if m := sectionHeading.FindStringSubmatch(line); m != nil {
+			// Any heading closes an open manual list. A deeper one keeps us
+			// in the section, but nothing under it belongs to a list that
+			// ended above it — and a sub-bullet that stays nested is a
+			// skipped command, so leaving the block open reads as a pass.
+			proseIndent, proseParent = -1, ""
 			switch {
 			case verificationHeading.MatchString(line):
 				// A second Verification heading restarts the section:
@@ -575,9 +655,60 @@ func parsePlanVerification(content string) (steps []planStep, truncated, found b
 			truncated = true
 			continue
 		}
-		steps = append(steps, classifyVerifyItem(m[1], m[2]))
+		step := classifyVerifyItem(m[1], m[2])
+		indent := itemIndent(line)
+		switch {
+		case proseIndent >= 0 && indent > proseIndent:
+			// Nested under a prose line, so it belongs to that line and
+			// the block stays open for its siblings.
+			step = proseChild(step.Label, proseParent)
+		case verifyProseLabels[strings.ToLower(step.Label)]:
+			proseIndent, proseParent = indent, step.Label
+		default:
+			proseIndent, proseParent = -1, ""
+		}
+		steps = append(steps, step)
 	}
 	return steps, truncated, found
+}
+
+// proseChild is a Verification line nested under a prose one. The plan skill
+// specifies Blackbox as "steps to start the app and verify key business flows
+// still work", and a model that writes those steps as sub-bullets gives each
+// one a label of its own:
+//
+//	## Verification
+//	- Blackbox:
+//	  - Start the app: mvn quarkus:dev
+//	  - Check the endpoint: curl -sf localhost:8080/q/health
+//
+// Read on its own, `Start the app` is a command — and `mvn quarkus:dev` never
+// exits, so the harness would spend a whole timeout on it and record a
+// measured failure for a plan whose every scorable command passed. The
+// nesting is the only thing that says those lines are part of the prose above
+// them, so the parser is the only place that can tell.
+func proseChild(label, parent string) planStep {
+	return planStep{
+		Label: label,
+		Skip:  fmt.Sprintf("nested under %s — part of its manual steps, not a command the harness can run or score", parent),
+	}
+}
+
+// itemIndent is the visual indentation of a list item, counting a tab as four
+// columns so a tab-indented sub-bullet nests like a space-indented one.
+func itemIndent(line string) int {
+	n := 0
+	for _, r := range line {
+		switch r {
+		case ' ':
+			n++
+		case '\t':
+			n += 4
+		default:
+			return n
+		}
+	}
+	return n
 }
 
 // classifyVerifyItem decides whether one Verification line is a command the
@@ -617,8 +748,14 @@ func notRun(format string, args ...any) *verification {
 
 // incomplete builds the recorded "started and could not finish" result:
 // there was something to measure and the harness cannot claim it did.
-func incomplete(format string, args ...any) *verification {
-	reason := clipVerify(fmt.Sprintf(format, args...), verifyReasonLen)
+//
+// Takes the redactor because its reasons quote git: a branch that will not
+// resolve, a worktree that cannot be read. Those errors can carry the remote
+// URL, and the clone's remote holds a token until StripCredentials runs — and
+// verification.reason is the one field the termination blob keeps to the last
+// rung of its trim ladder, so an unredacted one travels all the way out.
+func incomplete(red *redactor, format string, args ...any) *verification {
+	reason := clipVerify(red.redact(fmt.Sprintf(format, args...)), verifyReasonLen)
 	logging.Err("verification INCOMPLETE — %s", reason)
 	return &verification{Status: verificationIncomplete, Reason: reason}
 }
@@ -628,6 +765,16 @@ func clipVerify(s string, n int) string {
 	s = strings.TrimSpace(s)
 	if r := []rune(s); len(r) > n {
 		return strings.TrimSpace(string(r[:n-1])) + "…"
+	}
+	return s
+}
+
+// clipVerifyTail bounds s to its LAST n runes: what clipVerify does, from the
+// other end, for output whose interesting part is where it stopped.
+func clipVerifyTail(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if r := []rune(s); len(r) > n {
+		return "…" + strings.TrimSpace(string(r[len(r)-n+1:]))
 	}
 	return s
 }

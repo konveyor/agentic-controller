@@ -42,6 +42,7 @@ func clearKonveyorEnv(t *testing.T) {
 		"HARNESS_VERIFY",
 		"HARNESS_VERIFY_ENFORCE",
 		"HARNESS_VERIFY_TIMEOUT_SECONDS",
+		"HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS",
 		"KONVEYOR_GIT_AUTHOR_NAME",
 		"KONVEYOR_GIT_AUTHOR_EMAIL",
 	} {
@@ -659,6 +660,38 @@ func TestVerifyTimeoutClamp(t *testing.T) {
 			}
 			if cfg.VerifyTimeout != tc.want {
 				t.Errorf("HARNESS_VERIFY_TIMEOUT_SECONDS=%q → %v, want %v", tc.env, cfg.VerifyTimeout, tc.want)
+			}
+		})
+	}
+}
+
+// The pass-wide budget is clamped like the per-command one: the per-command
+// timeout alone lets a plan with a dozen slow commands spend hours after the
+// agent's turn, with the final push and the termination blob behind it.
+func TestVerifyTotalTimeoutClamp(t *testing.T) {
+	cases := []struct {
+		env  string
+		want time.Duration
+	}{
+		{"", 0},
+		{"not-a-number", 0},
+		{"0", 0},
+		{"-5", 0},
+		{"1200", 1200 * time.Second},
+		{"1", MinVerifyTotalTimeoutSeconds * time.Second},
+		{"99999", MaxVerifyTotalTimeoutSeconds * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			clearKonveyorEnv(t)
+			setRequiredEnv(t)
+			t.Setenv("HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS", tc.env)
+			cfg, err := LoadFromEnv()
+			if err != nil {
+				t.Fatalf("LoadFromEnv: %v", err)
+			}
+			if cfg.VerifyTotalTimeout != tc.want {
+				t.Errorf("HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS=%q → %v, want %v", tc.env, cfg.VerifyTotalTimeout, tc.want)
 			}
 		})
 	}

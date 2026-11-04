@@ -24,6 +24,16 @@ const (
 	MinVerifyTimeoutSeconds = 30
 	MaxVerifyTimeoutSeconds = 3600
 
+	// MinVerifyTotalTimeoutSeconds / MaxVerifyTotalTimeoutSeconds clamp
+	// HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS, the budget for the whole
+	// verification pass rather than one command. The per-command timeout
+	// alone bounds nothing useful: a plan may name a dozen commands, and
+	// a pass that spends hours after the agent's turn is one a pod
+	// deadline kills before the final push. The ceiling is 4h, past any
+	// sane pod lifetime; the floor is one minute.
+	MinVerifyTotalTimeoutSeconds = 60
+	MaxVerifyTotalTimeoutSeconds = 14400
+
 	// Default git commit identity used when the Agent/AgentRun does not
 	// configure one. Preserves the historical hardcoded author.
 	DefaultGitAuthorName  = "migration-agent"
@@ -105,6 +115,14 @@ type Config struct {
 	// harness default (HARNESS_VERIFY_TIMEOUT_SECONDS, clamped to
 	// [MinVerifyTimeoutSeconds, MaxVerifyTimeoutSeconds]).
 	VerifyTimeout time.Duration
+	// VerifyTotalTimeout bounds the verification pass as a whole, so a
+	// plan naming many slow commands cannot spend the pod's remaining
+	// life between the watcher stopping and the final push. 0 means the
+	// harness default (HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS, clamped to
+	// [MinVerifyTotalTimeoutSeconds, MaxVerifyTotalTimeoutSeconds]).
+	// Commands the budget leaves unrun are recorded as a gap, which makes
+	// the verdict incomplete rather than a pass.
+	VerifyTotalTimeout time.Duration
 
 	// Prompt context layers, composed by internal/prompt.
 	AgentPrompt       string
@@ -239,6 +257,9 @@ func LoadFromEnv() (*Config, error) {
 	cfg.VerifyEnforce = envSwitchedOn("HARNESS_VERIFY_ENFORCE")
 	if n, err := strconv.Atoi(os.Getenv("HARNESS_VERIFY_TIMEOUT_SECONDS")); err == nil && n > 0 {
 		cfg.VerifyTimeout = time.Duration(min(max(n, MinVerifyTimeoutSeconds), MaxVerifyTimeoutSeconds)) * time.Second
+	}
+	if n, err := strconv.Atoi(os.Getenv("HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS")); err == nil && n > 0 {
+		cfg.VerifyTotalTimeout = time.Duration(min(max(n, MinVerifyTotalTimeoutSeconds), MaxVerifyTotalTimeoutSeconds)) * time.Second
 	}
 	if n, err := strconv.Atoi(os.Getenv("HARNESS_HITL_TIMEOUT_SECONDS")); err == nil && n > 0 {
 		// Ceiling: a single ask parking the run for hours isn't HITL,
