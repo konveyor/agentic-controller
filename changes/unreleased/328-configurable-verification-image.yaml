@@ -1,0 +1,10 @@
+kind: feature
+description: >
+  Make the Gateway verification container image configurable through a
+  VERIFICATION_IMAGE environment variable on the controller manager,
+  declared (empty) on the manager Deployment and the operator template, so
+  an arm64 cluster, a mirror or a private registry can point verification
+  Jobs at its own agent image instead of preloading a build under the
+  published tag. Leaving it unset keeps
+  quay.io/konveyor/agentic-controller-agent:latest, so default behaviour is
+  unchanged.
