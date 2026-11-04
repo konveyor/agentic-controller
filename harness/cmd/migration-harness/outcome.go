@@ -237,6 +237,40 @@ func providerErrorSummary(text string) string {
 	return ""
 }
 
+// promptFailureDetail says why a session/prompt call failed, in as much
+// detail as exists anywhere.
+//
+// err's own text is the base, and for a well-behaved agent that is
+// enough: RPCError.Error() already appends the error's data field, which
+// is where goose puts the cause when it sends one (#170). When it sends
+// none — the "-32000 Authentication required" of #323, which named
+// neither the provider nor the credential nor Bedrock — the reason is not
+// in the error at all. It is on goose's own stdio, where the provider's
+// sentence was logged and would otherwise die with the pod, so
+// gooseError supplies that line (ServeProcess.ProviderError) and it is
+// summarised the same way an in-band provider refusal is.
+//
+// gooseError is a func because fetching the line waits briefly on a
+// racing writer: nothing should pay that on a call that reported its own
+// cause. It may be nil.
+func promptFailureDetail(err error, red *redactor, gooseError func() string) string {
+	if err == nil {
+		return ""
+	}
+	detail := red.redact(err.Error())
+	var rpcErr *acp.RPCError
+	if errors.As(err, &rpcErr) && rpcErr.Detail() != "" {
+		return detail
+	}
+	if gooseError == nil {
+		return detail
+	}
+	if line := gooseError(); line != "" {
+		detail += " — " + providerErrorSummary(red.redact(line))
+	}
+	return detail
+}
+
 // providerErrorSummaryLen bounds the summary without cutting away the
 // reason: goose renders an AWS SDK error with Debug formatting, and #231's
 // Bedrock line ran ~500 runes with "The security token included in the

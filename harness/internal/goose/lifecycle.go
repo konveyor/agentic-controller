@@ -22,6 +22,7 @@ type ServeProcess struct {
 	secretKey string
 	done      chan struct{}
 	tempDirs  []string
+	output    *outputCapture
 }
 
 const (
@@ -105,8 +106,13 @@ func StartServe(ctx context.Context, cfg ServeConfig) (*ServeProcess, error) {
 		env = append(env, "GOOSE_SERVER__SECRET_KEY="+secretKey)
 	}
 	cmd.Env = env
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	// One capture across both streams, so the order the process wrote its
+	// lines in is the order they are read back. Everything still reaches
+	// the pod log exactly as before; the capture only keeps a copy of the
+	// error lines, for ProviderError (#323).
+	output := newOutputCapture(os.Stderr)
+	cmd.Stdout = output
+	cmd.Stderr = output
 
 	if err := cmd.Start(); err != nil {
 		for _, d := range tempDirs {
@@ -121,6 +127,7 @@ func StartServe(ctx context.Context, cfg ServeConfig) (*ServeProcess, error) {
 		secretKey: secretKey,
 		done:      make(chan struct{}),
 		tempDirs:  tempDirs,
+		output:    output,
 	}
 
 	go func() {
@@ -141,6 +148,42 @@ func (s *ServeProcess) Port() int {
 func (s *ServeProcess) SecretKey() string {
 	return s.secretKey
 }
+
+// ProviderError returns the most recent error-level line goose wrote on
+// its own stdio after since, waiting up to within for one to arrive, or
+// "" when it logged none. Callers use it to name why a model call failed
+// when the ACP error itself does not (#323).
+//
+// The wait is there because the two paths race: the JSON-RPC error
+// arrives over the websocket, while goose's stdio reaches the harness
+// through os/exec's copier goroutine, so the response can be handled
+// before the line it explains has been read. The wait is paid only on a
+// failure, and only until a line shows up.
+func (s *ServeProcess) ProviderError(since time.Time, within time.Duration) string {
+	if s.output == nil {
+		return ""
+	}
+	deadline := time.Now().Add(within)
+	for {
+		if line := s.output.errorSince(since); line != "" {
+			return line
+		}
+		if !time.Now().Before(deadline) {
+			return ""
+		}
+		time.Sleep(providerErrorPollInterval)
+	}
+}
+
+// ProviderErrorGrace is how long ProviderError should be given to pick up
+// the line explaining a failure the ACP error left unexplained, and
+// ProviderErrorPollInterval how often it looks. A second is far longer
+// than the copier goroutine needs and is spent only on a run that has
+// already failed.
+const (
+	ProviderErrorGrace        = time.Second
+	providerErrorPollInterval = 20 * time.Millisecond
+)
 
 // Alive returns true if the goose serve process is still running.
 func (s *ServeProcess) Alive() bool {
