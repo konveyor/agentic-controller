@@ -46,24 +46,21 @@ rules apply to standalone runs and every workflow stage. See the
 [harness proxy contract](../../harness/README.md#hub-proxy-inheritance) for
 matching semantics, validation and compatibility limits.
 
-**Update (2026-11-03):** Review clarified hostname exclusion compatibility:
-bare domains bypass themselves and subdomains, while leading-dot domains
-bypass subdomains only; Maven receives equivalent wildcard entries. Git always
-bypasses localhost/loopback. Nonempty lowercase proxy variables apply when the
-uppercase form is unset or empty. Proxy selection functions are prepared once
-per startup. Username-only proxy credentials and their encoded forms are
-redacted, while ordinary short placeholder LLM keys retain the pre-existing
-redaction heuristic. Real proxy/Maven credentials are still masked regardless
-of length. Generated Maven settings reject `${` in Hub proxy credentials with
-an actionable error because Maven would interpolate the value before using it;
-explicit proxy settings remain authoritative. Lookup failures and unsupported
-Hub exclusion forms retain the previously agreed fail-closed policy and opt-out.
+**Update (2026-11-03):** Review clarified proxy routing: bare domains bypass
+both themselves and subdomains, leading-dot domains bypass subdomains only,
+and Maven receives equivalent wildcard entries. Git always bypasses
+localhost/loopback. Nonempty lowercase proxy variables apply when uppercase is
+unset or empty. Proxy selection functions are prepared once per startup.
+Username-only credentials and encoded forms are redacted, while short
+placeholder LLM keys retain the existing redaction heuristic.
 
-**Update (2026-11-03):** Exclusion compatibility is tool-specific. Git honors
-inherited CIDRs and port-specific exclusions. Maven rejects forms it cannot
-represent only when generating proxy settings, after existing user settings,
-Secret mounts, and explicit Hub Maven proxy sections have taken precedence.
-This preserves supplied overrides without silently dropping bypass rules.
+Exclusion compatibility became tool-specific: Git honors inherited CIDRs and
+port-specific exclusions; Maven validation runs only when generating proxy
+settings, after existing files, Secret mounts, and explicit Hub Maven proxy
+sections have taken precedence. At this point, unsupported Maven exclusions
+and credential interpolation syntax still caused startup failure; the
+November 4 amendment below supersedes that choice.
+
 The Hub `release-0.11` source grants `agentic.harness` the `addon` role, including
 `proxies:get`, `identities:get`, and `identities:decrypt`; see
 [service account](https://github.com/konveyor/tackle2-hub/blob/59f079ecf59bb89e4d51b2831ffaa3784ce41c9f/internal/auth/seed/serviceaccounts.yaml#L6)
@@ -71,27 +68,28 @@ and [role](https://github.com/konveyor/tackle2-hub/blob/59f079ecf59bb89e4d51b283
 This supports retaining strict lookup failures. Deployed MTA 8.3 token and image
 verification remain release checks.
 
-**Update (2026-11-04):** Short ordinary proxy usernames paired with a password
-use the existing eight-character redaction heuristic so words such as `proxy`
-remain readable in diagnostics. Passwords and username-only tokens remain
-masked regardless of length, as do complete credential URLs and userinfo.
-Real Maven 3.9.11 builds verify raw IPv6 proxy hosts and both whole and embedded
-brace passwords. Maven may report failed decryption of brace values while
-retaining the original credential. Setup remains independent of installed
-toolchains: generated Maven proxy incompatibilities also stop non-Java runs,
-with explicit settings or `HARNESS_HUB_PROXY=off` as the supplied workarounds.
-
-**Update (2026-11-04):** Further review replaces fatal Maven proxy conversion
-with warning-and-continue behavior. When inherited exclusions or credential
+**Update (2026-11-04):** Automatic Maven proxy conversion now warns and
+continues instead of failing startup. When inherited exclusions or credential
 syntax cannot be represented safely, skip the entire automatic Maven proxy
 addition rather than dropping individual entries. Preserve supplied Maven
 settings byte-for-byte, including repository credentials and their redaction;
 without a Maven credential, leave the user settings file absent. Git retains
-its valid proxy policy. Maven may later use direct/default access and fail at
-the build step if explicit proxy settings are required. This applies to all
-images without toolchain detection and supersedes the earlier startup-failure
-choice for Maven conversion only. Hub lookup/shared validation, malformed
-supplied settings, and filesystem errors retain their existing error handling.
+its valid proxy policy. This applies to all images without toolchain detection.
+Maven may later use direct/default access and fail at the build step if explicit
+proxy settings are required. Hub lookup/shared validation, malformed supplied
+settings, and filesystem errors retain their existing error handling.
+
+The skipped-proxy warning reaches the console once its ACP connection is
+available and is retained as `mavenProxyWarning` in AgentRun termination data,
+including early setup failures. Short ordinary usernames paired with a password
+use the shared eight-character heuristic; passwords and username-only tokens
+remain masked regardless of length, as do complete credential URLs/userinfo.
+Real Maven 3.9.11 builds verify raw IPv6 proxy hosts and both whole and embedded
+brace passwords. Maven may report failed decryption of brace values while
+retaining the original credential.
+
+Same-day proxy review notes have been consolidated here; the earlier strict
+Maven conversion decision is retained above to make the policy change explicit.
 
 
 ## Context
