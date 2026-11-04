@@ -7,7 +7,7 @@ import (
 )
 
 func TestProviderEnvAnthropic(t *testing.T) {
-	env, _ := providerEnv("anthropic", "claude-sonnet-4-5", "sk-ant-key", "https://api.anthropic.com")
+	env, _ := providerEnv(nil, "anthropic", "claude-sonnet-4-5", "sk-ant-key", "https://api.anthropic.com")
 	assertEnvContains(t, env, "GOOSE_PROVIDER", "anthropic")
 	assertEnvContains(t, env, "GOOSE_MODEL", "claude-sonnet-4-5")
 	assertEnvContains(t, env, "ANTHROPIC_API_KEY", "sk-ant-key")
@@ -15,20 +15,20 @@ func TestProviderEnvAnthropic(t *testing.T) {
 }
 
 func TestProviderEnvOpenAI(t *testing.T) {
-	env, _ := providerEnv("openai", "gpt-4o", "sk-openai-key", "https://api.openai.com")
+	env, _ := providerEnv(nil, "openai", "gpt-4o", "sk-openai-key", "https://api.openai.com")
 	assertEnvContains(t, env, "GOOSE_PROVIDER", "openai")
 	assertEnvContains(t, env, "OPENAI_API_KEY", "sk-openai-key")
 	assertEnvContains(t, env, "OPENAI_HOST", "https://api.openai.com")
 }
 
 func TestProviderEnvGoogle(t *testing.T) {
-	env, _ := providerEnv("google", "gemini-2.5-pro", "google-key", "")
+	env, _ := providerEnv(nil, "google", "gemini-2.5-pro", "google-key", "")
 	assertEnvContains(t, env, "GOOGLE_API_KEY", "google-key")
 	assertEnvNotPresent(t, env, "ANTHROPIC_API_KEY")
 }
 
 func TestProviderEnvAWSBedrock(t *testing.T) {
-	env, _ := providerEnv("aws-bedrock", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "unused-key", "https://bedrock-runtime.us-east-1.amazonaws.com")
+	env, _ := providerEnv(nil, "aws-bedrock", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "unused-key", "https://bedrock-runtime.us-east-1.amazonaws.com")
 	assertEnvContains(t, env, "GOOSE_PROVIDER", "aws_bedrock")
 	assertEnvContains(t, env, "GOOSE_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
 	assertEnvNotPresent(t, env, "ANTHROPIC_API_KEY")
@@ -37,13 +37,39 @@ func TestProviderEnvAWSBedrock(t *testing.T) {
 	assertEnvNotPresent(t, env, "OPENAI_HOST")
 }
 
+// The ambient environment must not decide what the assertions above
+// conclude. providerEnv appends to the base it is handed, so a test
+// asking what the harness added hands it nil and gets an answer about
+// the harness. While the base was an os.Environ() call inside the
+// function, a developer with OPENAI_API_KEY exported failed
+// TestProviderEnvAWSBedrock whatever the harness did — and the failure
+// printed their key.
+func TestProviderEnvAsksAboutTheHarnessNotTheShell(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "ambient-not-from-the-harness")
+	t.Setenv("ANTHROPIC_API_KEY", "ambient-not-from-the-harness")
+
+	env, _ := providerEnv(nil, "aws-bedrock", "us.anthropic.claude-sonnet-4-5-20250929-v1:0", "unused-key", "")
+	assertEnvNotPresent(t, env, "OPENAI_API_KEY")
+	assertEnvNotPresent(t, env, "ANTHROPIC_API_KEY")
+
+	// What the caller does hand over is carried through, and left alone:
+	// in production the base is os.Environ(), which goose needs.
+	base := make([]string, 1, 8)
+	base[0] = "PATH=/usr/bin"
+	withBase, _ := providerEnv(base, "aws-bedrock", "", "", "")
+	assertEnvContains(t, withBase, "PATH", "/usr/bin")
+	if len(base) != 1 || base[0] != "PATH=/usr/bin" {
+		t.Errorf("providerEnv wrote through to the base slice it was handed: %v", base)
+	}
+}
+
 func TestProviderEnvNormalizesHyphens(t *testing.T) {
-	env, _ := providerEnv("gcp-vertex-ai", "", "", "")
+	env, _ := providerEnv(nil, "gcp-vertex-ai", "", "", "")
 	assertEnvContains(t, env, "GOOSE_PROVIDER", "gcp_vertex_ai")
 }
 
 func TestProviderEnvEmptyStringsAddNothing(t *testing.T) {
-	env, _ := providerEnv("", "", "", "")
+	env, _ := providerEnv(nil, "", "", "", "")
 	assertEnvNotPresent(t, env, "GOOSE_PROVIDER")
 	assertEnvNotPresent(t, env, "GOOSE_MODEL")
 	assertEnvNotPresent(t, env, "ANTHROPIC_API_KEY")
@@ -51,7 +77,7 @@ func TestProviderEnvEmptyStringsAddNothing(t *testing.T) {
 
 func TestProviderEnvGCPVertexFiltersCredJSON(t *testing.T) {
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS_JSON", `{"type":"service_account"}`)
-	env, tempDirs := providerEnv("gcp-vertex-ai", "", "", "")
+	env, tempDirs := providerEnv(os.Environ(), "gcp-vertex-ai", "", "", "")
 	for _, d := range tempDirs {
 		defer os.RemoveAll(d)
 	}
@@ -130,7 +156,10 @@ func assertEnvNotPresent(t *testing.T, env []string, key string) {
 	prefix := key + "="
 	for _, e := range env {
 		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
-			t.Errorf("env should not contain key %s, found %s", key, e)
+			// The key only, never the entry: the value may be a real
+			// credential, and a failure message is printed to the test
+			// log and to CI output.
+			t.Errorf("env should not contain key %s", key)
 		}
 	}
 }
