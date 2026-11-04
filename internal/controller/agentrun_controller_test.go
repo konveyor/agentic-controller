@@ -1048,7 +1048,9 @@ var _ = Describe("AgentRun Controller", func() {
 			const terminationMsg = `source repository "https://svn.example/repo" uses SCM kind "subversion"; only git is supported`
 			pod := &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      name + "-pod",
+					// Agent Sandbox names the pod after the Sandbox, which
+					// is how the controller reads a finished run's pod.
+					Name:      fetchedRun.Status.SandboxName,
 					Namespace: testNamespace,
 					Labels:    map[string]string{labelAgentRun: name},
 				},

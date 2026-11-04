@@ -1607,7 +1607,7 @@ func (r *AgentRunReconciler) updatePhaseFromSandbox(
 			// The harness may also write a human-readable failure message to
 			// the termination log (e.g. a non-git source, #143); surface it
 			// on the failure outcome, preferring it over the generic reason.
-			r.setTerminalOutcome(run, pod, cond.Reason, r.lookupTerminationMessage(ctx, run))
+			r.setTerminalOutcome(run, pod, cond.Reason, agentTerminationMessage(pod))
 			return 0
 		}
 	}
@@ -1928,43 +1928,21 @@ func podStartTime(pod *corev1.Pod, fallback metav1.Time) metav1.Time {
 	return fallback
 }
 
-// lookupTerminationMessage lists the run's pods and returns the agent
-// container's terminated-state message, or "" if none is available. Errors
-// listing pods are swallowed — the termination payload is best-effort detail
-// and must never block the phase update, so a reconciler built without a
-// direct reader reports the run without this detail rather than failing.
-func (r *AgentRunReconciler) lookupTerminationMessage(
-	ctx context.Context,
-	run *konveyoriov1alpha1.AgentRun,
-) string {
-	if r.apiReader == nil {
-		return ""
-	}
-	var pods corev1.PodList
-	if err := r.apiReader.List(ctx, &pods,
-		client.InNamespace(run.Namespace),
-		client.MatchingLabels{labelAgentRun: run.Name},
-	); err != nil {
-		log.FromContext(ctx).V(1).Info("listing pods for termination message failed",
-			"agentRun", run.Name, "error", err)
-		return ""
-	}
-	return podTerminationMessage(pods.Items)
-}
-
-// podTerminationMessage returns the "agent" container's terminated-state
-// message across the given pods, or "" if no such terminated container is
-// found. It is a pure function to keep the extraction logic unit-testable.
-func podTerminationMessage(pods []corev1.Pod) string {
-	for i := range pods {
-		for _, cs := range pods[i].Status.ContainerStatuses {
-			if cs.Name != agentContainerName {
-				continue
-			}
-			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
-				return cs.State.Terminated.Message
-			}
-		}
+// agentTerminationMessage returns the agent container's terminated-state
+// message, or "" when the pod is absent or its agent has not terminated.
+//
+// Read off the pod terminalPod already resolved, so the message, the exit
+// code and the termination blob all come from one record. It used to be
+// its own uncached list of the run's pods, which was how the message
+// reached past a lagging cache before terminalPod existed; keeping that
+// list would now mean a second direct read per terminal reconcile, and
+// one that selected by label where terminalPod selects by name — so a
+// run with more than one labelled pod could pair one pod's message with
+// another pod's exit code. Best-effort as before: no pod, or no
+// termination on it, leaves the caller on the Sandbox's own reason.
+func agentTerminationMessage(pod *corev1.Pod) string {
+	if term := agentContainerTermination(pod); term != nil {
+		return term.Message
 	}
 	return ""
 }
