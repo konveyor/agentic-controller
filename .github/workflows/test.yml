@@ -98,6 +98,25 @@ jobs:
         working-directory: harness
         run: go test ./...
 
+  operator-sync-test:
+    permissions:
+      contents: read
+    name: Operator sync history test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install test dependency
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/operator-sync-tests"
+          "${RUNNER_TEMP}/operator-sync-tests/bin/pip" install PyYAML
+
+      - name: Test sync branch preservation
+        run: '"${RUNNER_TEMP}/operator-sync-tests/bin/python" -m unittest discover -s hack/tests -p test_operator_sync.py -v'
+
   tests:
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -106,15 +125,17 @@ jobs:
       - test
       - api-test
       - harness-test
+      - operator-sync-test
     steps:
       - name: Check test results
         env:
           RESULT_TEST: ${{ needs.test.result }}
           RESULT_API_TEST: ${{ needs.api-test.result }}
           RESULT_HARNESS_TEST: ${{ needs.harness-test.result }}
+          RESULT_OPERATOR_SYNC_TEST: ${{ needs.operator-sync-test.result }}
         run: |
           FAILED=false
-          for result_var in RESULT_TEST RESULT_API_TEST RESULT_HARNESS_TEST; do
+          for result_var in RESULT_TEST RESULT_API_TEST RESULT_HARNESS_TEST RESULT_OPERATOR_SYNC_TEST; do
             result="${!result_var}"
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then
               echo "::error::${result_var} = ${result}"

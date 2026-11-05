@@ -11,9 +11,9 @@ name: Sync manifests to operator
 # result. `make bundle` is run with the operator's own defaults (VERSION/IMG),
 # matching its csv-validate.yml, so the only bundle churn is CRD/RBAC-driven.
 #
-# The head branch is fixed per base branch and force-pushed every run: if a PR is
-# already open we just update it, otherwise we open a fresh one -- so there is
-# never a pile of stale sync branches or duplicate PRs.
+# The head branch is fixed per base branch. Reuse its existing history, merge in
+# the target branch, then append a sync commit with a normal push. This preserves
+# operator integration and review fixes added while the sync PR is open.
 
 on:
   push:
@@ -131,6 +131,42 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      # Start from the remote sync head before rendering so manual integration
+      # commits survive. Merge the current base even when an older sync PR was
+      # squash-merged and its branch still exists. Conflicts require a human;
+      # never rebuild an existing branch from base or force-push over its work.
+      # Publish a clean base merge only with the next manifest change. A no-op
+      # sync leaves the remote alone; conflicts still fail here on every run.
+      - name: Prepare operator sync branch
+        if: steps.target.outputs.exists == 'true'
+        working-directory: operator
+        env:
+          BASE: ${{ steps.branches.outputs.base }}
+          HEAD: ${{ steps.branches.outputs.head }}
+        run: |
+          set -euo pipefail
+          git config user.name "konveyor"
+          git config user.email "konveyor@users.noreply.github.com"
+          git fetch --no-tags origin "refs/heads/${BASE}:refs/remotes/origin/${BASE}"
+
+          if git ls-remote --exit-code --heads origin "refs/heads/${HEAD}" > /dev/null; then
+            git fetch --no-tags origin "refs/heads/${HEAD}:refs/remotes/origin/${HEAD}"
+            git checkout --no-track -b "${HEAD}" "refs/remotes/origin/${HEAD}"
+            if ! git merge --no-edit --signoff "refs/remotes/origin/${BASE}"; then
+              echo "::error::Cannot merge operator ${BASE} into ${HEAD}. Resolve conflicts on the sync branch and rerun; no remote history was changed." >&2
+              exit 1
+            fi
+          else
+            status=$?
+            # ls-remote returns 2 only when no matching ref exists. Auth,
+            # network, and server errors must fail instead of starting over.
+            if [ "${status}" -ne 2 ]; then
+              echo "::error::Cannot check operator sync branch ${HEAD} (git exit ${status})." >&2
+              exit "${status}"
+            fi
+            git checkout --no-track -b "${HEAD}" "refs/remotes/origin/${BASE}"
+          fi
+
       - name: Render manifests into operator checkout
         if: steps.target.outputs.exists == 'true'
         run: ./hack/sync-operator.sh operator
@@ -149,7 +185,7 @@ jobs:
       # first sync) count -- plain `git diff` only sees tracked changes. The -I
       # filter drops the CSV's createdAt timestamp, which moves every run, so a
       # no-op sync is correctly detected as no change.
-      - name: Detect config changes
+      - name: Stage and detect config changes
         id: diff
         if: steps.target.outputs.exists == 'true'
         working-directory: operator
@@ -163,33 +199,39 @@ jobs:
             git diff --cached --stat -- helm/templates/crds helm/templates/rbac roles/tackle/templates/agentic bundle
           fi
 
-      - name: Push branch and open/update PR
+      # Commit the index staged by the detection step above. Keep that index
+      # unchanged between detection and commit so both consume the same paths.
+      - name: Push sync commit
+        if: steps.target.outputs.exists == 'true' && steps.diff.outputs.changed == 'true'
+        working-directory: operator
+        env:
+          HEAD: ${{ steps.branches.outputs.head }}
+          SRC_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git commit -s -m ":seedling: Sync agentic-controller manifests
+
+          Rendered from konveyor/agentic-controller@${SRC_SHA} by
+          hack/sync-operator.sh + make bundle. Do not hand-edit the synced
+          files; re-run the sync instead."
+          # A concurrent human/bot push rejects this update instead of losing
+          # the new remote commits. Rerun from the latest head to retry.
+          git push origin "${HEAD}"
+
+      - name: Open or update PR
         if: steps.target.outputs.exists == 'true' && steps.diff.outputs.changed == 'true'
         working-directory: operator
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           BASE: ${{ steps.branches.outputs.base }}
           HEAD: ${{ steps.branches.outputs.head }}
-          SRC_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          git config user.name "konveyor"
-          git config user.email "konveyor@users.noreply.github.com"
-
-          git checkout -b "${HEAD}"
-          git add -A -- helm/templates/crds helm/templates/rbac roles/tackle/templates/agentic bundle
-          git commit -s -m ":seedling: Sync agentic-controller manifests
-
-          Rendered from konveyor/agentic-controller@${SRC_SHA} by
-          hack/sync-operator.sh + make bundle. Do not hand-edit the synced
-          files; re-run the sync instead."
-          git push --force origin "${HEAD}"
-
           existing="$(gh pr list --repo konveyor/operator \
             --head "${HEAD}" --base "${BASE}" --state open \
             --json number --jq '.[0].number // empty')"
           if [ -n "${existing}" ]; then
-            echo "PR #${existing} already open; force-push updated it."
+            echo "PR #${existing} already open; appended the sync commit."
           else
             gh pr create --repo konveyor/operator \
               --base "${BASE}" --head "${HEAD}" \
