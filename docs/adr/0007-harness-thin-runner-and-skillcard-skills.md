@@ -4,12 +4,12 @@ title: "Harness as Thin Single-Stage Runner with SkillCard-Based Skills"
 description: "Defines the harness as a thin, single-stage runner responsible for git lifecycle, skill delivery, and agent runtime lifecycle."
 status: accepted
 date: "2026-07-21"
-last_updated: "2026-09-02"
+last_updated: "2026-11-04"
 authors:
   - "Savitha Raghunathan"
-last_reviewed: "2026-08-31"
+last_reviewed: "2026-11-04"
 implementation_status: amended
-review_note: "Accepted and implemented as the minimal entry point contract. The 2026-08-27 amendment records that it does not create .gitignore or grounding-data commits."
+review_note: "Release 0.11 retains its execution and Git APIs. Hub proxy lookup and shared validation remain strict; unsupported Maven proxy conversion warns and preserves supplied settings without blocking runs. Deployed MTA 8.3 token scopes and image verification remain a release check."
 ---
 
 # ADR 0007: Harness as Thin Single-Stage Runner with SkillCard-Based Skills
@@ -20,6 +20,84 @@ review_note: "Accepted and implemented as the minimal entry point contract. The 
 base image no longer installs `graphifyy`. The stage and image descriptions
 below are retained as historical context where applicable; current planning
 uses repository files and optional Hub analysis results.
+
+**Update (2026-10-28):** Runtime setup resolves enabled Hub HTTP/HTTPS proxies
+and decrypted identities once per invocation for
+[Git proxy inheritance](https://redhat.atlassian.net/browse/MTA-8193) and
+[Maven proxy inheritance](https://redhat.atlassian.net/browse/MTA-8206).
+The controller remains domain-agnostic. Git uses an in-memory HTTP transport
+policy for clone/fetch, write-access discovery and all pushes. Push credentials
+stay in the harness; adopting Hub's complete SCM backend is not required.
+
+Explicit Git proxy environment settings take precedence per scheme. Existing
+Maven user settings and Secret mounts are complete overrides. Proxies are added
+only to generated settings when the Hub Maven credential has no explicit
+proxies section. Keeping the normal user-settings path avoids changing
+Maven/wrapper argument precedence or rewriting supplied files. Generated
+settings are private (`0600`) and outside Git; proxy secrets are redacted from
+diagnostics. A shared hostname/IP/wildcard bypass list prevents Maven's HTTP
+fallback from defeating an HTTPS exclusion. Unsupported inherited exclusion
+forms fail startup instead of being silently ignored.
+
+`HARNESS_HUB_PROXY=off` skips proxy lookup and injection for both tools, retaining
+supplied configuration as an operational workaround. Otherwise proxy lookup or
+credential resolution failures stop startup with an actionable error. These
+rules apply to standalone runs and every workflow stage. See the
+[harness proxy contract](../../harness/README.md#hub-proxy-inheritance) for
+matching semantics, validation and compatibility limits.
+
+**Update (2026-11-02):** The release-0.11 backport includes Maven credential
+setup and proxy inheritance as separate commits. This branch predates the
+Git push-access preflight and handoff-verdict features referenced by the
+main-branch implementation. The backport preserves the release's existing
+execution and Git APIs: proxying covers clone/fetch and all pushes, and Maven
+secrets are redacted from the available handoff-prompt and runtime diagnostics.
+
+**Update (2026-11-03):** Review clarified proxy routing: bare domains bypass
+both themselves and subdomains, leading-dot domains bypass subdomains only,
+and Maven receives equivalent wildcard entries. Git always bypasses
+localhost/loopback. Nonempty lowercase proxy variables apply when uppercase is
+unset or empty. Proxy selection functions are prepared once per startup.
+Username-only credentials and encoded forms are redacted, while short
+placeholder LLM keys retain the existing redaction heuristic.
+
+Exclusion compatibility became tool-specific: Git honors inherited CIDRs and
+port-specific exclusions; Maven validation runs only when generating proxy
+settings, after existing files, Secret mounts, and explicit Hub Maven proxy
+sections have taken precedence. At this point, unsupported Maven exclusions
+and credential interpolation syntax still caused startup failure; the
+November 4 amendment below supersedes that choice.
+
+The Hub `release-0.11` source grants `agentic.harness` the `addon` role, including
+`proxies:get`, `identities:get`, and `identities:decrypt`; see
+[service account](https://github.com/konveyor/tackle2-hub/blob/59f079ecf59bb89e4d51b2831ffaa3784ce41c9f/internal/auth/seed/serviceaccounts.yaml#L6)
+and [role](https://github.com/konveyor/tackle2-hub/blob/59f079ecf59bb89e4d51b2831ffaa3784ce41c9f/internal/auth/seed/roles.yaml#L603).
+This supports retaining strict lookup failures. Deployed MTA 8.3 token and image
+verification remain release checks.
+
+**Update (2026-11-04):** Automatic Maven proxy conversion now warns and
+continues instead of failing startup. When inherited exclusions or credential
+syntax cannot be represented safely, skip the entire automatic Maven proxy
+addition rather than dropping individual entries. Preserve supplied Maven
+settings byte-for-byte, including repository credentials and their redaction;
+without a Maven credential, leave the user settings file absent. Git retains
+its valid proxy policy. This applies to all images without toolchain detection.
+Maven may later use direct/default access and fail at the build step if explicit
+proxy settings are required. Hub lookup/shared validation, malformed supplied
+settings, and filesystem errors retain their existing error handling.
+
+The skipped-proxy warning reaches the console once its ACP connection is
+available and is retained as `mavenProxyWarning` in AgentRun termination data,
+including early setup failures. Short ordinary usernames paired with a password
+use the shared eight-character heuristic; passwords and username-only tokens
+remain masked regardless of length, as do complete credential URLs/userinfo.
+Real Maven 3.9.11 builds verify raw IPv6 proxy hosts and both whole and embedded
+brace passwords. Maven may report failed decryption of brace values while
+retaining the original credential.
+
+Same-day proxy review notes have been consolidated here; the earlier strict
+Maven conversion decision is retained above to make the policy change explicit.
+
 
 ## Context
 

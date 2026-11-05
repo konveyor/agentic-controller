@@ -72,6 +72,22 @@ func (c *Client) FetchGitCreds(appID uint) (*api.Identity, error) {
 	return identity, nil
 }
 
+// FetchMavenCreds retrieves the application's Maven settings credential,
+// falling back to the global default when none is assigned.
+func (c *Client) FetchMavenCreds(appID uint) (*api.Identity, error) {
+	identity, found, err := c.rich.Application.Select(appID).Identity.Decrypted().Search().
+		Direct("maven").
+		Indirect("maven").
+		Find()
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
+	}
+	return identity, nil
+}
+
 // FetchAnalysis retrieves analysis insights for an application.
 // Returns an empty slice (not an error) if no analysis exists.
 func (c *Client) FetchAnalysis(appID uint) ([]api.Insight, error) {

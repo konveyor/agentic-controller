@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"github.com/konveyor/migration-harness/internal/logging"
 	"github.com/konveyor/migration-harness/internal/params"
 	"github.com/konveyor/migration-harness/internal/prompt"
+	"github.com/konveyor/migration-harness/internal/proxy"
 	"github.com/konveyor/migration-harness/internal/tee"
 	"github.com/konveyor/migration-harness/internal/watcher"
 )
@@ -107,6 +109,8 @@ func main() {
 }
 
 func runStage(cmd *cobra.Command, args []string) (code int, err error) {
+	red := newRedactor()
+	var mavenProxyWarning string
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -122,6 +126,13 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		// turn) that a later stage already recorded.
 		if err != nil && term.StopReason == "" {
 			term.StopReason = err.Error()
+		}
+		term.StopReason = red.redact(term.StopReason)
+		term.MavenProxyWarning = red.redact(mavenProxyWarning)
+		if err != nil {
+			if safe := red.redact(err.Error()); safe != err.Error() {
+				err = errors.New(safe)
+			}
 		}
 		writeTerminationLog(terminationLogPath(), term)
 	}()
@@ -172,13 +183,34 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		return 1, fmt.Errorf("hub resolution: %w", err)
 	}
 	// Model text is logged at stage end; whatever it says, the
-	// credentials goose inherits from this environment must not be in it.
-	red := newRedactor(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
+	// credentials goose can read must not be in it. Maven setup adds the
+	// secrets from the effective settings file before goose starts.
+	red = newRedactor(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
 
 	if cfg.TargetBranch == creds.Branch {
 		return 1, fmt.Errorf("TARGET_BRANCH %q must differ from source branch", cfg.TargetBranch)
 	}
 	creds.Branch = cfg.TargetBranch
+
+	var inherited []proxy.Config
+	if cfg.HubProxy {
+		inherited, err = hubClient.FetchProxies()
+		if err != nil {
+			return 1, fmt.Errorf("Hub proxy resolution: %w; set HARNESS_HUB_PROXY=off to use supplied proxy settings", err)
+		}
+	}
+	proxyPolicy, err := proxy.New(inherited, os.LookupEnv)
+	if err != nil {
+		return 1, fmt.Errorf("Hub proxy configuration: %w; set HARNESS_HUB_PROXY=off to use supplied proxy settings", err)
+	}
+	red.addSecrets(proxyPolicy.Secrets()...)
+	restoreGitProxy := git.ConfigureProxy(proxyPolicy.GitProxy)
+	defer restoreGitProxy()
+
+	mavenProxyWarning, err = prepareMavenSettings(hubClient, cfg.AppID, red, proxyPolicy.HubProxies()...)
+	if err != nil {
+		return 1, fmt.Errorf("Maven settings: %w", err)
+	}
 
 	// 3. Clone, strip creds, checkout branch
 	logging.Header("Git Setup")
@@ -401,6 +433,9 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// Workspace prep all happened before the tee existed; publish it as
 	// already done so a viewer's first glance shows the ladder.
 	emitPlan("completed", "pending", "pending")
+	if mavenProxyWarning != "" {
+		emitNotice("%s", red.redact(mavenProxyWarning))
+	}
 
 	// 7. Build prompt from context layers
 	stagePrompt := prompt.Build(prompt.Layers{
@@ -513,7 +548,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			{Type: "text", Text: handoffPromptText},
 		}, cfg.MaxCost)
 		if handoffErr != nil {
-			logging.Warn("handoff prompt: %v — continuing, the limit-reached outcome stands", handoffErr)
+			logging.Warn("handoff prompt: %s — continuing, the limit-reached outcome stands", red.redact(handoffErr.Error()))
 		}
 		if handoffResult != nil {
 			logAgentClosingMessage(handoffResult, red)
@@ -547,7 +582,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			ExitCode:     stageOutcome.exitCode(),
 			Outcome:      stageOutcome.String(),
 			LimitReached: string(limit),
-			StopReason:   primaryResult.StopReason,
+			StopReason:   red.redact(primaryResult.StopReason),
 			Usage:        &u,
 		}
 		if providerRejected {

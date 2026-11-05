@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/konveyor/migration-harness/internal/redaction"
 )
 
 // redactor masks the secrets the harness holds wherever they appear in text
@@ -20,17 +22,13 @@ type redactor struct {
 // by the names the controller, the gateway Secret and the harness use.
 var secretEnvName = regexp.MustCompile(`(?i)(SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|CREDENTIALS)`)
 
-// minSecretLen keeps ids and flags ("7", "true") out of the list: replacing
-// those would mangle ordinary prose.
-const minSecretLen = 8
-
 // newRedactor collects the given values plus every credential-looking
 // variable in the current environment. Build it before the harness clears
 // credentials from its environment, so what goose saw is what gets masked.
 func newRedactor(known ...string) *redactor {
 	var secrets []string
 	add := func(v string) {
-		if len(v) >= minSecretLen && !slices.Contains(secrets, v) {
+		if len(v) >= redaction.MinSecretLen && !slices.Contains(secrets, v) {
 			secrets = append(secrets, v)
 		}
 	}
@@ -48,13 +46,27 @@ func newRedactor(known ...string) *redactor {
 	return &redactor{secrets: secrets}
 }
 
+// addSecrets registers explicit credentials, including short passwords that the
+// environment heuristic would skip, and keeps overlapping values longest first.
+func (r *redactor) addSecrets(secrets ...string) {
+	for _, secret := range secrets {
+		if secret != "" && !slices.Contains(r.secrets, secret) {
+			r.secrets = append(r.secrets, secret)
+		}
+	}
+	slices.SortFunc(r.secrets, func(a, b string) int { return len(b) - len(a) })
+}
+
 // redact returns text with every known secret replaced by "[redacted]".
 func (r *redactor) redact(text string) string {
 	if r == nil {
 		return text
 	}
-	for _, s := range r.secrets {
-		text = strings.ReplaceAll(text, s, "[redacted]")
+	var replacements []string
+	for _, secret := range r.secrets {
+		replacements = append(replacements, secret, "[redacted]")
 	}
-	return text
+	// A single pass prevents short credentials from matching inside a
+	// replacement marker inserted for an earlier secret.
+	return strings.NewReplacer(replacements...).Replace(text)
 }
