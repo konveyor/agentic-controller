@@ -257,6 +257,53 @@ func TestParsePlanVerification(t *testing.T) {
 			},
 		},
 		{
+			// A fenced block nested under a prose line is part of those
+			// manual steps, not an unreadable automated check: the plan
+			// skill asks for Blackbox as steps to run by hand, and a model
+			// that illustrates one with a snippet has still written a
+			// manual-only section. Reporting the fence here made such a
+			// section `incomplete` and failed the stage under enforcement
+			// for containing a code block.
+			name: "a fence nested under Blackbox belongs to its manual steps",
+			content: "## Verification\n- Blackbox: start the app and check the page\n" +
+				"  ```bash\n  npm start\n  ```\n- Test: none\n",
+			wantFound: true,
+			wantSteps: []planStep{
+				{Label: "Blackbox", Skip: "manual steps, not a command the harness can run or score"},
+				{Label: "Test", Skip: "the plan names no command here"},
+			},
+		},
+		{
+			// A fence at the section's own indentation is the section's,
+			// whatever list sits above it.
+			name: "a fence beside the list is the section's own",
+			content: "## Verification\n- Blackbox: start the app\n" +
+				"```bash\nnpm run tsc -w client\n```\n",
+			wantFound: true,
+			wantFence: "```bash",
+			wantSteps: []planStep{
+				{Label: "Blackbox", Skip: "manual steps, not a command the harness can run or score"},
+			},
+		},
+		{
+			// Punctuation inside a quoted argument is a string passed to a
+			// program, not sentence structure. Skipping these commands let
+			// a section whose other command passed verdict `passed` over a
+			// check that never ran — unearned green, the worse direction
+			// for this heuristic to be wrong in.
+			name: "quoted punctuation does not make a command prose",
+			content: "## Verification\n- Artifact: test -f required-artifact && echo 'Build passed.'\n" +
+				"- Greet: echo 'Done. Next step.'\n- Inner: sh -c \"echo done. bye\"\n" +
+				"- Sub: test -n \"$(ls -A dist)\"\n",
+			wantFound: true,
+			wantSteps: []planStep{
+				{Label: "Artifact", Command: "test -f required-artifact && echo 'Build passed.'"},
+				{Label: "Greet", Command: "echo 'Done. Next step.'"},
+				{Label: "Inner", Command: `sh -c "echo done. bye"`},
+				{Label: "Sub", Command: `test -n "$(ls -A dist)"`},
+			},
+		},
+		{
 			// The prose heuristic must not eat real commands: a dot in a
 			// path, a `./...` package pattern, a `--` separator.
 			name: "commands that contain dots are still commands",
@@ -425,6 +472,16 @@ func TestRunPlanVerificationNotRun(t *testing.T) {
 			wantReason: "names no command to run",
 		},
 		{
+			// Must stay notRun: a manual-only section does not become an
+			// unreadable one by illustrating a step with a code block.
+			name: "a Blackbox section whose manual steps include a fenced snippet",
+			setup: func(t *testing.T) (string, *gogit.Repository) {
+				return writePlan(t, "## Verification\n- Blackbox: start the app and check the page\n"+
+					"  ```bash\n  npm start\n  ```\n- Test: none\n")
+			},
+			wantReason: "names no command to run",
+		},
+		{
 			name: "a Verification section whose only line is a Blackbox paragraph",
 			setup: func(t *testing.T) (string, *gogit.Repository) {
 				return writePlan(t, "## Verification\n- Blackbox: start the app with npm run start:dev "+
@@ -501,6 +558,31 @@ func TestRunPlanVerificationIncompleteWhenThePlansCommandsAreUnreadable(t *testi
 	}
 }
 
+// TestRunPlanVerificationRunsAChecksQuotedPunctuation is the false pass the
+// prose heuristic first allowed. `test -f required-artifact && echo 'Build
+// passed.'` is a real check; read as prose it was skipped, and the section's
+// other command passing then verdicted the whole pass `passed` over a
+// missing artefact. A skipped command is the worse way for the heuristic to
+// be wrong, because the gap renders as green.
+func TestRunPlanVerificationRunsAChecksQuotedPunctuation(t *testing.T) {
+	requireShell(t)
+	dir, repo := writePlan(t, "## Verification\n- Build: true\n"+
+		"- Artifact: test -f required-artifact && echo 'Build passed.'\n")
+
+	v := runPlan(context.Background(), dir, repo, time.Minute, newRedactor())
+
+	if v.Status != verificationFailed {
+		t.Fatalf("status = %q (reason %q), want %q — the artefact is missing and the check must run",
+			v.Status, v.Reason, verificationFailed)
+	}
+	if len(v.Commands) != 2 {
+		t.Fatalf("got %d commands %+v, want 2", len(v.Commands), v.Commands)
+	}
+	if v.Commands[1].Status != verifyStepFailed {
+		t.Errorf("the artefact check recorded %+v, want it run and failed", v.Commands[1])
+	}
+}
+
 // TestClassifyVerifyItemNeverRunsProse pins the shapes that must not reach
 // `sh -c`, and the ones that must still get there.
 func TestClassifyVerifyItemNeverRunsProse(t *testing.T) {
@@ -545,6 +627,26 @@ func TestClassifyVerifyItemNeverRunsProse(t *testing.T) {
 			label:       "Typecheck",
 			value:       "npm run tsc -w client",
 			wantCommand: "npm run tsc -w client",
+		},
+		{
+			// A skipped command is worse than a wrongly-run prose line: it
+			// leaves a `passed` verdict over a check that never ran.
+			name:        "a check whose quoted argument ends a sentence",
+			label:       "Artifact",
+			value:       "test -f required-artifact && echo 'Build passed.'",
+			wantCommand: "test -f required-artifact && echo 'Build passed.'",
+		},
+		{
+			name:        "a command substitution",
+			label:       "Dist",
+			value:       `test -n "$(ls -A dist)"`,
+			wantCommand: `test -n "$(ls -A dist)"`,
+		},
+		{
+			name:        "an either-or shell operator",
+			label:       "Build",
+			value:       "mvn -q verify || mvn -q -X verify",
+			wantCommand: "mvn -q verify || mvn -q -X verify",
 		},
 	}
 

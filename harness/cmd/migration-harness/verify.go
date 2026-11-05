@@ -219,6 +219,15 @@ var (
 	// where no letter precedes it — while a sentence always does. See
 	// verifyLooksLikeProse.
 	verifySentence = regexp.MustCompile(`[A-Za-z][.!?]["')]?(\s+[A-Z]|$)`)
+	// verifyQuoted matches a single- or double-quoted span, whose contents
+	// are an argument the shell passes along rather than anything the
+	// sentence test should read: `echo 'Build passed.'` is a command.
+	verifyQuoted = regexp.MustCompile(`'[^']*'|"[^"]*"`)
+	// verifyShellOperator matches shell syntax that settles the question on
+	// its own. No English sentence carries `&&`, `||` or a command
+	// substitution, so a value holding one is shell whatever its
+	// punctuation looks like.
+	verifyShellOperator = regexp.MustCompile(`&&|\|\||\$\(`)
 )
 
 // verifyProseLabels are the Verification labels that name manual steps
@@ -683,10 +692,20 @@ func parsePlanVerification(content string) planVerification {
 	for _, entry := range handoffProseLines(content) {
 		if entry.Fence {
 			// A dropped block. Its contents are not read; the first one
-			// inside the section is remembered so the verdict can say the
-			// section's content was unreadable rather than absent.
-			if inSection && parsed.Fence == "" {
-				parsed.Fence = entry.Text
+			// that belongs to the section itself is remembered so the
+			// verdict can say the section's content was unreadable rather
+			// than absent.
+			//
+			// A block nested under an open prose line is NOT one of those.
+			// The plan skill specifies Blackbox as "steps to start the app
+			// and verify key business flows still work", and a model that
+			// illustrates a step with a fenced snippet is still writing
+			// manual steps — the indentation says so, exactly as it does
+			// for a nested item (see proseChild). Recording that fence made
+			// a manual-only section report incomplete and, under
+			// enforcement, fail the stage for containing a code block.
+			if inSection && parsed.Fence == "" && !nestedUnderProse(entry.Text, proseIndent) {
+				parsed.Fence = strings.TrimSpace(entry.Text)
 			}
 			continue
 		}
@@ -761,6 +780,14 @@ func proseChild(label, parent string) planStep {
 	}
 }
 
+// nestedUnderProse reports whether a line sits inside the sub-block of an
+// open prose list item: the same indentation test the parser applies to a
+// nested item, applied to a fenced block. proseIndent is -1 when no prose
+// line is open, and then nothing is nested.
+func nestedUnderProse(line string, proseIndent int) bool {
+	return proseIndent >= 0 && itemIndent(line) > proseIndent
+}
+
 // itemIndent is the visual indentation of a list item, counting a tab as four
 // columns so a tab-indented sub-bullet nests like a space-indented one.
 func itemIndent(line string) int {
@@ -833,19 +860,32 @@ func verifyFirstWord(value string) string {
 // sentence rather than a command.
 //
 // The length guard above catches a paragraph; this catches the short
-// sentence that fits under it. The test is a sentence boundary (verifySentence)
-// in a value of more than one word: a command is a program and its arguments,
-// and does not end a word with a full stop or run two capitalised sentences
-// together. It is a heuristic and it is deliberately one-sided — a value it
-// misreads is recorded as a skip naming its reason, which a reader can see
-// and act on, where the miss in the other direction is a sentence of English
-// handed to a shell and `command not found` recorded as a measurement of the
-// tree (#336).
+// sentence that fits under it. The test is a sentence boundary
+// (verifySentence) in a value of more than one word: a command is a program
+// and its arguments, and does not end a word with a full stop or run two
+// capitalised sentences together.
+//
+// It is a heuristic, and the two ways it can be wrong are not symmetric. A
+// line of prose misread as a command runs, exits non-zero and verdicts the
+// stage `failed` — bogus evidence, loudly. A COMMAND misread as prose is
+// skipped, and a section whose other commands pass then verdicts `passed`
+// over a check that never ran: unearned green, which is the failure mode
+// this whole file exists to remove. So the test fires only on unmistakable
+// prose, and anything that carries a mark of shell is a command:
+//
+//   - a shell operator anywhere in the value (verifyShellOperator), and
+//   - punctuation inside a quoted argument, which is a string being passed
+//     to a program, not sentence structure. `test -f required-artifact &&
+//     echo 'Build passed.'` is a real check, and skipping it let a missing
+//     artefact pass.
 func verifyLooksLikeProse(value string) bool {
 	if !strings.ContainsAny(value, " \t") {
 		return false
 	}
-	return verifySentence.MatchString(value)
+	if verifyShellOperator.MatchString(value) {
+		return false
+	}
+	return verifySentence.MatchString(verifyQuoted.ReplaceAllString(value, " "))
 }
 
 // notRun builds the recorded "nothing was measured" result. It carries a

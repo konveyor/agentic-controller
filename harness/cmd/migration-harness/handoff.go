@@ -178,8 +178,9 @@ func handoffProse(content string) []string {
 // fenced block covered, or the place where a fenced block was dropped.
 type proseLine struct {
 	// Text is the line itself, or, for a dropped block, its opening fence
-	// line including any info string, trimmed — so a reader can tell a
-	// ```bash block from a quoted ```markdown template.
+	// line as written: the info string says whether the block held shell
+	// commands or a quoted ```markdown template, and the indentation says
+	// whether the block was nested under a list item above it.
 	Text string
 	// Fence marks this entry as a removed block rather than prose. A
 	// reader that wants only prose drops these (handoffProse); a reader
@@ -207,7 +208,7 @@ func handoffProseLines(content string) []proseLine {
 		case fence == "":
 			if marker != nil {
 				fence = marker[1]
-				prose = append(prose, proseLine{Text: strings.TrimSpace(line), Fence: true})
+				prose = append(prose, proseLine{Text: line, Fence: true})
 				continue
 			}
 			prose = append(prose, proseLine{Text: line})

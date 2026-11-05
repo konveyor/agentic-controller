@@ -335,6 +335,12 @@ outside one is reported as `incomplete`, naming the block, rather than as
 "nothing to measure". The commands have to be list items for the harness to run
 them.
 
+A fence **nested under a prose line** is the exception: the plan skill asks for
+Blackbox as steps to run by hand, and a model that illustrates one with a
+snippet has still written a manual-only section. The indentation says so,
+exactly as it does for a nested item, so that block is not reported and such a
+section stays `notRun` instead of failing a stage for containing a code block.
+
 What is **not** run, recorded line by line with a reason rather than dropped:
 
 - **Blackbox** (and `Manual`, `Notes`, `Steps`) — prose steps for a person,
@@ -360,6 +366,17 @@ What is **not** run, recorded line by line with a reason rather than dropped:
   found` as that tree's verification result. A command is a program and its
   arguments; it does not end a word with a full stop, which is why `go test
   ./...`, `find . -name x` and `. ./scripts/env.sh && npm test` are still run.
+
+  The two ways this heuristic can be wrong are **not symmetric**, and it is
+  tuned accordingly. Prose misread as a command runs, exits non-zero and
+  verdicts the stage `failed` — bogus evidence, loudly. A command misread as
+  prose is skipped, and a section whose other commands pass then verdicts
+  `passed` over a check that never ran: unearned green, the failure mode this
+  file exists to remove. So anything carrying a mark of shell is a command — a
+  shell operator (`&&`, `||`, `$(`) anywhere in the value, and punctuation
+  inside a quoted argument, which is a string being passed to a program rather
+  than sentence structure. `test -f required-artifact && echo 'Build passed.'`
+  is a real check and runs.
 
 **A pass must be measured, never assumed.** `verification.status` is one of
 four values, and the difference between the last two is the point:
