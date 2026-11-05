@@ -197,17 +197,14 @@ jobs:
             git diff --cached --stat -- helm/templates/crds helm/templates/rbac roles/tackle/templates/agentic bundle
           fi
 
-      - name: Push branch and open/update PR
+      - name: Push sync commit
         if: steps.target.outputs.exists == 'true' && steps.diff.outputs.changed == 'true'
         working-directory: operator
         env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
-          BASE: ${{ steps.branches.outputs.base }}
           HEAD: ${{ steps.branches.outputs.head }}
           SRC_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          git add -A -- helm/templates/crds helm/templates/rbac roles/tackle/templates/agentic bundle
           git commit -s -m ":seedling: Sync agentic-controller manifests
 
           Rendered from konveyor/agentic-controller@${SRC_SHA} by
@@ -217,6 +214,15 @@ jobs:
           # the new remote commits. Rerun from the latest head to retry.
           git push origin "${HEAD}"
 
+      - name: Open or update PR
+        if: steps.target.outputs.exists == 'true' && steps.diff.outputs.changed == 'true'
+        working-directory: operator
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          BASE: ${{ steps.branches.outputs.base }}
+          HEAD: ${{ steps.branches.outputs.head }}
+        run: |
+          set -euo pipefail
           existing="$(gh pr list --repo konveyor/operator \
             --head "${HEAD}" --base "${BASE}" --state open \
             --json number --jq '.[0].number // empty')"
