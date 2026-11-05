@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -553,5 +554,115 @@ func TestGitWriteAccessPrefixIsVerbatim(t *testing.T) {
 	// The UI keys off this literal; a reword silently breaks it.
 	if gitWriteAccessPrefix != "git write access:" {
 		t.Errorf("gitWriteAccessPrefix = %q, want %q", gitWriteAccessPrefix, "git write access:")
+	}
+}
+
+// --- promptFailureDetail (#323) ---
+
+func rpcPromptError(code int, data string) error {
+	e := &acp.RPCError{Code: code, Message: "Authentication required"}
+	if data != "" {
+		e.Data = json.RawMessage(data)
+	}
+	return fmt.Errorf("prompt error %d: %w", code, e)
+}
+
+func TestPromptFailureDetailNoError(t *testing.T) {
+	called := false
+	got := promptFailureDetail(nil, newRedactor(), func() string {
+		called = true
+		return "ERROR goose: something"
+	})
+	if got != "" {
+		t.Errorf("promptFailureDetail(nil) = %q, want \"\"", got)
+	}
+	if called {
+		t.Error("goose's stdio was read for a call that did not fail")
+	}
+}
+
+// goose sent the cause in the error's data field, so the error already
+// says why and nothing should pay the wait on goose's stdio (#170).
+func TestPromptFailureDetailKeepsTheErrorsOwnData(t *testing.T) {
+	called := false
+	got := promptFailureDetail(rpcPromptError(-32603, `"Error getting agent reply: Provider not set"`),
+		newRedactor(), func() string {
+			called = true
+			return "ERROR goose: a line nobody should need"
+		})
+	if !strings.Contains(got, "Provider not set") {
+		t.Errorf("promptFailureDetail = %q, want it to carry the error's data", got)
+	}
+	if called {
+		t.Error("goose's stdio was read although the error carried its own cause")
+	}
+	if strings.Contains(got, "nobody should need") {
+		t.Errorf("promptFailureDetail = %q, want the error's own data to stand alone", got)
+	}
+}
+
+// The #323 case: -32000 "Authentication required" with no data, and the
+// provider's real sentence only on goose's stdio.
+func TestPromptFailureDetailRecoversTheProvidersSentence(t *testing.T) {
+	line := "ERROR goose::providers::bedrock: AccessDeniedException: User: " +
+		"arn:aws:iam::123456789012:user/agentic is not authorized to perform " +
+		"bedrock:InvokeModelWithResponseStream on the inference profile us.anthropic.claude-sonnet-4-5"
+	got := promptFailureDetail(rpcPromptError(-32000, ""), newRedactor(), func() string { return line })
+
+	if !strings.Contains(got, "Authentication required") {
+		t.Errorf("promptFailureDetail = %q, want it to keep what the error said", got)
+	}
+	for _, want := range []string{"AccessDeniedException", "not authorized", "bedrock:InvokeModelWithResponseStream"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("promptFailureDetail = %q, want it to name %q", got, want)
+		}
+	}
+}
+
+func TestPromptFailureDetailWhenGooseLoggedNothing(t *testing.T) {
+	got := promptFailureDetail(rpcPromptError(-32000, ""), newRedactor(), func() string { return "" })
+	if got != "prompt error -32000: Authentication required" {
+		t.Errorf("promptFailureDetail = %q, want the error's own text alone", got)
+	}
+}
+
+func TestPromptFailureDetailWithoutALookup(t *testing.T) {
+	got := promptFailureDetail(rpcPromptError(-32000, ""), newRedactor(), nil)
+	if got != "prompt error -32000: Authentication required" {
+		t.Errorf("promptFailureDetail = %q, want the error's own text alone", got)
+	}
+}
+
+// A dropped connection carries no data either, and goose logs why it
+// died on the same stdio.
+func TestPromptFailureDetailConsultsGooseForANonRPCError(t *testing.T) {
+	got := promptFailureDetail(fmt.Errorf("send prompt: %w", acp.ErrConnectionLost), newRedactor(),
+		func() string { return "ERROR goose: provider stream closed by peer" })
+	if !strings.Contains(got, "provider stream closed by peer") {
+		t.Errorf("promptFailureDetail = %q, want goose's own reason appended", got)
+	}
+}
+
+// Whatever goose logged goes to the AgentRun's status and the
+// termination log, so it is redacted on the way like every other path.
+func TestPromptFailureDetailRedactsTheGooseLine(t *testing.T) {
+	const secret = "aws-secret-access-key-value-0123456789"
+	got := promptFailureDetail(rpcPromptError(-32000, ""), newRedactor(secret),
+		func() string { return "ERROR goose: rejected credential " + secret + " for bedrock" })
+	if strings.Contains(got, secret) {
+		t.Errorf("promptFailureDetail = %q, want the credential redacted", got)
+	}
+	if !strings.Contains(got, "[redacted]") {
+		t.Errorf("promptFailureDetail = %q, want the redaction marker", got)
+	}
+}
+
+// providerErrorSummary cuts the line for display, and it is the only
+// thing bounding what reaches a 4096-byte termination log from here.
+func TestPromptFailureDetailBoundsAnEnormousGooseLine(t *testing.T) {
+	got := promptFailureDetail(rpcPromptError(-32000, ""), newRedactor(),
+		func() string { return "ERROR goose: " + strings.Repeat("x", 10_000) })
+	if n := utf8.RuneCountInString(got); n > providerErrorSummaryLen+100 {
+		t.Errorf("promptFailureDetail is %d runes, want it cut near %d", n, providerErrorSummaryLen)
 	}
 }

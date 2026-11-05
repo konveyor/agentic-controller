@@ -553,9 +553,17 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			emitPlan("completed", "in_progress", "pending")
 		}
 	})
+	// Sent-at is the floor on the search of goose's stdio for the reason a
+	// failed call does not carry (#323): an error goose logged before this
+	// prompt belongs to something else.
+	promptSentAt := time.Now()
 	primaryResult, err := session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
 		{Type: "text", Text: stagePrompt},
 	}, cfg.CostLimit)
+	// When the call came back, which is what a goose error line has to be
+	// near to be about it. Taken before anything else runs, so the
+	// measurement is of the call and not of the work below it.
+	promptReturnedAt := time.Now()
 	if primaryResult != nil {
 		turnBase = primaryResult.TurnsUsed
 		turnsSeen.Store(int64(turnBase))
@@ -587,8 +595,15 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	case viewerCancelled:
 		logging.Warn("run cancelled by an attached viewer")
 	}
+	// What the failure was, with the provider's own sentence recovered
+	// from goose's stdio when the ACP error did not carry one (#323).
+	// Built once: it is what the log, the viewer, the termination blob
+	// and the returned error all say.
+	promptDetail := promptFailureDetail(err, red, func() string {
+		return srv.ProviderError(promptSentAt, promptReturnedAt, goose.ProviderErrorGrace)
+	})
 	if err != nil {
-		logging.Err("prompt failed: %s", red.redact(err.Error()))
+		logging.Err("prompt failed: %s", promptDetail)
 	}
 	// Tell the people watching in words they can act on: the console
 	// viewer has no pod log, but the provider's own error names the fix.
@@ -597,6 +612,10 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		emitNotice("the model provider rejected the call — no work was done: %s", providerSummary)
 	case providerErr:
 		emitNotice("the model provider rejected a call after %d turns: %s", primaryResult.TurnsUsed, providerSummary)
+	case err != nil && stageOutcome == outcomeFailed:
+		// A call that never came back has no closing message to read, so
+		// without this the viewer was told "stage failed" and nothing else.
+		emitNotice("the model call failed: %s", promptDetail)
 	}
 
 	// 9b. One-shot handoff prompt when a limit was reached (ADR 0011).
@@ -764,6 +783,16 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			Verification: verified,
 		}
 	}
+	// A failed call outranks whatever stopReason the partial result
+	// carried: the turn did not end, it was cut off, and this is the only
+	// field the documented blob schema has for saying why. Left alone
+	// where a more specific reason was just set above, and where the
+	// failure was goose dropping the connection at its native turn
+	// ceiling — that is a limit, not a provider error, and
+	// limitReached already records it.
+	if err != nil && stageOutcome == outcomeFailed && !providerRejected && !enforceVerify {
+		term.StopReason = "prompt failed: " + promptDetail
+	}
 
 	// 14. Final push (use a fresh context — the signal context may
 	// already be cancelled after SIGINT)
@@ -861,6 +890,12 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		case enforceVerify:
 			emitOutcome("stage failed — the harness's own verification %s (%s); no commits to push",
 				verified.Status, verified.Reason)
+		// Ordered after enforcement to match the returned error below:
+		// one failure, told the same way in both places.
+		case err != nil && pushed:
+			emitOutcome("stage failed — the model call failed (%s); partial work pushed to branch %s", promptDetail, creds.Branch)
+		case err != nil:
+			emitOutcome("stage failed — the model call failed: %s", promptDetail)
 		case pushed:
 			emitOutcome("stage failed — partial work pushed to branch %s", creds.Branch)
 		default:
@@ -877,6 +912,12 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		if enforceVerify {
 			logging.Err("stage failed: verification %s — %s", verified.Status, verified.Reason)
 			return 1, fmt.Errorf("stage failed: verification %s: %s", verified.Status, verified.Reason)
+		}
+		if err != nil {
+			// The reason reaches the AgentRun through this error, not only
+			// the pod log it used to stop at (#323).
+			logging.Err("stage failed: the model call failed — %s", promptDetail)
+			return 1, fmt.Errorf("stage failed: prompt failed: %s", promptDetail)
 		}
 		logging.Err("stage failed")
 		return 1, fmt.Errorf("stage failed")

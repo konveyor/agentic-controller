@@ -22,6 +22,7 @@ type ServeProcess struct {
 	secretKey string
 	done      chan struct{}
 	tempDirs  []string
+	output    *outputCapture
 }
 
 const (
@@ -105,8 +106,13 @@ func StartServe(ctx context.Context, cfg ServeConfig) (*ServeProcess, error) {
 		env = append(env, "GOOSE_SERVER__SECRET_KEY="+secretKey)
 	}
 	cmd.Env = env
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	// One capture across both streams, so the order the process wrote its
+	// lines in is the order they are read back. Everything still reaches
+	// the pod log exactly as before; the capture only keeps a copy of the
+	// error lines, for ProviderError (#323).
+	output := newOutputCapture(os.Stderr)
+	cmd.Stdout = output
+	cmd.Stderr = output
 
 	if err := cmd.Start(); err != nil {
 		for _, d := range tempDirs {
@@ -121,6 +127,7 @@ func StartServe(ctx context.Context, cfg ServeConfig) (*ServeProcess, error) {
 		secretKey: secretKey,
 		done:      make(chan struct{}),
 		tempDirs:  tempDirs,
+		output:    output,
 	}
 
 	go func() {
@@ -141,6 +148,65 @@ func (s *ServeProcess) Port() int {
 func (s *ServeProcess) SecretKey() string {
 	return s.secretKey
 }
+
+// ProviderError returns the error line goose logged for the model call
+// that just failed, or "" when it logged none. Callers use it to name why
+// the call failed when the ACP error itself does not (#323).
+//
+// failedAt is when the call came back failed, and the line that explains
+// it is logged within a moment of that — so within bounds the search in
+// both directions: how long to wait for a line still in flight, and how
+// far back a line may already have been read. notBefore is a hard floor
+// on top of that, so nothing from before this prompt is ever reported.
+//
+// The wait is there because the two paths race: the JSON-RPC error
+// arrives over the websocket, while goose's stdio reaches the harness
+// through os/exec's copier goroutine, so the response is often handled
+// before the line it explains has been read.
+//
+// What the wait must not do is end early on a line that was already
+// there. A stage prompt runs many turns, and goose logs an error for a
+// recoverable tool failure too; returning one of those the moment the
+// call fails would hand the viewer and the termination log an error from
+// earlier in the run as the reason for this one, without ever waiting for
+// the real one racing over stdio. So only a line read after the failure
+// ends the wait early — the provider's own text is logged before goose's
+// wrapping of it, which makes the first such line the most specific one
+// available. Otherwise the full grace is spent, and the newest line
+// inside the window is the answer, "" included. That costs a second on a
+// run that has already failed, and buys an answer that is about the
+// failure.
+func (s *ServeProcess) ProviderError(notBefore, failedAt time.Time, within time.Duration) string {
+	if s.output == nil {
+		return ""
+	}
+	floor := failedAt.Add(-within)
+	if floor.Before(notBefore) {
+		floor = notBefore
+	}
+	deadline := time.Now().Add(within)
+	for {
+		line, at := s.output.lastErrorSince(floor)
+		if line != "" && at.After(failedAt) {
+			return line
+		}
+		if !time.Now().Before(deadline) {
+			return line
+		}
+		time.Sleep(providerErrorPollInterval)
+	}
+}
+
+// ProviderErrorGrace is how long ProviderError should be given to pick up
+// the line explaining a failure the ACP error left unexplained, and how
+// far before the failure a line may have been read; providerErrorPollInterval
+// is how often it looks. A second is far longer than the copier goroutine
+// needs, and short enough that a recoverable error from earlier in the
+// stage is not mistaken for the reason this call failed.
+const (
+	ProviderErrorGrace        = time.Second
+	providerErrorPollInterval = 20 * time.Millisecond
+)
 
 // Alive returns true if the goose serve process is still running.
 func (s *ServeProcess) Alive() bool {

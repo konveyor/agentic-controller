@@ -1,0 +1,8 @@
+kind: bugfix
+description: >
+  Say why a model call failed, in the provider's own words. A rejected call
+  reached the user as "Authentication required" with the provider's actual
+  error only in the pod log, which nothing reads and which goes away with the
+  pod. The harness now keeps the error lines the agent runtime logs and reports
+  the reason on the run's outcome, so a run that failed because the provider
+  refused says so.
