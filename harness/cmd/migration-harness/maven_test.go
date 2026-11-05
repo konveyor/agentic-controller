@@ -26,6 +26,10 @@ func TestRunStagePreparesMavenSettings(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/proxies" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		if r.URL.Path == "/applications/42" {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": 42, "name": "maven-app",
@@ -117,7 +121,7 @@ func TestPrepareMavenSettingsWithoutUsableCredential(t *testing.T) {
 			}))
 			defer server.Close()
 
-			err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor())
+			_, err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor())
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("no Maven credential should retain Maven defaults: %v", err)
@@ -159,7 +163,7 @@ func TestPrepareMavenSettingsPreservesExistingFile(t *testing.T) {
 			}))
 			defer server.Close()
 
-			if err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor()); err != nil {
+			if _, err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor()); err != nil {
 				t.Fatal(err)
 			}
 			data, err := os.ReadFile(path)
@@ -192,7 +196,7 @@ func TestPrepareMavenSettingsRejectsInvalidPath(t *testing.T) {
 			} else if err := os.WriteFile(path, []byte("not a directory"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := prepareMavenSettings(nil, "42", newRedactor()); err == nil {
+			if _, err := prepareMavenSettings(nil, "42", newRedactor()); err == nil {
 				t.Fatal("expected a filesystem error before fetching a credential")
 			}
 		})
@@ -224,7 +228,7 @@ func TestPrepareMavenSettingsRejectsBrokenSymlink(t *testing.T) {
 			}))
 			defer server.Close()
 
-			err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor())
+			_, err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor())
 			wantErr := "inspect Maven user settings"
 			if targetDirectory {
 				wantErr = "not a regular file"
@@ -341,7 +345,7 @@ func TestPrepareMavenSettingsDoesNotOverwriteConcurrentFile(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor())
+	_, err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor())
 	if !errors.Is(err, os.ErrExist) {
 		t.Fatalf("error = %v, want an exclusive-creation failure", err)
 	}

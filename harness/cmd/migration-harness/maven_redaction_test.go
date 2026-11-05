@@ -57,7 +57,7 @@ func TestPrepareMavenSettingsRedactsCredentials(t *testing.T) {
 			defer server.Close()
 
 			red := newRedactor("git-token-value")
-			if err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", red); err != nil {
+			if _, err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", red); err != nil {
 				t.Fatal(err)
 			}
 			// Closing messages, provider errors, notices, and plan excerpts
@@ -101,7 +101,7 @@ func TestPrepareMavenSettingsRejectsUnredactableXML(t *testing.T) {
 				_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 7, "settings": settings}})
 			}))
 			defer server.Close()
-			err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor())
+			_, err := prepareMavenSettings(hub.NewClient(server.URL, "token"), "42", newRedactor())
 			if err == nil {
 				t.Fatal("settings that cannot be parsed for secret redaction must stop setup")
 			}

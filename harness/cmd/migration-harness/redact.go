@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/konveyor/migration-harness/internal/redaction"
 )
 
 // redactor masks the secrets the harness holds wherever they appear in text
@@ -20,17 +22,13 @@ type redactor struct {
 // by the names the controller, the gateway Secret and the harness use.
 var secretEnvName = regexp.MustCompile(`(?i)(SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|CREDENTIALS)`)
 
-// minSecretLen keeps ids and flags ("7", "true") out of the list: replacing
-// those would mangle ordinary prose.
-const minSecretLen = 8
-
 // newRedactor collects the given values plus every credential-looking
 // variable in the current environment. Build it before the harness clears
 // credentials from its environment, so what goose saw is what gets masked.
 func newRedactor(known ...string) *redactor {
 	var secrets []string
 	add := func(v string) {
-		if len(v) >= minSecretLen && !slices.Contains(secrets, v) {
+		if len(v) >= redaction.MinSecretLen && !slices.Contains(secrets, v) {
 			secrets = append(secrets, v)
 		}
 	}

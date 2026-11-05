@@ -28,6 +28,7 @@ import (
 	"github.com/konveyor/migration-harness/internal/logging"
 	"github.com/konveyor/migration-harness/internal/params"
 	"github.com/konveyor/migration-harness/internal/prompt"
+	"github.com/konveyor/migration-harness/internal/proxy"
 	"github.com/konveyor/migration-harness/internal/tee"
 	"github.com/konveyor/migration-harness/internal/watcher"
 )
@@ -109,6 +110,8 @@ func main() {
 }
 
 func runStage(cmd *cobra.Command, args []string) (code int, err error) {
+	red := newRedactor()
+	var mavenProxyWarning string
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -124,6 +127,13 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		// turn) that a later stage already recorded.
 		if err != nil && term.StopReason == "" {
 			term.StopReason = err.Error()
+		}
+		term.StopReason = red.redact(term.StopReason)
+		term.MavenProxyWarning = red.redact(mavenProxyWarning)
+		if err != nil {
+			if safe := red.redact(err.Error()); safe != err.Error() {
+				err = errors.New(safe)
+			}
 		}
 		writeTerminationLog(terminationLogPath(), term)
 	}()
@@ -176,14 +186,30 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// Model text is logged at stage end; whatever it says, the
 	// credentials goose can read must not be in it. Maven setup adds the
 	// secrets from the effective settings file before goose starts.
-	red := newRedactor(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
+	red = newRedactor(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
 
 	if cfg.TargetBranch == creds.Branch {
 		return 1, fmt.Errorf("TARGET_BRANCH %q must differ from source branch", cfg.TargetBranch)
 	}
 	creds.Branch = cfg.TargetBranch
 
-	if err := prepareMavenSettings(hubClient, cfg.AppID, red); err != nil {
+	var inherited []proxy.Config
+	if cfg.HubProxy {
+		inherited, err = hubClient.FetchProxies()
+		if err != nil {
+			return 1, fmt.Errorf("Hub proxy resolution: %w; set HARNESS_HUB_PROXY=off to use supplied proxy settings", err)
+		}
+	}
+	proxyPolicy, err := proxy.New(inherited, os.LookupEnv)
+	if err != nil {
+		return 1, fmt.Errorf("Hub proxy configuration: %w; set HARNESS_HUB_PROXY=off to use supplied proxy settings", err)
+	}
+	red.addSecrets(proxyPolicy.Secrets()...)
+	restoreGitProxy := git.ConfigureProxy(proxyPolicy.GitProxy)
+	defer restoreGitProxy()
+
+	mavenProxyWarning, err = prepareMavenSettings(hubClient, cfg.AppID, red, proxyPolicy.HubProxies()...)
+	if err != nil {
 		return 1, fmt.Errorf("Maven settings: %w", err)
 	}
 
@@ -470,6 +496,9 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// Workspace prep all happened before the tee existed; publish it as
 	// already done so a viewer's first glance shows the ladder.
 	emitPlan("completed", "pending", "pending")
+	if mavenProxyWarning != "" {
+		emitNotice("%s", red.redact(mavenProxyWarning))
+	}
 
 	// 7. Build prompt from context layers
 	stagePrompt := prompt.Build(prompt.Layers{
@@ -641,6 +670,63 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// 12. Stop watcher before final push
 	w.Stop()
 
+	// 12b. The harness's own verdict (#300). Step 11b read what the stage
+	// SAYS about its work; this measures it, by running the commands the
+	// plan's own `## Verification` section names and recording their exit
+	// codes. Run after the watcher stops so build artefacts do not wake it,
+	// and before the push, so the record describes the tree that lands on
+	// the branch.
+	//
+	// Only a turn that earned success is measured: a crash, a limit or a
+	// refusal already says the stage did not finish, and spending a build
+	// to confirm it buys nothing. Those record the reason instead, because
+	// an absent verification reads as a pass.
+	var verified *verification
+	switch {
+	case !cfg.Verify:
+		verified = notRun("disabled (HARNESS_VERIFY=off)")
+	case stageOutcome != outcomeSucceeded:
+		verified = notRun("stage outcome %s — the harness verifies a turn that claims success", stageOutcome)
+	default:
+		// creds.Branch, not HEAD: the branch is what the final push sends
+		// (#281), so it is the only commit a result may claim to describe.
+		verified = runPlanVerification(ctx, repo, cloneDir, creds.Branch, cfg.VerifyTimeout, cfg.VerifyTotalTimeout, red)
+	}
+	// Measured on every stage; acted on only where the plan's verification
+	// is meant to hold by now. See enforceVerification.
+	enforceVerify := enforceVerification(cfg, verified)
+	if verified.unmet() {
+		// The console viewer has no pod log; this is the only place a
+		// person watching is told the tree does not do what it claims, or
+		// that part of it went unchecked.
+		if verified.failed() {
+			emitNotice("the harness re-ran the plan's verification commands and one failed — %s", verified.Reason)
+		} else {
+			emitNotice("the harness could not finish verifying this stage — %s", verified.Reason)
+		}
+		switch {
+		case enforceVerify:
+			// Opt-in (HARNESS_VERIFY_ENFORCE=on): the measurement, not the
+			// agent's account of it, decides the stage. An incomplete
+			// measurement counts, because under enforcement the stage must
+			// be verified and a partly measured one is not; notRun does not,
+			// so a run with no plan is unaffected. Mapped onto the existing
+			// exit 1 rather than a new code — what this should mean for
+			// AgentRun.status is #302, and inventing an exit code here would
+			// pre-empt it.
+			logging.Err("verification %s and HARNESS_VERIFY_ENFORCE=on — failing the stage", verified.Status)
+			stageOutcome, limit = outcomeFailed, limitNone
+		case cfg.VerifyEnforce:
+			logging.Warn("verification %s, but this is an intermediate workflow stage — the plan's "+
+				"verification is not expected to hold until the last one, so the result is recorded "+
+				"and the stage keeps its outcome", verified.Status)
+		default:
+			logging.Warn("verification %s but enforcement is off — the stage keeps its outcome; "+
+				"the result is recorded in the termination data (HARNESS_VERIFY_ENFORCE=on to fail the stage)",
+				verified.Status)
+		}
+	}
+
 	// 13. Usage stats and termination log, regardless of outcome. Set
 	// before the final push below so a push failure doesn't discard
 	// them — the deferred writeTerminationLog fires no matter how this
@@ -654,8 +740,14 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			HandoffStatus: red.redact(verdict.Status),
 			StopReason:    red.redact(primaryResult.StopReason),
 			Usage:         &u,
+			Verification:  verified,
 		}
 		switch {
+		case enforceVerify:
+			// Enforcement turned the measurement into the outcome, so it
+			// is also the reason — "end_turn" describes the agent's turn,
+			// not why the stage failed.
+			term.StopReason = "verification " + verified.Status + ": " + verified.Reason
 		case providerRejected:
 			// "end_turn" is what goose said; the provider's message is
 			// what happened, and stopReason is the blob's free-text field
@@ -666,7 +758,11 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			term.StopReason = verdict.stopReason()
 		}
 	} else {
-		term = terminationBlob{ExitCode: stageOutcome.exitCode(), Outcome: stageOutcome.String()}
+		term = terminationBlob{
+			ExitCode:     stageOutcome.exitCode(),
+			Outcome:      stageOutcome.String(),
+			Verification: verified,
+		}
 	}
 
 	// 14. Final push (use a fresh context — the signal context may
@@ -759,6 +855,12 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			emitOutcome("run cancelled by viewer — no commits to push")
 		case providerRejected:
 			emitOutcome("stage failed — the model provider rejected the call; no work was done")
+		case enforceVerify && pushed:
+			emitOutcome("stage failed — the harness's own verification %s (%s); work pushed to branch %s",
+				verified.Status, verified.Reason, creds.Branch)
+		case enforceVerify:
+			emitOutcome("stage failed — the harness's own verification %s (%s); no commits to push",
+				verified.Status, verified.Reason)
 		case pushed:
 			emitOutcome("stage failed — partial work pushed to branch %s", creds.Branch)
 		default:
@@ -771,6 +873,10 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		if providerRejected {
 			logging.Err("stage failed: the model provider rejected the call — %s", providerSummary)
 			return 1, fmt.Errorf("stage failed: provider error: %s", providerSummary)
+		}
+		if enforceVerify {
+			logging.Err("stage failed: verification %s — %s", verified.Status, verified.Reason)
+			return 1, fmt.Errorf("stage failed: verification %s: %s", verified.Status, verified.Reason)
 		}
 		logging.Err("stage failed")
 		return 1, fmt.Errorf("stage failed")
@@ -922,6 +1028,26 @@ func workflowStagePosition(cfg *config.Config) (stage, count uint64, ok bool) {
 func isIntermediateWorkflowStage(cfg *config.Config) bool {
 	stage, count, ok := workflowStagePosition(cfg)
 	return ok && stage < count
+}
+
+// enforceVerification reports whether an unmet verification should decide
+// this stage's outcome.
+//
+// The pass measures every stage, because a recorded exit code is worth having
+// wherever it comes from. Failing the run on one is different: `docs/plan.md`
+// describes the state of the tree AFTER the migration, so an intermediate
+// stage is not expected to satisfy it yet. The execute stage hands a
+// half-migrated tree on by design, and the verify skill's own Step 1 is a
+// build fix loop ("Build fails: enter fix loop ... keep going until it
+// compiles") — a non-zero exit at the end of execute is the workflow working.
+// Enforcing there would fail the stage and stop the run (ADR 0018) before the
+// stage whose job is to fix exactly that ever started.
+//
+// So enforcement waits for the last stage. A standalone run is its own last
+// stage, and metadata that does not describe a position does not get to
+// silently disable the switch the operator turned on.
+func enforceVerification(cfg *config.Config, v *verification) bool {
+	return cfg.VerifyEnforce && v.unmet() && !isIntermediateWorkflowStage(cfg)
 }
 
 // planPrepRung is the first rung of the plan ladder: what the workspace

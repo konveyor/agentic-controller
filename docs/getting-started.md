@@ -10,6 +10,29 @@ AgentRun to trigger execution.
   the ImageVolume feature — a beta gate that is **off by default** on
   Kubernetes 1.33–1.34, so enable `ImageVolume` there; it is on by
   default from 1.35 and GA in 1.36)
+- A container runtime that implements image volumes — containerd 2.1+ or
+  CRI-O 1.31+. The gate above governs the API server; the mount itself is
+  the kubelet's, through the CRI. containerd added the OCI image volume
+  source in 2.1.0, so 2.0 does not qualify, and `cri-dockerd` does not
+  implement it at all. A minikube cluster therefore needs
+  `--container-runtime=containerd` (or `crio`); on the default `docker`
+  runtime every run fails at `Init:CreateContainerError` — *invalid mount
+  config for type "bind": field Source must not be empty* — whatever the
+  Kubernetes version
+- An amd64 cluster, or images you build yourself. Two published images
+  are amd64-only by design (see [`images/README.md`](../images/README.md)):
+  the controller and `agentic-controller-agent`. Each fails on arm64 with
+  *no match for platform in manifest*, in three places — the manager
+  Deployment, the `skill-loader` init container (which runs the
+  controller image) and the Gateway verification Job — each redirectable
+  to a local build (`IMG=` for the first two, `VERIFICATION_IMAGE` for
+  the third). The skill bundle is
+  no longer one of them: `quay.io/konveyor/skills:latest` carries
+  `linux/arm64` as of
+  [#306](https://github.com/konveyor/agentic-controller/pull/306), so the
+  SkillCards in `config/defaults/` resolve as shipped. Release tags
+  through `v0.11.0` predate that and are still amd64-only.
+  [Running on arm64](#running-on-arm64) in step 3 is the full recipe
 - [Agent Sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
   v1.0.x installed in the cluster
 - [Konveyor Hub](https://github.com/konveyor/tackle2-hub) installed in
@@ -84,11 +107,15 @@ kubectl wait deployment/agent-sandbox-controller \
 > chart removes the conversion-webhook Service while the old CRDs still
 > reference it. Fresh installs (the command above) are unaffected.
 
-> **Future:** [OpenShell](https://github.com/NVIDIA/OpenShell) will
-> replace the direct Agent Sandbox dependency. When integrated, the
-> controller will provision sandboxes through the OpenShell gateway
-> API instead of creating Sandbox CRs directly. See
-> [ADR 0004](adr/0004-openshell-as-execution-interface.md).
+> **Note:** the controller creates
+> [Agent Sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
+> `Sandbox` CRs directly. An earlier design routed this through
+> [OpenShell](https://github.com/NVIDIA/OpenShell); adoption remains deferred.
+> OpenShell retains its gateway and credential isolation, but its managed
+> inference route has been replaced by provider attachment. See
+> [ADR 0016](adr/0016-gateway-crd-as-interim-execution-interface.md),
+> and [ADR 0004](adr/0004-openshell-as-execution-interface.md) for the
+> history.
 
 ## 2. Install Konveyor Hub
 
@@ -225,6 +252,81 @@ from source:
 make build-installer IMG=$IMG
 kubectl apply -f dist/install.yaml
 ```
+
+### Running on arm64
+
+The controller and `agentic-controller-agent` images published to quay
+are amd64-only ([`images/README.md`](../images/README.md)), so on an
+arm64 cluster those two need a local build. The skill bundle does not:
+`quay.io/konveyor/skills:latest` is a manifest list covering
+`linux/amd64` and `linux/arm64` as of
+[#306](https://github.com/konveyor/agentic-controller/pull/306), so the
+SkillCards in `config/defaults/` resolve as shipped.
+
+`$REG` below is any registry the cluster can pull from; to skip the
+registry, load the image onto the nodes instead (`minikube image load`,
+`kind load docker-image`) and keep the `:dev` tag — `:latest` defaults
+`imagePullPolicy` to `Always`, which makes the kubelet ignore a loaded
+image and try to pull:
+
+```bash
+export REG=quay.io/<your-org>
+make docker-build docker-push IMG=$REG/agentic-controller:dev
+make deploy IMG=$REG/agentic-controller:dev
+kubectl apply -k config/defaults/ -n "$KONVEYOR_NS"
+```
+
+`make deploy` keeps `SKILL_LOADER_IMAGE` equal to the manager image, so
+the `skill-loader` init container follows your controller build with no
+extra step. That init container is where both inputs meet — it *runs*
+the controller image you just built and *mounts* the skill bundle as an
+image volume — and the bundle half now needs nothing from you.
+
+Gateway verification (step 4) runs the agent image, which `make deploy`
+does not touch, so point the controller at your own build with
+`VERIFICATION_IMAGE` on the manager Deployment. Empty or unset keeps the
+published `quay.io/konveyor/agentic-controller-agent:latest`:
+
+```bash
+make controller-agent-push \
+  CONTROLLER_AGENT_IMG=$REG/agentic-controller-agent:dev
+kubectl set env deployment/agentic-controller-controller-manager \
+  -n agentic-controller-system \
+  VERIFICATION_IMAGE=$REG/agentic-controller-agent:dev
+```
+
+Run that after `make deploy`, not before: a redeploy reapplies the
+manifest's empty value and puts the default back.
+
+To skip the registry, `make controller-agent-build` under a `:dev` tag,
+load it onto the nodes (`minikube image load`, `kind load docker-image`)
+and set `VERIFICATION_IMAGE` to that tag — the Job runs
+`imagePullPolicy: IfNotPresent`, so a loaded image is used as-is.
+
+`hack/setup-e2e.sh` takes the older route on the Kind path: it builds the
+agent image, retags it `:latest` and loads it before deploying, so the
+built-in default resolves locally.
+
+**If you pin an older bundle tag.** The arm64 bundle starts at
+`:latest`; the published tags that predate it — `v0.11.0` with its alphas
+and betas, and `release-0.11` — are still amd64-only. If you have
+repointed the SkillCards at one of those, build the bundle on your own
+host and repoint the four image-backed cards at that instead. Leave
+`house-rules` alone; it is inline and has no image:
+
+```bash
+make skill-push SKILL_IMAGE=$REG/skills:dev
+for card in plan execute verify javaee-to-quarkus; do
+  kubectl patch skillcard "$card" -n "$KONVEYOR_NS" --type=merge \
+    -p "{\"spec\":{\"image\":\"$REG/skills:dev\"}}"
+done
+```
+
+`skill-push` is single-arch on purpose, which is why it belongs on a dev
+tag: pushing it to `quay.io/konveyor/skills:latest` would replace the
+manifest list with one architecture. `hack/setup-e2e.sh` is not a model
+for the patch step either — it applies `config/defaults/` verbatim and
+never repoints the cards.
 
 ### Open the UI
 

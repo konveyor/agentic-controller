@@ -338,8 +338,11 @@ SKILL_IMAGE ?= quay.io/konveyor/skills:latest
 skill-build: ## Build the skill bundle image.
 	$(CONTAINER_TOOL) build -t $(SKILL_IMAGE) -f catalog/Containerfile .
 
+# Single-arch, like agent-images-push: CI publishes the real quay tag as a
+# multi-arch manifest list, so pushing this at that tag would replace the
+# list with one architecture. Use it against a scratch/dev SKILL_IMAGE.
 .PHONY: skill-push
-skill-push: skill-build ## Build and push the skill bundle image.
+skill-push: skill-build ## Build and push the skill bundle image (single-arch; dev registries only).
 	$(CONTAINER_TOOL) push $(SKILL_IMAGE)
 
 # A skill is one directory deep, so a directory of directories is not itself a

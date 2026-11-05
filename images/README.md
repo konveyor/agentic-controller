@@ -44,10 +44,12 @@ repos overwrites the multi-arch manifest with a single-arch image. Use it
 only for scratch/dev registries; for quay, use the multi-arch targets
 below.
 
-The `controller` and skill bundle images are amd64-only, as is
-`agentic-controller-agent` — the agentic stack targets amd64 Sandbox
-clusters, so "multi-arch" here covers only the agent-base + language image
-hierarchy.
+The `controller` image is amd64-only, as is `agentic-controller-agent` —
+the agentic stack targets amd64 Sandbox clusters, so "multi-arch" among
+the runtime images covers only the agent-base + language image hierarchy.
+The skill bundle is multi-arch too, for a different reason: it carries no
+binary at all, and a SkillCard pointing at it has to pull wherever the
+cluster runs.
 
 ### Publishing (versioned)
 
@@ -67,7 +69,9 @@ shared `build-push-images.yaml` reusable workflow:
   manifest list under the real tag. agent-base publishes first so the
   language images' `FROM quay.io/konveyor/agent-base` resolves against an
   already-published, genuinely multi-arch manifest.
-- **`skills`** — the skill bundle (amd64), built from `catalog/` (build
+- **`skills`** — the skill bundle (`linux/amd64` and `linux/arm64`;
+  `FROM scratch` plus text, so each arch is the same content under a
+  manifest list), built from `catalog/` (build
   context `catalog/`, `catalog/Containerfile`), gated on `make skill-validate`
   so an unusable skill never ships. Everything under `catalog/skills/` ships;
   the worked examples in `catalog/examples/` and the repo's maintainer

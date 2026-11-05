@@ -39,6 +39,11 @@ func clearKonveyorEnv(t *testing.T) {
 		"HARNESS_HITL_ASK",
 		"HARNESS_HITL_TIMEOUT_SECONDS",
 		"HARNESS_GIT_WRITE_CHECK",
+		"HARNESS_HUB_PROXY",
+		"HARNESS_VERIFY",
+		"HARNESS_VERIFY_ENFORCE",
+		"HARNESS_VERIFY_TIMEOUT_SECONDS",
+		"HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS",
 		"KONVEYOR_GIT_AUTHOR_NAME",
 		"KONVEYOR_GIT_AUTHOR_EMAIL",
 	} {
@@ -597,5 +602,98 @@ func TestGitWriteCheckSwitch(t *testing.T) {
 	}
 	if cfg.GitWriteCheck {
 		t.Error("HARNESS_GIT_WRITE_CHECK=OFF (padded, uppercase) should disable the push pre-flight")
+	}
+}
+
+func TestVerifySwitches(t *testing.T) {
+	clearKonveyorEnv(t)
+	setRequiredEnv(t)
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if !cfg.Verify {
+		t.Error("Verify should default on: a green run on a tree that does not build is the failure #300 reports")
+	}
+	if cfg.VerifyEnforce {
+		t.Error("VerifyEnforce should default off: recording the result is the fix; deciding the stage on it is opt-in")
+	}
+	if cfg.VerifyTimeout != 0 {
+		t.Errorf("VerifyTimeout = %v, want 0 (the harness applies its own default)", cfg.VerifyTimeout)
+	}
+
+	t.Setenv("HARNESS_VERIFY", " OFF ")
+	t.Setenv("HARNESS_VERIFY_ENFORCE", "ON")
+	cfg, err = LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if cfg.Verify {
+		t.Error("HARNESS_VERIFY=OFF (padded, uppercase) should disable the harness's own verification pass")
+	}
+	if !cfg.VerifyEnforce {
+		t.Error("HARNESS_VERIFY_ENFORCE=ON should make a failing verification command fail the stage")
+	}
+}
+
+func TestVerifyTimeoutClamp(t *testing.T) {
+	cases := []struct {
+		env  string
+		want time.Duration
+	}{
+		{"", 0},
+		{"not-a-number", 0},
+		{"0", 0},
+		{"-5", 0},
+		{"120", 120 * time.Second},
+		{"1", MinVerifyTimeoutSeconds * time.Second},
+		{"99999", MaxVerifyTimeoutSeconds * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			clearKonveyorEnv(t)
+			setRequiredEnv(t)
+			t.Setenv("HARNESS_VERIFY_TIMEOUT_SECONDS", tc.env)
+			cfg, err := LoadFromEnv()
+			if err != nil {
+				t.Fatalf("LoadFromEnv: %v", err)
+			}
+			if cfg.VerifyTimeout != tc.want {
+				t.Errorf("HARNESS_VERIFY_TIMEOUT_SECONDS=%q → %v, want %v", tc.env, cfg.VerifyTimeout, tc.want)
+			}
+		})
+	}
+}
+
+// The pass-wide budget is clamped like the per-command one: the per-command
+// timeout alone lets a plan with a dozen slow commands spend hours after the
+// agent's turn, with the final push and the termination blob behind it.
+func TestVerifyTotalTimeoutClamp(t *testing.T) {
+	cases := []struct {
+		env  string
+		want time.Duration
+	}{
+		{"", 0},
+		{"not-a-number", 0},
+		{"0", 0},
+		{"-5", 0},
+		{"1200", 1200 * time.Second},
+		{"1", MinVerifyTotalTimeoutSeconds * time.Second},
+		{"99999", MaxVerifyTotalTimeoutSeconds * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.env, func(t *testing.T) {
+			clearKonveyorEnv(t)
+			setRequiredEnv(t)
+			t.Setenv("HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS", tc.env)
+			cfg, err := LoadFromEnv()
+			if err != nil {
+				t.Fatalf("LoadFromEnv: %v", err)
+			}
+			if cfg.VerifyTotalTimeout != tc.want {
+				t.Errorf("HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS=%q → %v, want %v", tc.env, cfg.VerifyTotalTimeout, tc.want)
+			}
+		})
 	}
 }

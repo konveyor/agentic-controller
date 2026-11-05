@@ -257,14 +257,23 @@ type terminationBlob struct {
 	// outcome says whether the harness acted on it.
 	HandoffStatus string `json:"handoffStatus,omitempty"`
 	StopReason    string `json:"stopReason,omitempty"`
-	Usage         *usage `json:"usage,omitempty"`
+	// MavenProxyWarning records skipped automatic proxy conversion even when
+	// setup fails before the console connection is available.
+	MavenProxyWarning string `json:"mavenProxyWarning,omitempty"`
+	Usage             *usage `json:"usage,omitempty"`
+	// Verification is what the harness itself measured: the commands from
+	// the plan's `## Verification` section, re-run on the tree about to be
+	// pushed, with their real exit codes (#300). HandoffStatus above is
+	// the agent's account of the same work; this is the measurement, and
+	// the two disagreeing is the case the field exists for.
+	Verification *verification `json:"verification,omitempty"`
 }
 
 // executeErrorTerminationBlob builds the termination-log blob for an error
 // returned directly by rootCmd.Execute() — a failure outside runStage's own
 // deferred writeTerminationLog (e.g. a cobra flag-parsing error, so RunE
-// never ran). StopReason is the only free-text field the documented schema
-// offers, so the go error text goes there rather than being written as a
+// never ran). StopReason carries this failure diagnostic, so the go error
+// text goes there rather than being written as a
 // raw, potentially invalid-JSON string (issue #189).
 func executeErrorTerminationBlob(err error, exitCode int) terminationBlob {
 	return terminationBlob{
@@ -309,18 +318,32 @@ func writeTerminationLog(path string, term terminationBlob) {
 	}
 	if len(data) > maxTerminationLogBytes {
 		logging.Warn("termination log: %d bytes exceeds %d-byte limit; trimming to fit", len(data), maxTerminationLogBytes)
+		// Shed payload before verdicts, biggest first: a dropped output
+		// excerpt still leaves the exit code that failed the command (and
+		// the full output is in the pod log either way), where a dropped
+		// verification section would read as "nothing was checked".
+		term.Verification = term.Verification.withoutOutput()
 		if len(term.StopReason) > 200 {
 			term.StopReason = truncateRuneSafe(term.StopReason, 200) + "…"
 		}
 		data, err = json.Marshal(term)
 		if err != nil || len(data) > maxTerminationLogBytes {
-			// Fall back to minimal valid JSON preserving exitCode, outcome, and limitReached.
+			// Fall back to minimal valid JSON preserving exitCode, outcome,
+			// limitReached — and the verification verdict, which is the one
+			// field whose absence is read as a pass (#300). Retain the Maven
+			// setup warning too, since it explains missing proxy configuration.
 			term = terminationBlob{
-				ExitCode:     term.ExitCode,
-				Outcome:      term.Outcome,
-				LimitReached: term.LimitReached,
+				ExitCode:          term.ExitCode,
+				Outcome:           term.Outcome,
+				LimitReached:      term.LimitReached,
+				Verification:      term.Verification.verdictOnly(),
+				MavenProxyWarning: truncateRuneSafe(term.MavenProxyWarning, 200),
 			}
-			data, _ = json.Marshal(term)
+			data, err = json.Marshal(term)
+			if err != nil || len(data) > maxTerminationLogBytes {
+				term.Verification = nil
+				data, _ = json.Marshal(term)
+			}
 		}
 	} else if len(data) > terminationLogSizeWarning {
 		logging.Warn("termination log: %d bytes, approaching the kubelet's 4096-byte limit", len(data))

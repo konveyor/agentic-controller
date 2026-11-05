@@ -99,7 +99,7 @@ func StartServe(ctx context.Context, cfg ServeConfig) (*ServeProcess, error) {
 		"--port", fmt.Sprintf("%d", port),
 		"--with-builtin", "developer",
 	)
-	env, tempDirs := providerEnv(provider, model, apiKey, endpoint)
+	env, tempDirs := providerEnv(os.Environ(), provider, model, apiKey, endpoint)
 	env = append(env, executionEnv(cfg.Mode, cfg.MaxTurns)...)
 	if secretKey != "" {
 		env = append(env, "GOOSE_SERVER__SECRET_KEY="+secretKey)
@@ -197,14 +197,21 @@ func FindFreePort() (int, error) {
 	return port, nil
 }
 
-// providerEnv returns the current process environment with LLM provider
-// credentials translated to the env vars goose expects. Called before
-// starting goose serve so the process has the right credentials at
-// startup. In a Sandbox, the controller injects KONVEYOR_LLM_* env vars
-// (with KONVEYOR_MODEL_PRIMARY_* as legacy fallbacks); this function
-// maps them to provider-specific names.
-func providerEnv(provider, model, apiKey, endpoint string) (env []string, tempDirs []string) {
-	env = os.Environ()
+// providerEnv returns base with the LLM provider credentials translated
+// to the env vars goose expects. Called before starting goose serve so
+// the process has the right credentials at startup. In a Sandbox, the
+// controller injects KONVEYOR_LLM_* env vars (with
+// KONVEYOR_MODEL_PRIMARY_* as legacy fallbacks); this function maps them
+// to provider-specific names.
+//
+// base is the environment to build on — os.Environ() in production, so
+// goose inherits PATH, HOME and the rest. It is a parameter rather than
+// a call to os.Environ() inside, because a test asking "does the harness
+// add this provider's key" must be able to ask about what this function
+// appended and not about what the developer happens to have exported.
+// base is copied, never appended to in place.
+func providerEnv(base []string, provider, model, apiKey, endpoint string) (env []string, tempDirs []string) {
+	env = append([]string(nil), base...)
 	p := strings.ReplaceAll(strings.ToLower(provider), "-", "_")
 
 	if p != "" {
