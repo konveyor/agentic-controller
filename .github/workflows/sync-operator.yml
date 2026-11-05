@@ -135,6 +135,8 @@ jobs:
       # commits survive. Merge the current base even when an older sync PR was
       # squash-merged and its branch still exists. Conflicts require a human;
       # never rebuild an existing branch from base or force-push over its work.
+      # Publish a clean base merge only with the next manifest change. A no-op
+      # sync leaves the remote alone; conflicts still fail here on every run.
       - name: Prepare operator sync branch
         if: steps.target.outputs.exists == 'true'
         working-directory: operator
@@ -183,7 +185,7 @@ jobs:
       # first sync) count -- plain `git diff` only sees tracked changes. The -I
       # filter drops the CSV's createdAt timestamp, which moves every run, so a
       # no-op sync is correctly detected as no change.
-      - name: Detect config changes
+      - name: Stage and detect config changes
         id: diff
         if: steps.target.outputs.exists == 'true'
         working-directory: operator
@@ -197,6 +199,8 @@ jobs:
             git diff --cached --stat -- helm/templates/crds helm/templates/rbac roles/tackle/templates/agentic bundle
           fi
 
+      # Commit the index staged by the detection step above. Keep that index
+      # unchanged between detection and commit so both consume the same paths.
       - name: Push sync commit
         if: steps.target.outputs.exists == 'true' && steps.diff.outputs.changed == 'true'
         working-directory: operator
