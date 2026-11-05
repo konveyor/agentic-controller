@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+// errorSince is lastErrorSince without the timestamp, for the tests that
+// only ask what was kept.
+func (c *outputCapture) errorSince(since time.Time) string {
+	line, _ := c.lastErrorSince(since)
+	return line
+}
+
 // TestOutputCaptureForwardsEveryByte is the property that matters most:
 // the capture sits in front of the pod log, so whatever it does to find
 // error lines, the log must read exactly as it did before.
@@ -219,23 +226,93 @@ func TestStripANSI(t *testing.T) {
 func TestProviderErrorWaitsForTheLine(t *testing.T) {
 	c := newOutputCapture(&bytes.Buffer{})
 	srv := &ServeProcess{output: c}
-	since := time.Now()
+	sent := time.Now()
 
 	go func() {
 		time.Sleep(40 * time.Millisecond)
 		c.Write([]byte("ERROR goose::providers::bedrock: AccessDeniedException: not authorized\n"))
 	}()
 
-	got := srv.ProviderError(since, 2*time.Second)
+	got := srv.ProviderError(sent, time.Now(), 2*time.Second)
 	if !strings.Contains(got, "AccessDeniedException") {
 		t.Errorf("ProviderError = %q, want the line written while it waited", got)
+	}
+}
+
+// The regression djzager found in review: a stage prompt runs many turns,
+// and a recoverable tool error logged during one of them is already
+// captured when the call fails. Returning it the moment the failure
+// arrives would make an unrelated error the viewer message and the
+// termination reason, and would never wait for the provider error racing
+// over stdio 40ms behind it.
+func TestProviderErrorWaitsThroughAnEarlierToolError(t *testing.T) {
+	c := newOutputCapture(&bytes.Buffer{})
+	srv := &ServeProcess{output: c}
+	sent := time.Now()
+
+	c.Write([]byte("ERROR goose::developer: text_editor failed: No such file or directory\n"))
+
+	failedAt := time.Now()
+	go func() {
+		time.Sleep(40 * time.Millisecond)
+		c.Write([]byte("ERROR goose::providers::bedrock: AccessDeniedException: not authorized\n"))
+	}()
+
+	got := srv.ProviderError(sent, failedAt, 2*time.Second)
+	if !strings.Contains(got, "AccessDeniedException") {
+		t.Errorf("ProviderError = %q, want the provider error that arrived after the failure", got)
+	}
+	if strings.Contains(got, "text_editor") {
+		t.Errorf("ProviderError = %q, want the earlier tool error not to be reported as the reason", got)
+	}
+}
+
+// The usual case: goose logs the provider's error, then sends the
+// JSON-RPC error, so the line can already have been read when the call
+// comes back. It is about this failure and it is the answer.
+func TestProviderErrorTakesTheLineReadJustBeforeTheFailure(t *testing.T) {
+	c := newOutputCapture(&bytes.Buffer{})
+	srv := &ServeProcess{output: c}
+	sent := time.Now()
+	c.Write([]byte("ERROR goose::providers::bedrock: AccessDeniedException: not authorized\n"))
+
+	got := srv.ProviderError(sent, time.Now(), 100*time.Millisecond)
+	if !strings.Contains(got, "AccessDeniedException") {
+		t.Errorf("ProviderError = %q, want the line read just before the failure", got)
+	}
+}
+
+// Far enough back and it is not about this call at all, whatever it says.
+func TestProviderErrorIgnoresAnErrorFromEarlierInTheStage(t *testing.T) {
+	c := newOutputCapture(&bytes.Buffer{})
+	srv := &ServeProcess{output: c}
+	sent := time.Now()
+	c.Write([]byte("ERROR goose::developer: text_editor failed: No such file or directory\n"))
+
+	time.Sleep(80 * time.Millisecond)
+	if got := srv.ProviderError(sent, time.Now(), 50*time.Millisecond); got != "" {
+		t.Errorf("ProviderError = %q, want \"\" — that error predates the window around the failure", got)
+	}
+}
+
+// notBefore is a hard floor even inside the window: a line from before
+// this prompt was sent is never the reason this prompt failed.
+func TestProviderErrorNeverReportsFromBeforeThePrompt(t *testing.T) {
+	c := newOutputCapture(&bytes.Buffer{})
+	srv := &ServeProcess{output: c}
+	c.Write([]byte("ERROR goose: a failure from the stage before this prompt\n"))
+
+	time.Sleep(2 * time.Millisecond)
+	sent := time.Now()
+	if got := srv.ProviderError(sent, time.Now(), 60*time.Millisecond); got != "" {
+		t.Errorf("ProviderError = %q, want \"\" — that line predates the prompt", got)
 	}
 }
 
 func TestProviderErrorGivesUpWhenGooseLoggedNothing(t *testing.T) {
 	srv := &ServeProcess{output: newOutputCapture(&bytes.Buffer{})}
 	start := time.Now()
-	if got := srv.ProviderError(start, 60*time.Millisecond); got != "" {
+	if got := srv.ProviderError(start, start, 60*time.Millisecond); got != "" {
 		t.Errorf("ProviderError = %q, want \"\"", got)
 	}
 	if waited := time.Since(start); waited > time.Second {
@@ -246,7 +323,8 @@ func TestProviderErrorGivesUpWhenGooseLoggedNothing(t *testing.T) {
 // A ServeProcess from before the capture existed, or one a test built by
 // hand, must not panic.
 func TestProviderErrorWithoutCapture(t *testing.T) {
-	if got := (&ServeProcess{}).ProviderError(time.Now(), time.Millisecond); got != "" {
+	now := time.Now()
+	if got := (&ServeProcess{}).ProviderError(now, now, time.Millisecond); got != "" {
 		t.Errorf("ProviderError = %q, want \"\"", got)
 	}
 }

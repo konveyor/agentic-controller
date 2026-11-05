@@ -553,13 +553,17 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			emitPlan("completed", "in_progress", "pending")
 		}
 	})
-	// Sent-at bounds the search of goose's stdio for the reason a failed
-	// call does not carry (#323): an error goose logged before this
+	// Sent-at is the floor on the search of goose's stdio for the reason a
+	// failed call does not carry (#323): an error goose logged before this
 	// prompt belongs to something else.
 	promptSentAt := time.Now()
 	primaryResult, err := session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
 		{Type: "text", Text: stagePrompt},
 	}, cfg.CostLimit)
+	// When the call came back, which is what a goose error line has to be
+	// near to be about it. Taken before anything else runs, so the
+	// measurement is of the call and not of the work below it.
+	promptReturnedAt := time.Now()
 	if primaryResult != nil {
 		turnBase = primaryResult.TurnsUsed
 		turnsSeen.Store(int64(turnBase))
@@ -596,7 +600,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// Built once: it is what the log, the viewer, the termination blob
 	// and the returned error all say.
 	promptDetail := promptFailureDetail(err, red, func() string {
-		return srv.ProviderError(promptSentAt, goose.ProviderErrorGrace)
+		return srv.ProviderError(promptSentAt, promptReturnedAt, goose.ProviderErrorGrace)
 	})
 	if err != nil {
 		logging.Err("prompt failed: %s", promptDetail)

@@ -125,20 +125,21 @@ func (c *outputCapture) record(line string) {
 	}
 }
 
-// errorSince returns the most recent error-level line read after since,
-// or "" when goose logged none in that window. The window is what makes
-// the answer about this failure: goose logs an error for a transient tool
-// problem too, and attributing one from earlier in the run to the call
-// that just failed would be a confident wrong answer.
-func (c *outputCapture) errorSince(since time.Time) string {
+// lastErrorSince returns the most recent error-level line read after
+// since, with when it was read, or "" when goose logged none in that
+// window. The caller needs the timestamp as well as the text: whether a
+// line can be the reason a call failed depends on when it was read
+// relative to the failure, not merely on being inside the window (see
+// ServeProcess.ProviderError).
+func (c *outputCapture) lastErrorSince(since time.Time) (string, time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for i := len(c.lines) - 1; i >= 0; i-- {
 		if c.lines[i].at.After(since) {
-			return c.lines[i].text
+			return c.lines[i].text, c.lines[i].at
 		}
 	}
-	return ""
+	return "", time.Time{}
 }
 
 // looksLikeErrorLine reports whether a line of goose's stdio is reporting
