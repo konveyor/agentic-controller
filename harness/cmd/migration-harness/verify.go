@@ -39,15 +39,20 @@ const (
 	// could not be started.
 	verificationFailed = "failed"
 	// verificationNotRun: there was nothing to measure. No plan, no
-	// Verification section, no runnable command, a disabled pass, a stage
-	// that never claimed success. Deliberately NOT an absence: it carries a
-	// reason, because silence that renders as green is the failure mode this
-	// whole file exists to close.
+	// Verification section, a section the harness READ that names nothing
+	// scorable (Blackbox only, an explicit `none`, an unfilled
+	// placeholder), a disabled pass, a stage that never claimed success.
+	// Deliberately NOT an absence: it carries a reason, because silence
+	// that renders as green is the failure mode this whole file exists to
+	// close. A section the harness could not read is not this — see
+	// verificationIncomplete.
 	verificationNotRun = "notRun"
 	// verificationIncomplete: there WAS something to measure and the harness
 	// could not finish measuring it — the run was cancelled part way, the
-	// step cap left commands unrun, or the tree checked was not the commit
-	// being pushed. Distinct from notRun because the two differ in what a
+	// step cap left commands unrun, the tree checked was not the commit
+	// being pushed, or the section's commands sat inside a fenced block that
+	// is dropped before parsing, so the harness never read them (#336).
+	// Distinct from notRun because the two differ in what a
 	// consumer should do: nothing to verify is normal, a verification that
 	// could not be completed is a gap. Neither is a pass, and under
 	// enforcement this one fails the stage while notRun does not.
@@ -207,6 +212,22 @@ var (
 	// sectionHeading matches a heading; its first submatch gives the level,
 	// so a `###` subheading stays inside the section and a `##` ends it.
 	sectionHeading = regexp.MustCompile(`^ {0,3}(#{1,6})\s+\S`)
+	// verifySentence matches an English sentence boundary in a value: a
+	// letter, then `.`, `!` or `?`, then either a capitalised next word or
+	// the end of the value. A shell command does not normally end a word
+	// with a full stop — `go test ./...` and `find . -name x` put the dot
+	// where no letter precedes it — while a sentence always does. See
+	// verifyLooksLikeProse.
+	verifySentence = regexp.MustCompile(`[A-Za-z][.!?]["')]?(\s+[A-Z]|$)`)
+	// verifyQuoted matches a single- or double-quoted span, whose contents
+	// are an argument the shell passes along rather than anything the
+	// sentence test should read: `echo 'Build passed.'` is a command.
+	verifyQuoted = regexp.MustCompile(`'[^']*'|"[^"]*"`)
+	// verifyShellOperator matches shell syntax that settles the question on
+	// its own. No English sentence carries `&&`, `||` or a command
+	// substitution, so a value holding one is shell whatever its
+	// punctuation looks like.
+	verifyShellOperator = regexp.MustCompile(`&&|\|\||\$\(`)
 )
 
 // verifyProseLabels are the Verification labels that name manual steps
@@ -279,23 +300,43 @@ func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, 
 		}
 		return notRun("read %s: %v", planPath, red.redact(err.Error()))
 	}
-	steps, truncated, found := parsePlanVerification(string(content))
-	if !found {
+	parsed := parsePlanVerification(string(content))
+	if !parsed.Found {
 		return notRun("%s has no ## Verification section", planPath)
 	}
-	if len(steps) == 0 {
-		return notRun("the ## Verification section of %s is empty", planPath)
-	}
-	if !slices.ContainsFunc(steps, planStep.runnable) {
-		// Unless the cap is the reason there is none. A section whose
-		// commands all sit past the cap DID name commands to run, and
-		// the harness ran none of them: that is a gap, not an absent
-		// measurement, and notRun here would be the step cap quietly
-		// passing the stage again — the thing truncatedGap exists to
-		// stop, one branch earlier than it was wired in.
-		if truncated {
-			return incomplete(red, "%s", truncatedGap(truncated))
+	if !parsed.runnable() {
+		// Nothing to run. Whether that is "there was nothing to measure"
+		// or "there was, and the harness could not read it" is the whole
+		// difference between a verdict that never fails a stage and one
+		// that does under enforcement, so the two cases are separated
+		// here rather than collapsed into notRun.
+		switch {
+		case parsed.Truncated:
+			// A section whose commands all sit past the cap DID name
+			// commands to run, and the harness ran none of them: that is
+			// a gap, not an absent measurement, and notRun here would be
+			// the step cap quietly passing the stage again — the thing
+			// truncatedGap exists to stop, one branch earlier than it was
+			// wired in.
+			return incomplete(red, "%s", truncatedGap(parsed.Truncated))
+		case parsed.Fence != "":
+			// The #336 case. A real plan wrote its six commands inside a
+			// ```bash block with prose around them; the fence is dropped
+			// before parsing (deliberately — see parsePlanVerification),
+			// so the section parsed as naming nothing, and notRun let the
+			// stage keep its green on a tree that did not compile. The
+			// harness cannot run those commands and will not guess at
+			// them, but it must not call a section it could not read an
+			// absent one.
+			logging.Err("verification: write the plan's Verification commands as `- Label: command` list "+
+				"items, not inside a %s block — the harness does not read fenced blocks", parsed.Fence)
+			return incomplete(red, "the ## Verification section of %s names no command outside a fenced %s "+
+				"block, which the harness does not read — nothing was measured", planPath, parsed.Fence)
+		case len(parsed.Steps) == 0:
+			return notRun("the ## Verification section of %s is empty", planPath)
 		}
+		// Read, and genuinely nothing to score: a Blackbox-only section,
+		// an explicit `none`, an unfilled placeholder.
 		return notRun("the ## Verification section of %s names no command to run", planPath)
 	}
 
@@ -326,7 +367,7 @@ func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, 
 	v := &verification{Status: verificationPassed, Commit: target}
 	logging.Info("verification: checking commit %s, the tip of branch %s (%s per command, %s for the pass)",
 		shortSHA(target), branch, timeout, total)
-	for _, step := range steps {
+	for _, step := range parsed.Steps {
 		if !step.runnable() {
 			logging.Info("verification: %s skipped — %s", step.Label, step.Skip)
 			v.Commands = append(v.Commands, verificationStep{
@@ -350,7 +391,7 @@ func runPlanVerification(ctx context.Context, repo *gogit.Repository, cloneDir, 
 		v.Commands = append(v.Commands, runVerifyStep(passCtx, cloneDir, timeout, total, step, red))
 	}
 
-	v.settle(red, gap, truncatedGap(truncated))
+	v.settle(red, gap, truncatedGap(parsed.Truncated))
 	return v
 }
 
@@ -610,21 +651,65 @@ func runVerifyStep(ctx context.Context, dir string, timeout, total time.Duration
 	return recorded
 }
 
-// parsePlanVerification returns the plan's Verification lines, classified
-// into commands to run and lines to skip. found is false when the document
-// has no such section at all — distinct from a section with nothing in it.
+// planVerification is what the parser made of the plan's `## Verification`
+// section.
+type planVerification struct {
+	// Steps are the section's lines, classified into commands to run and
+	// lines to skip.
+	Steps []planStep
+	// Found is false when the document has no such section at all —
+	// distinct from a section with nothing in it.
+	Found bool
+	// Truncated records that verifyMaxSteps left lines of the section
+	// unread.
+	Truncated bool
+	// Fence is the opening fence line of the first fenced block inside the
+	// section, or "" when it had none. The block's contents are dropped
+	// before parsing and stay dropped; this field is only how the caller
+	// tells a section that was read and had nothing to score from one
+	// whose content never reached the parser. See runPlanVerification.
+	Fence string
+}
+
+// runnable reports whether the section named at least one command to run.
+func (p planVerification) runnable() bool { return slices.ContainsFunc(p.Steps, planStep.runnable) }
+
+// parsePlanVerification reads the plan's Verification section.
 //
 // Fenced code blocks are dropped first (handoffProse), for the same reason
 // the handoff reader drops them: a plan that quotes the plan template back
 // inside a fence carries a second `## Verification` heading and a second set
 // of `- Build:` lines, and reading those would have the harness run the
-// template's own `<build command>` placeholder.
-func parsePlanVerification(content string) (steps []planStep, truncated, found bool) {
+// template's own `<build command>` placeholder. That stays — but the parser
+// records that a block was there (Fence), because a section whose commands
+// were all inside one is not a section that named no commands (#336).
+func parsePlanVerification(content string) planVerification {
+	parsed := planVerification{}
 	inSection := false
 	// The indentation of the prose line whose sub-bullets we are inside,
 	// and its label. -1 when we are not inside one. See proseChild.
 	proseIndent, proseParent := -1, ""
-	for _, line := range handoffProse(content) {
+	for _, entry := range handoffProseLines(content) {
+		if entry.Fence {
+			// A dropped block. Its contents are not read; the first one
+			// that belongs to the section itself is remembered so the
+			// verdict can say the section's content was unreadable rather
+			// than absent.
+			//
+			// A block nested under an open prose line is NOT one of those.
+			// The plan skill specifies Blackbox as "steps to start the app
+			// and verify key business flows still work", and a model that
+			// illustrates a step with a fenced snippet is still writing
+			// manual steps — the indentation says so, exactly as it does
+			// for a nested item (see proseChild). Recording that fence made
+			// a manual-only section report incomplete and, under
+			// enforcement, fail the stage for containing a code block.
+			if inSection && parsed.Fence == "" && !nestedUnderProse(entry.Text, proseIndent) {
+				parsed.Fence = strings.TrimSpace(entry.Text)
+			}
+			continue
+		}
+		line := entry.Text
 		if m := sectionHeading.FindStringSubmatch(line); m != nil {
 			// Any heading closes an open manual list. A deeper one keeps us
 			// in the section, but nothing under it belongs to a list that
@@ -635,7 +720,8 @@ func parsePlanVerification(content string) (steps []planStep, truncated, found b
 			case verificationHeading.MatchString(line):
 				// A second Verification heading restarts the section:
 				// later wins, as it does for the handoff's verdict.
-				inSection, found, steps, truncated = true, true, nil, false
+				inSection = true
+				parsed = planVerification{Found: true}
 			case len(m[1]) <= 2:
 				inSection = false
 			}
@@ -651,8 +737,8 @@ func parsePlanVerification(content string) (steps []planStep, truncated, found b
 		// The cap bounds the work, not the honesty about it: a dropped
 		// line is reported so the verdict can say the section was only
 		// partly measured, instead of passing on the prefix it ran.
-		if len(steps) >= verifyMaxSteps {
-			truncated = true
+		if len(parsed.Steps) >= verifyMaxSteps {
+			parsed.Truncated = true
 			continue
 		}
 		step := classifyVerifyItem(m[1], m[2])
@@ -667,9 +753,9 @@ func parsePlanVerification(content string) (steps []planStep, truncated, found b
 		default:
 			proseIndent, proseParent = -1, ""
 		}
-		steps = append(steps, step)
+		parsed.Steps = append(parsed.Steps, step)
 	}
-	return steps, truncated, found
+	return parsed
 }
 
 // proseChild is a Verification line nested under a prose one. The plan skill
@@ -692,6 +778,14 @@ func proseChild(label, parent string) planStep {
 		Label: label,
 		Skip:  fmt.Sprintf("nested under %s — part of its manual steps, not a command the harness can run or score", parent),
 	}
+}
+
+// nestedUnderProse reports whether a line sits inside the sub-block of an
+// open prose list item: the same indentation test the parser applies to a
+// nested item, applied to a fenced block. proseIndent is -1 when no prose
+// line is open, and then nothing is nested.
+func nestedUnderProse(line string, proseIndent int) bool {
+	return proseIndent >= 0 && itemIndent(line) > proseIndent
 }
 
 // itemIndent is the visual indentation of a list item, counting a tab as four
@@ -720,21 +814,78 @@ func classifyVerifyItem(label, value string) planStep {
 	if len(value) > 1 && strings.HasPrefix(value, "`") && strings.HasSuffix(value, "`") {
 		value = strings.TrimSpace(strings.Trim(value, "`"))
 	}
-	switch {
+	switch first := verifyFirstWord(value); {
 	case verifyProseLabels[strings.ToLower(step.Label)]:
 		step.Skip = "manual steps, not a command the harness can run or score"
 	case verifyEmptyValues[strings.ToLower(value)]:
 		step.Skip = "the plan names no command here"
+	// first != "": the empty string is an empty VALUE, but a value whose
+	// first word is all punctuation — `. ./scripts/env.sh && npm test`
+	// sources a file — is a command.
+	case first != "" && verifyEmptyValues[first]:
+		// A real plan wrote `**Runtime verification**: skipped — this
+		// migration changes only the query library API surface, not
+		// application behavior.` The sentence that follows the word does
+		// not make the word mean something else, and before this the whole
+		// 132-rune sentence went to `sh -c`, which recorded a measured
+		// failure reading `/bin/sh: skipped: command not found` (#336).
+		// The value says what it says; the rest is the plan's reasoning.
+		step.Skip = fmt.Sprintf("the plan says %q here, not a command", first)
 	case strings.HasPrefix(value, "<"):
 		// The plan skill's template is literally `<build command, e.g. mvn
 		// clean compile>`; an agent that copied it left a placeholder.
 		step.Skip = "unfilled placeholder in the plan, not a command"
 	case len([]rune(value)) > verifyCommandMaxLen:
 		step.Skip = "prose, not a command (too long to be one)"
+	case verifyLooksLikeProse(value):
+		step.Skip = "prose, not a command (reads as a sentence)"
 	default:
 		step.Command = value
 	}
 	return step
+}
+
+// verifyFirstWord is the value's first word, lowercased and stripped of
+// trailing punctuation, so `skipped —`, `Skipped:` and `skipped` all read
+// as the same word.
+func verifyFirstWord(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToLower(strings.Trim(fields[0], ".,;:!?`\"'*"))
+}
+
+// verifyLooksLikeProse reports whether a Verification value is an English
+// sentence rather than a command.
+//
+// The length guard above catches a paragraph; this catches the short
+// sentence that fits under it. The test is a sentence boundary
+// (verifySentence) in a value of more than one word: a command is a program
+// and its arguments, and does not end a word with a full stop or run two
+// capitalised sentences together.
+//
+// It is a heuristic, and the two ways it can be wrong are not symmetric. A
+// line of prose misread as a command runs, exits non-zero and verdicts the
+// stage `failed` — bogus evidence, loudly. A COMMAND misread as prose is
+// skipped, and a section whose other commands pass then verdicts `passed`
+// over a check that never ran: unearned green, which is the failure mode
+// this whole file exists to remove. So the test fires only on unmistakable
+// prose, and anything that carries a mark of shell is a command:
+//
+//   - a shell operator anywhere in the value (verifyShellOperator), and
+//   - punctuation inside a quoted argument, which is a string being passed
+//     to a program, not sentence structure. `test -f required-artifact &&
+//     echo 'Build passed.'` is a real check, and skipping it let a missing
+//     artefact pass.
+func verifyLooksLikeProse(value string) bool {
+	if !strings.ContainsAny(value, " \t") {
+		return false
+	}
+	if verifyShellOperator.MatchString(value) {
+		return false
+	}
+	return verifySentence.MatchString(verifyQuoted.ReplaceAllString(value, " "))
 }
 
 // notRun builds the recorded "nothing was measured" result. It carries a
