@@ -57,7 +57,6 @@ Two original statements still need qualification:
   would enforce the harness-only push boundary in our workload.
 
 [os-3195]: https://github.com/NVIDIA/OpenShell/pull/3195
-[os-3172]: https://github.com/NVIDIA/OpenShell/issues/3172
 [os-inference]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/docs/how-it-works/inference.mdx
 
 ## Context

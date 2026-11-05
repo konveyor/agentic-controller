@@ -5,15 +5,18 @@ description: "Records the deferred OpenShell execution interface, with correctio
 status: accepted
 status_note: "OpenShell adoption remains deferred. The managed inference route was removed, but the gateway and credential isolation remain. ADR 0016 supersedes the no-Gateway-CRD and immediate OpenShell-client clauses; ADR 0021 supersedes the predetermined OpenShell destination."
 date: "2026-07-20"
-last_updated: "2026-10-20"
+last_updated: "2026-11-04"
 authors:
   - "David Zager"
-last_reviewed: "2026-10-20"
-implementation_status: amended
+last_reviewed: "2026-11-04"
+implementation_status: deferred
 review_note: "Rechecked against OpenShell v0.1.3. Managed inference routing was removed; the gateway, sandbox lifecycle API, and provider credential isolation remain. Implications for Konveyor's adoption design remain open for discussion."
 ---
 
 # ADR 0004: OpenShell as Execution Interface
+
+**Update (2026-11-04):** Confirmed the evidence pin as OpenShell v0.1.3.
+OpenShell adoption and its implementation status remain deferred.
 
 **Update (2026-10-20):** [ADR 0021](./0021-shared-runtime-and-conditional-lightspeed-execution.md)
 supersedes the deferred choice of OpenShell as the predetermined execution
@@ -29,12 +32,12 @@ inference routing was removed; the gateway and credential isolation remain.**
 An earlier proposed amendment ([closed PR #271](https://github.com/konveyor/agentic-controller/pull/271)) incorrectly concluded that deleting the privacy-router
 crate deleted credential isolation, and that the OpenShell gateway no longer
 existed. This correction replaces those conclusions, preserving the original
-design below as historical context. Evidence is pinned to OpenShell v0.1.3
+design below as historical context. Evidence is pinned to [OpenShell v0.1.3][os-release]
 (`e1f3c82caa3ed3b65de22889ae7ef32a774878ef`).
 
-[PR #3195][os-3195] merged on 2026-09-09; [v0.1.0][os-release] shipped on
-2026-09-25. It removed `inference.local`, workspace-global managed inference
-routes, and `openshell-router`. The [replacement access path][os-inference]
+[PR #3195][os-3195] merged on 2026-09-09 and removed `inference.local`,
+workspace-global managed inference routes, and `openshell-router`.
+The [replacement access path][os-inference]
 uses attached providers: workloads call native APIs with placeholder
 credentials, and the sandbox proxy substitutes real values after policy and
 credential endpoint checks. It no longer selects or rewrites the model.
@@ -66,12 +69,8 @@ valid. These are existing decisions. This amendment corrects upstream facts;
 any resulting change to our adoption plans remains for discussion.
 
 [os-3195]: https://github.com/NVIDIA/OpenShell/pull/3195
-[os-3172]: https://github.com/NVIDIA/OpenShell/issues/3172
-[os-1722]: https://github.com/NVIDIA/OpenShell/issues/1722
 [os-1795]: https://github.com/NVIDIA/OpenShell/issues/1795
-[os-1977]: https://github.com/NVIDIA/OpenShell/issues/1977
-[os-2270]: https://github.com/NVIDIA/OpenShell/issues/2270
-[os-release]: https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.0
+[os-release]: https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.3
 [os-inference]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/docs/how-it-works/inference.mdx
 [os-profiles]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/docs/how-it-works/providers/profiles.mdx
 [os-architecture]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/docs/about/architecture.mdx

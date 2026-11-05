@@ -5,10 +5,10 @@ description: "Reuse Lightspeed's DeepAgents runtime and its inspection behavior 
 status: accepted
 status_note: "Approves Konveyor direction only; implementation, backend qualification, and Lightspeed agreement are separate."
 date: "2026-10-20"
-last_updated: "2026-11-02"
+last_updated: null
 authors:
   - "David Zager"
-last_reviewed: "2026-11-02"
+last_reviewed: "2026-11-04"
 implementation_status: deferred
 review_note: "Runtime reuse and custom-image execution were demonstrated separately. Full runtime adoption requires compatibility work for existing interaction, execution controls, session continuation, and inspection behavior. Operator placement, credential delivery, and lifecycle design remain open. Production integration is unimplemented."
 relates_to:
@@ -20,41 +20,6 @@ relates_to:
 ---
 
 # ADR 0021: Shared Runtime and Conditional Lightspeed Execution
-
-**Update (2026-11-02): shared runtime direction.** Reuse and contribute to
-Lightspeed's runtime, keeping Konveyor-specific behavior in the harness.
-Operator adoption remains conditional on the capabilities and integration
-design below.
-
-**Update (2026-10-30): existing behavior and upstream collaboration.** Runtime
-reuse remains the chosen direction, with compatibility changes needed before
-full adoption. This supersedes the earlier deferral of existing interaction
-features and same-session continuation needed for limit-triggered handoff.
-Usage/cost accounting belongs to the runtime; Konveyor consumes its reporting
-for execution controls. We can prototype and contribute runtime changes
-upstream. Operator adoption also requires collaboration, but its placement,
-access, credential, and lifecycle design remains unresolved.
-
-**Update (2026-10-28): scope clarification following review.** Runtime reuse
-includes Lightspeed's applicable inspection and tool-admission behavior inside
-Konveyor's harness. Image and entrypoint control remain firm requirements for
-operator adoption. Execution placement and credential delivery return to open
-design questions, superseding the namespace mandate in the earlier same-day
-amendment below. The current Decision and Consequences sections reflect this
-clarification; no provider mapping or Gateway API migration is selected here.
-
-**Update (2026-10-28):** Made execution in Konveyor's Hub namespace an explicit
-operator-adoption requirement alongside a workload image per invocation. The
-earlier Decision named image selection but left namespace and credential
-ownership to follow-up design. Both capabilities, including their combined
-lifecycle and Hub connectivity, must be supported and validated before adoption.
-
-**Update (2026-10-26):** Clarified the adoption sequence and ownership in the
-Decision and follow-up sections. Existing use-case coverage gates runtime
-adoption; retained-session contributions are separate. Lightspeed operator
-execution is an optional backend alongside direct Agent Sandbox. Equivalent
-Lightspeed resources should replace our APIs through deprecation and removal
-over subsequent releases.
 
 ## Context
 
@@ -112,9 +77,9 @@ every harmful command or request is prevented.
 
 **Add the Lightspeed operator as an alternative execution backend when ready.**
 Runtime reuse proceeds independently under our existing controller and direct
-Agent Sandbox. **Control over the workload image and entrypoint per AgenticRun
-is a firm adoption requirement.** The operator must let our selected image run
-our harness and supply the runtime and toolchains. Honoring the selected image's
+Agent Sandbox. **Control over the workload image and entrypoint for each
+invocation is a firm adoption requirement.** The operator must let our selected
+image run our harness and supply the runtime and toolchains. Honoring the image's
 declared entrypoint may be sufficient to meet the startup requirement. The
 integration design will determine whether an explicit command override is needed.
 

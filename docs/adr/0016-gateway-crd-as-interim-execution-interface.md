@@ -84,11 +84,7 @@ assumptions that have changed. This amendment does not choose a replacement
 design or change the existing adoption decision.
 
 [os-3195]: https://github.com/NVIDIA/OpenShell/pull/3195
-[os-3172]: https://github.com/NVIDIA/OpenShell/issues/3172
-[os-1722]: https://github.com/NVIDIA/OpenShell/issues/1722
 [os-1795]: https://github.com/NVIDIA/OpenShell/issues/1795
-[os-1977]: https://github.com/NVIDIA/OpenShell/issues/1977
-[os-2270]: https://github.com/NVIDIA/OpenShell/issues/2270
 [os-inference]: https://github.com/NVIDIA/OpenShell/blob/e1f3c82caa3ed3b65de22889ae7ef32a774878ef/docs/how-it-works/inference.mdx
 
 > Numbering note: an earlier PR proposed 0016 (harness git-backend
