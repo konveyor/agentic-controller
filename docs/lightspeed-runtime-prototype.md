@@ -1,9 +1,10 @@
 # Lightspeed runtime integration prototype
 
 This implements the runtime-first direction in [ADR 0021](adr/0021-shared-runtime-and-conditional-lightspeed-execution.md).
-An existing AgentRun selects an image containing the current Konveyor harness
-and a patched Lightspeed DeepAgents runtime. The controller still creates an
-Agent Sandbox. No Lightspeed operator, new CRD, or Gateway migration is involved.
+An existing AgentRun invokes an Agent whose `spec.image` contains the current
+Konveyor harness and a patched Lightspeed DeepAgents runtime. The controller
+still creates an Agent Sandbox. No Lightspeed operator, new CRD, or Gateway
+migration is involved.
 
 The harness continues to prepare the application from Hub, isolate push
 credentials, assemble rules and instructions, expose the existing ACP tee,
@@ -26,10 +27,11 @@ active work and terminates shell child processes.
 
 The optional `lightspeed_agentic.acp` package adapts callbacks and normalized
 events to the existing harness connection. Removing it does not remove core
-sessions or the existing batch entrypoint. Only inspection-approved tool results
-reach the model and ACP viewers. The trusted `ask_user` bridge calls the harness's
-existing MCP executable; viewers cannot configure arbitrary local MCP commands.
-Remote MCP servers continue through Lightspeed's admission path.
+sessions or the existing batch entrypoint. With Lightspeed inspection enabled,
+untrusted tool results reach the model and ACP viewers only after inspection
+allows them. The trusted `ask_user` bridge calls the harness's existing MCP
+executable; viewers cannot configure arbitrary local MCP commands. Remote MCP
+servers continue through Lightspeed's admission path.
 
 Sessions and replay history last only for the runtime process. Viewer reconnect
 and further prompts during that lifetime do not imply recovery after pod restart.
@@ -39,8 +41,9 @@ and further prompts during that lifetime do not imply recovery after pod restart
 The runtime emits cumulative token observations as model calls complete. The
 harness consumes snapshots rather than summing notifications or recounting the
 first prompt during handoff. Missing measurements remain absent; measured zero
-is preserved. Observations cover agent, subagent, and summarization calls, but
-exclude isolated inspection classifier calls. They are not a billing total.
+is preserved. Observations cover agent, subagent, summarization, and shaping
+calls, but exclude isolated inspection classifier calls. Shaping calls do not
+consume the main session's turn budget. These observations are not a billing total.
 
 This prototype adds no monetary estimator. Its ACP consumer can read supplied
 cost, but this Lightspeed fork supplies none. A Lightspeed run configured with
@@ -87,10 +90,11 @@ hack/lightspeed-runtime/build-image.sh \
   /path/to/lightspeed-agentic-sandbox localhost/agent-lightspeed:prototype
 ```
 
-Set `CONTAINER_TOOL=docker` if needed. The image records the runtime Git revision
-in its labels. It contains Python, Git, and the Go harness; extend it with the
-language toolchain needed by the selected application. This is a development
-image, not a qualified production or FIPS build. The script does not publish it.
+The build uses Podman by default. The image records both the controller and
+runtime Git revisions in its labels. It contains Python, Git, and the Go harness;
+extend it with the language toolchain needed by the selected application. This is
+a development image, not a qualified production or FIPS build. The script does
+not publish it.
 
 Make the image available to the cluster and select it on a demo Agent using the
 existing `spec.image` field. Keep the Gateway, skills, and Hub-created
@@ -109,3 +113,47 @@ Record image digest, source revisions, AgentRun names, outcomes, and failures.
 Local scripted results do not substitute for cluster/UI evidence. Operator
 placement, per-invocation image/entrypoint control, and provider/secret access
 remain the separate operator adoption work.
+
+## Recorded verification (2026-11-06)
+
+The pinned runtime passed 1,988 tests, with 13 skipped, plus mypy and Ruff checks.
+The controller's `make test`, API tests, and harness tests and race checks passed.
+All six local integration cases passed: automatic execution, approval, ask-user,
+cancellation, steering/reconnect, and turn-limit handoff. An independent rerun
+also passed all six cases.
+
+A Podman-backed Kind cluster also passed the existing 16-check pipeline and three
+real AgentRun checks. Automatic execution and approval both reached `Succeeded`
+with `Verified=True`. The turn-limit case intentionally reached `Failed` with
+`LimitReached`: it committed and pushed its handoff using a second prompt in the
+same session. Each case reported cumulative usage and revoked its Hub fixture
+token. These checks use a scripted HTTP model and Hub fixture, real Git transport,
+and a direct ACP WebSocket viewer. They do not establish live-model quality or a
+browser UI result.
+
+An additional AgentRun created through the deployed Tackle Hub API also
+succeeded. It used the real Hub's application metadata and scoped token, answered
+an `ask_user` question and approved a tool through a direct ACP viewer, verified
+and pushed the resulting commit, and revoked the Hub token. Its model and Git
+repository remained local fixtures; UI/Hub login was disabled in this local
+deployment, so production authentication remains untested.
+
+To repeat the cluster checks, install the controller and Agent Sandbox, load the
+prototype image into a disposable cluster, and use a fresh namespace and evidence
+directory:
+
+```sh
+/path/to/lightspeed-agentic-sandbox/.venv/bin/python \
+  hack/lightspeed-runtime/cluster_verify.py \
+  --kubeconfig /path/to/task.kubeconfig \
+  --image localhost/agent-lightspeed:prototype \
+  --namespace lightspeed-validation \
+  --evidence .scratch/lightspeed-cluster-verification
+```
+
+The deployed `tackle2-ui` assets and Hub APIs responded, but the first browser
+observation showed a blank page and subsequent browser-control calls stalled.
+No browser-created AgentRun or browser interaction was verified. That manual UI
+check remains outstanding. Source revisions, image IDs, outcomes, and local
+evidence paths are recorded in
+[`reference.json`](../hack/lightspeed-runtime/reference.json).
