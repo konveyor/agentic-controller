@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -29,6 +30,7 @@ type lightspeedProcess struct {
 	secretKey string
 	done      chan struct{}
 	tempDir   string
+	terminate func() error
 }
 
 func startLightspeed(ctx context.Context, cfg Config) (Process, error) {
@@ -73,7 +75,13 @@ func startLightspeed(ctx context.Context, cfg Config) (Process, error) {
 	cmd := exec.CommandContext(ctx, python, "-m", "lightspeed_agentic.acp", "--host", host, "--port", fmt.Sprint(cfg.Port), "--config", configPath)
 	// Let the adapter close the active session and terminate local tool process
 	// groups before os/exec falls back to killing the runtime process.
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	var terminateOnce sync.Once
+	var terminateErr error
+	terminate := func() error {
+		terminateOnce.Do(func() { terminateErr = cmd.Process.Signal(syscall.SIGTERM) })
+		return terminateErr
+	}
+	cmd.Cancel = terminate
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Env = env
 	// Runtime errors are returned with ACP error data; preserve process logs too.
@@ -82,7 +90,7 @@ func startLightspeed(ctx context.Context, cfg Config) (Process, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start Lightspeed ACP: %w", err)
 	}
-	srv := &lightspeedProcess{cmd: cmd, port: cfg.Port, secretKey: cfg.SecretKey, done: make(chan struct{}), tempDir: dir}
+	srv := &lightspeedProcess{cmd: cmd, port: cfg.Port, secretKey: cfg.SecretKey, done: make(chan struct{}), tempDir: dir, terminate: terminate}
 	go func() { cmd.Wait(); close(srv.done) }()
 	cleanup = false
 	logging.Info("Lightspeed ACP started on port %d (pid %d)", cfg.Port, cmd.Process.Pid)
@@ -108,7 +116,7 @@ func (s *lightspeedProcess) Stop() error {
 	if !s.Alive() {
 		return nil
 	}
-	if err := s.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	if err := s.terminate(); err != nil {
 		return fmt.Errorf("sigterm Lightspeed: %w", err)
 	}
 	select {

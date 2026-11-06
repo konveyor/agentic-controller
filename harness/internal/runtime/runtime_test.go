@@ -175,3 +175,44 @@ func TestLightspeedVertexDocumentedGatewaySecret(t *testing.T) {
 		t.Fatal("explicit runtime configuration lost")
 	}
 }
+
+func TestLightspeedContextShutdownSignalsOnce(t *testing.T) {
+	bin := t.TempDir()
+	termLog := filepath.Join(bin, "terms")
+	ready := filepath.Join(bin, "ready")
+	t.Setenv("FIXTURE_TERM_LOG", termLog)
+	t.Setenv("FIXTURE_READY", ready)
+	script := "#!/bin/sh\ntrap 'printf x >> \"$FIXTURE_TERM_LOG\"; /bin/sleep 0.15; exit 0' TERM\nprintf ready > \"$FIXTURE_READY\"\nwhile :; do /bin/sleep 0.05; done\n"
+	if err := os.WriteFile(filepath.Join(bin, "python3"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	process, err := Start(ctx, Config{Name: "lightspeed", Provider: "openai", BindLoopback: true, MaxTurns: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer process.Stop()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fake runtime did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	if err := process.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(termLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "x" {
+		t.Fatalf("shutdown signalled %q; duplicate SIGTERM can interrupt Python session cleanup", data)
+	}
+}
