@@ -148,6 +148,30 @@ Set `AGENT_PLATFORMS` to change the platform list. The default is
   `main`, `release-*` branches, and `v*` tags. It builds `agent-base` before
   the language images and assembles their multi-architecture manifests.
 
+### CI goose cache
+
+PR artifact builds and the live-model E2E job reuse the fingerprinted goose
+image produced by `.github/actions/goose-image`. GitHub can restore caches
+from the current ref or the default branch, but caches saved on a PR merge ref
+or a different merge-group ref are isolated from subsequent queue entries.
+See [GitHub's cache access rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
+
+`goose-cache.yml` warms the cache on `main` for both native architectures after
+each push. It uses the same action and cache key as the consumers, so changes
+to the goose build inputs produce a new image while harness-only changes reuse
+the existing one. A cold compile finishes even if another commit lands; one
+pending run then checks the latest `main`. The warmer runs independently of
+merge-queue checks. Shipped image publishing retains its source-build contract.
+
+After cache eviction, maintainers can warm `main` before queuing another PR:
+
+```bash
+gh workflow run goose-cache.yml --ref main
+```
+
+A change to goose's own build inputs still needs an initial cold build before
+the matching default-branch cache exists.
+
 ## Harness lifecycle
 
 The controller's `skill-loader` runs first as an init container. It validates
