@@ -389,15 +389,9 @@ async def main():
     args.evidence = args.evidence.resolve()
     args.evidence.mkdir(parents=True, exist_ok=False)
     cluster = Cluster(args)
-    cluster.apply(
-        [
-            {
-                "apiVersion": "v1",
-                "kind": "Namespace",
-                "metadata": {"name": args.namespace},
-            }
-        ]
-    )
+    # Fixture model counters and Git repositories require a fresh namespace.
+    # Refuse an occupied namespace before applying any workload resources.
+    cluster.kubectl("create", "namespace", args.namespace)
     hostname = f"lightspeed-fixture.{args.namespace}.svc"
     pod = base(
         "Pod",
