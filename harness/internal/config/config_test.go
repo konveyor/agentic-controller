@@ -22,6 +22,7 @@ func clearKonveyorEnv(t *testing.T) {
 		"KONVEYOR_MODEL_PRIMARY_ENDPOINT",
 		"KONVEYOR_MODEL_PRIMARY_API_KEY",
 		"HARNESS_PARAMS_FILE",
+		"HARNESS_RUNTIME",
 		"HUB_BASE_URL",
 		"HUB_TOKEN",
 		"APP_ID",
@@ -693,6 +694,34 @@ func TestVerifyTotalTimeoutClamp(t *testing.T) {
 			}
 			if cfg.VerifyTotalTimeout != tc.want {
 				t.Errorf("HARNESS_VERIFY_TOTAL_TIMEOUT_SECONDS=%q → %v, want %v", tc.env, cfg.VerifyTotalTimeout, tc.want)
+			}
+		})
+	}
+}
+
+func TestRuntimeSelection(t *testing.T) {
+	for _, tc := range []struct {
+		value, want string
+		invalid     bool
+	}{
+		{"", "goose", false}, {"goose", "goose", false}, {" LightSpeed ", "lightspeed", false}, {"unknown", "", true},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			clearKonveyorEnv(t)
+			setRequiredEnv(t)
+			t.Setenv("HARNESS_RUNTIME", tc.value)
+			cfg, err := LoadFromEnv()
+			if tc.invalid {
+				if err == nil {
+					t.Fatal("unsupported runtime accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Runtime != tc.want {
+				t.Fatalf("runtime=%q, want %q", cfg.Runtime, tc.want)
 			}
 		})
 	}

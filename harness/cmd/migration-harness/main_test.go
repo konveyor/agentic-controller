@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/konveyor/migration-harness/internal/config"
@@ -1096,5 +1097,41 @@ func TestEnforceVerificationWaitsForTheLastStage(t *testing.T) {
 				t.Errorf("enforceVerification = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLightspeedUnsupportedCostRevokesBeforeRuntimeOrHubPreparation(t *testing.T) {
+	var paths []string
+	var pathsMu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pathsMu.Lock()
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		pathsMu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	paramsPath := filepath.Join(dir, "params.json")
+	if err := os.WriteFile(paramsPath, []byte(`{"execution":{"maxCost":"1"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{
+		"HARNESS_RUNTIME": "lightspeed", "HARNESS_PARAMS_FILE": paramsPath,
+		"HARNESS_TERMINATION_LOG_PATH": filepath.Join(dir, "termination.json"),
+		"KONVEYOR_LLM_MODEL":           "fixture", "KONVEYOR_ACP_SECRET_KEY": "fixture-key",
+		"HUB_BASE_URL": server.URL, "HUB_TOKEN": "fixture-token", "HUB_TOKEN_ID": "42", "APP_ID": "1", "TARGET_BRANCH": "fixture-branch",
+		// No runtime executable exists; capability validation must precede it.
+		"PATH": dir,
+	} {
+		t.Setenv(key, value)
+	}
+	code, err := runStage(nil, nil)
+	if code != 1 || err == nil || !strings.Contains(err.Error(), "monetary usage is unavailable") {
+		t.Fatalf("code=%d err=%v", code, err)
+	}
+	pathsMu.Lock()
+	defer pathsMu.Unlock()
+	if len(paths) != 1 || paths[0] != "POST /auth/tokens/42/revoke" {
+		t.Fatalf("Hub requests=%v; expected only token revocation", paths)
 	}
 }

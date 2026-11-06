@@ -413,7 +413,7 @@ func WaitReadyDial(ctx context.Context, host string, port int, secretKey string,
 		}
 	}
 
-	return nil, fmt.Errorf("goose serve not ready on %s:%d after %v", host, port, timeout)
+	return nil, fmt.Errorf("ACP runtime not ready on %s:%d after %v", host, port, timeout)
 }
 
 // Close closes the WebSocket connection.

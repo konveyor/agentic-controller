@@ -23,19 +23,19 @@ import (
 	"github.com/konveyor/migration-harness/internal/askuser"
 	"github.com/konveyor/migration-harness/internal/config"
 	"github.com/konveyor/migration-harness/internal/git"
-	"github.com/konveyor/migration-harness/internal/goose"
 	"github.com/konveyor/migration-harness/internal/hub"
 	"github.com/konveyor/migration-harness/internal/logging"
 	"github.com/konveyor/migration-harness/internal/params"
 	"github.com/konveyor/migration-harness/internal/prompt"
 	"github.com/konveyor/migration-harness/internal/proxy"
+	"github.com/konveyor/migration-harness/internal/runtime"
 	"github.com/konveyor/migration-harness/internal/tee"
 	"github.com/konveyor/migration-harness/internal/watcher"
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "migration-harness",
-	Short: "Thin git plumbing wrapper for goose-based migration stages",
+	Short: "Git lifecycle harness for ACP migration runtimes",
 }
 
 // exitCode carries runStage's exit code out of cobra's RunE closure —
@@ -62,12 +62,12 @@ var runCmd = &cobra.Command{
 	},
 }
 
-// askUserCmd is the stdio MCP server goose spawns for the ask_user tool
+// askUserCmd is the stdio MCP server the runtime spawns for the ask_user tool
 // (listed in session/new mcpServers by runStage). It never loads the
 // harness config — it only speaks MCP on stdin/stdout.
 var askUserCmd = &cobra.Command{
 	Use:    askuser.Subcommand,
-	Short:  "Serve the ask_user MCP tool over stdio (started by goose, not by hand)",
+	Short:  "Serve the ask_user MCP tool over stdio (started by the runtime, not by hand)",
 	Hidden: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -179,13 +179,17 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		logging.Warn("HUB_TOKEN_ID %q is not a valid numeric ID — skipping token revocation", cfg.HubTokenID)
 	}
 
+	if err := runtime.Validate(cfg.Runtime, cfg.MaxCost, cfg.ACPTee); err != nil {
+		return 1, err
+	}
+
 	creds, err := resolveFromHub(cfg, hubClient)
 	if err != nil {
 		return 1, fmt.Errorf("hub resolution: %w", err)
 	}
 	// Model text is logged at stage end; whatever it says, the
-	// credentials goose can read must not be in it. Maven setup adds the
-	// secrets from the effective settings file before goose starts.
+	// credentials the runtime can read must not be in it. Maven setup adds the
+	// secrets from the effective settings file before the runtime starts.
 	red = newRedactor(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
 
 	if cfg.TargetBranch == creds.Branch {
@@ -325,38 +329,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		}
 	}
 
-	// 5. Start goose serve. With the ACP tee (default) goose binds
-	// loopback on :4001 and the harness owns the pod's :4000 endpoint;
-	// with HARNESS_ACP_TEE=off goose takes :4000 itself as before.
-	logging.Header("Goose Setup")
-	goosePort := 0
-	if cfg.ACPTee {
-		goosePort = goose.LoopbackACPPort
-	}
-	srv, err := goose.StartServe(ctx, goose.ServeConfig{
-		Port:         goosePort,
-		BindLoopback: cfg.ACPTee,
-		SecretKey:    cfg.ACPSecretKey,
-		Provider:     cfg.Provider,
-		Model:        cfg.Model,
-		APIKey:       cfg.APIKey,
-		Endpoint:     cfg.Endpoint,
-		Mode:         cfg.Params.Execution.Mode,
-		MaxTurns:     cfg.MaxTurns,
-	})
-	if err != nil {
-		return 1, fmt.Errorf("start goose serve: %w", err)
-	}
-	defer srv.Stop()
-
-	// 6. Connect ACP, create session
-	wsClient, err := acp.WaitReadyDial(ctx, "127.0.0.1", srv.Port(), srv.SecretKey(), 30*time.Second)
-	if err != nil {
-		return 1, fmt.Errorf("connect to goose: %w", err)
-	}
-	defer wsClient.Close()
-
-	session := acp.NewSessionClient(wsClient)
+	// Pin the optional trusted ask_user executable before either runtime starts.
 	// ask_user: the harness binary doubles as a stdio MCP server giving the
 	// agent one tool whose questions reach attached viewers (through the
 	// tee) and block the turn until answered — the in-turn "stop and
@@ -374,6 +347,44 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			logging.Warn("ask_user tool disabled: cannot resolve harness executable: %v", err)
 		}
 	}
+	// 5. Start the selected runtime behind the same ACP client and viewer tee.
+	logging.Header("Runtime Setup")
+	runtimePort := 0
+	if cfg.ACPTee {
+		runtimePort = runtime.LoopbackACPPort
+	}
+	var askUserConfig *runtime.AskUserConfig
+	if len(mcpServers) > 0 {
+		askUserConfig = &runtime.AskUserConfig{Command: mcpServers[0].Command, Args: mcpServers[0].Args}
+	}
+	srv, err := runtime.Start(ctx, runtime.Config{
+		Name:         cfg.Runtime,
+		Port:         runtimePort,
+		BindLoopback: cfg.ACPTee,
+		SecretKey:    cfg.ACPSecretKey,
+		Provider:     cfg.Provider,
+		Model:        cfg.Model,
+		APIKey:       cfg.APIKey,
+		Endpoint:     cfg.Endpoint,
+		Mode:         cfg.Params.Execution.Mode,
+		MaxTurns:     cfg.MaxTurns,
+		MaxCost:      cfg.MaxCost,
+		Cwd:          cloneDir,
+		AskUser:      askUserConfig,
+	})
+	if err != nil {
+		return 1, fmt.Errorf("start %s runtime: %w", cfg.Runtime, err)
+	}
+	defer srv.Stop()
+
+	// 6. Connect ACP and create the reusable session.
+	wsClient, err := acp.WaitReadyDial(ctx, "127.0.0.1", srv.Port(), srv.SecretKey(), 30*time.Second)
+	if err != nil {
+		return 1, fmt.Errorf("connect to %s runtime: %w", cfg.Runtime, err)
+	}
+	defer wsClient.Close()
+	session := acp.NewSessionClient(wsClient)
+	session.SetAuthoritativeStopReasons(cfg.Runtime == "lightspeed")
 	sessionID, err := session.CreateSession(ctx, cloneDir, mcpServers)
 	if err != nil {
 		return 1, fmt.Errorf("create session: %w", err)
@@ -385,7 +396,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	}
 
 	// 6b. Expose the run: tee listener on the pod ACP port. Viewers get
-	// a verbatim pipe to goose plus the run session's live stream —
+	// a verbatim pipe to the runtime plus the run session's live stream —
 	// message/thought chunks, tool calls, usage — and may redirect the
 	// run (steer/cancel) unless HARNESS_HITL_STEER=off. Permission asks
 	// are offered to whoever is watching. Failure here never fails the
@@ -398,15 +409,15 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			HITLTimeout:  cfg.HITLTimeout,
 			SteerEnabled: cfg.HITLSteer,
 		})
-		if err := t.Start(goose.DefaultACPPort); err != nil {
+		if err := t.Start(runtime.DefaultACPPort); err != nil {
 			logging.Warn("ACP tee: %v — run continues without live viewers", err)
 		} else {
 			defer t.Stop()
 			t.AttachRun(wsClient, sessionID)
 			session.SetPermissionForwarder(t)
 			teeSrv = t
-			logging.Ok("ACP tee on :%d (goose loopback :%d, viewer steering %s)",
-				goose.DefaultACPPort, srv.Port(), map[bool]string{true: "on", false: "off"}[cfg.HITLSteer])
+			logging.Ok("ACP tee on :%d (runtime loopback :%d, viewer steering %s)",
+				runtime.DefaultACPPort, srv.Port(), map[bool]string{true: "on", false: "off"}[cfg.HITLSteer])
 		}
 	}
 
@@ -526,8 +537,8 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	}
 	defer w.Stop()
 
-	// 9. Send the primary ACP prompt (blocks until goose finishes
-	// naturally, hits its native GOOSE_MAX_TURNS, or the harness cancels
+	// 9. Send the primary ACP prompt (blocks until the runtime finishes
+	// naturally, hits its native turn limit, or the harness cancels
 	// it for cost — ADR 0011).
 	logging.Header("Running Stage")
 	logging.Info("max turns: %d", cfg.MaxTurns)
@@ -600,7 +611,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// Built once: it is what the log, the viewer, the termination blob
 	// and the returned error all say.
 	promptDetail := promptFailureDetail(err, red, func() string {
-		return srv.ProviderError(promptSentAt, promptReturnedAt, goose.ProviderErrorGrace)
+		return srv.ProviderError(promptSentAt, promptReturnedAt, runtime.ProviderErrorGrace)
 	})
 	if err != nil {
 		logging.Err("prompt failed: %s", promptDetail)
@@ -646,9 +657,9 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	}
 	emitPlan("completed", "completed", "in_progress")
 
-	// 10. Check goose health — a crash overrides any outcome above.
+	// 10. Check runtime health — a crash overrides any outcome above.
 	if !srv.Alive() {
-		logging.Err("goose serve crashed")
+		logging.Err("%s runtime crashed", cfg.Runtime)
 		stageOutcome, limit = outcomeFailed, limitNone
 	}
 
@@ -1684,7 +1695,7 @@ const closingMessageLimit = 4000
 // with no trace of why.
 func logAgentClosingMessage(r *acp.PromptResult, red *redactor) (providerError bool) {
 	for _, n := range r.Notices {
-		logging.Warn("goose notice: %s", red.redact(n))
+		logging.Warn("runtime notice: %s", red.redact(n))
 	}
 	full := red.redact(strings.TrimSpace(r.FinalMessage()))
 	if full == "" {
