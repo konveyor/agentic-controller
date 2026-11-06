@@ -56,6 +56,12 @@ go build -o migration-harness ./cmd/migration-harness/
 
 ## Configuration
 
+The opt-in [Lightspeed runtime prototype](../docs/lightspeed-runtime-prototype.md)
+uses the same harness and ACP tee with `HARNESS_RUNTIME=lightspeed`. It requires
+the companion runtime changes described there. Goose remains the default.
+The prototype reports token usage and supports same-session handoff; it rejects
+`maxCost` because the runtime does not yet report monetary cost.
+
 Configuration comes from two sources: environment variables (required and optional) and the controller-mounted `/run/konveyor/params.json` file (execution controls and workflow/agent parameter values — see the Parameters section below).
 
 ### Required
