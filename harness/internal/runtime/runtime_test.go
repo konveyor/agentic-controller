@@ -156,3 +156,22 @@ func TestLightspeedRequiresViewerTee(t *testing.T) {
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestLightspeedVertexDocumentedGatewaySecret(t *testing.T) {
+	env, err := lightspeedEnv([]string{"GCP_PROJECT_ID=documented-project", "GCP_LOCATION=us-east5", "GOOGLE_CLOUD_PROJECT=alias-project", "GOOGLE_CLOUD_LOCATION=alias-region"}, Config{Provider: "gcp-vertex-ai", Model: "claude-sonnet-4-5"}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := envMap(env)
+	if values["LIGHTSPEED_PROVIDER_PROJECT"] != "documented-project" || values["LIGHTSPEED_PROVIDER_REGION"] != "us-east5" {
+		t.Fatal("documented Gateway Secret names not mapped")
+	}
+	env, err = lightspeedEnv([]string{"GCP_PROJECT_ID=project", "GCP_LOCATION=region", "LIGHTSPEED_PROVIDER_PROJECT=explicit-project", "LIGHTSPEED_PROVIDER_REGION=explicit-region"}, Config{Provider: "gcp-vertex-ai"}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	values = envMap(env)
+	if values["LIGHTSPEED_PROVIDER_PROJECT"] != "explicit-project" || values["LIGHTSPEED_PROVIDER_REGION"] != "explicit-region" {
+		t.Fatal("explicit runtime configuration lost")
+	}
+}

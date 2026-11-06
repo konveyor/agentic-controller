@@ -329,6 +329,7 @@ type ContentBlock struct {
 type PromptParams struct {
 	SessionID string         `json:"sessionId"`
 	Prompt    []ContentBlock `json:"prompt"`
+	Meta      map[string]any `json:"_meta,omitempty"`
 }
 
 // PromptResult is the final response from session/prompt.
@@ -465,9 +466,29 @@ func ProviderErrorText(text string) string {
 // when to stop; TurnsUsed on the result is for reporting only (ADR
 // 0011).
 func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, content []ContentBlock, costLimit float64) (*PromptResult, error) {
+	return c.sendPrompt(ctx, sessionID, content, costLimit, 0)
+}
+
+// SendPromptWithTurnLimit supplies an opt-in Lightspeed model-cycle budget for
+// this prompt, so wind-down spends only the turns remaining in the run budget.
+// Other runtime calls keep using SendPrompt with their existing native limit.
+func (c *SessionClient) SendPromptWithTurnLimit(ctx context.Context, sessionID string, content []ContentBlock, costLimit float64, maxTurns int) (*PromptResult, error) {
+	if maxTurns <= 0 {
+		return nil, fmt.Errorf("prompt maxTurns must be positive")
+	}
+	return c.sendPrompt(ctx, sessionID, content, costLimit, maxTurns)
+}
+
+func (c *SessionClient) sendPrompt(ctx context.Context, sessionID string, content []ContentBlock, costLimit float64, maxTurns int) (*PromptResult, error) {
+	var meta map[string]any
+	if maxTurns > 0 {
+		meta = map[string]any{"lightspeed": map[string]any{"maxTurns": maxTurns}}
+	}
+
 	req := newRequest("session/prompt", &PromptParams{
 		SessionID: sessionID,
 		Prompt:    content,
+		Meta:      meta,
 	})
 
 	respCh := c.ws.registerPending(req.ID)
@@ -508,7 +529,10 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			for _, n := range drainNotifications(notifCh) {
+				process(n)
+			}
+			return result, ctx.Err()
 		case <-c.ws.Done():
 			// readLoop exited. The response may already be routed to
 			// respCh — drain it before giving up.
@@ -775,7 +799,7 @@ func trackUsage(msg *RPCResponse, result *PromptResult, sawCost *bool) {
 	// Runtimes may publish the same cumulative snapshot through both the
 	// standard ACP channel and Goose's extension. Assign snapshots instead of
 	// summing them so dual publication and two prompts cannot double count.
-	if msg.Method != gooseUpdateMethod && msg.Method != "session/update" {
+	if msg.Method != gooseUpdateMethod && msg.Method != "_lightspeed/session/update" && msg.Method != "session/update" {
 		return
 	}
 	var params struct {

@@ -161,10 +161,16 @@ func lightspeedEnv(base []string, cfg Config, dir string) ([]string, error) {
 		}
 		values["LIGHTSPEED_MODEL_PROVIDER"] = family
 		if values["LIGHTSPEED_PROVIDER_PROJECT"] == "" {
-			values["LIGHTSPEED_PROVIDER_PROJECT"] = values["GOOGLE_CLOUD_PROJECT"]
+			values["LIGHTSPEED_PROVIDER_PROJECT"] = values["GCP_PROJECT_ID"]
+			if values["LIGHTSPEED_PROVIDER_PROJECT"] == "" {
+				values["LIGHTSPEED_PROVIDER_PROJECT"] = values["GOOGLE_CLOUD_PROJECT"]
+			}
 		}
 		if values["LIGHTSPEED_PROVIDER_REGION"] == "" {
-			values["LIGHTSPEED_PROVIDER_REGION"] = values["GOOGLE_CLOUD_LOCATION"]
+			values["LIGHTSPEED_PROVIDER_REGION"] = values["GCP_LOCATION"]
+			if values["LIGHTSPEED_PROVIDER_REGION"] == "" {
+				values["LIGHTSPEED_PROVIDER_REGION"] = values["GOOGLE_CLOUD_LOCATION"]
+			}
 		}
 		// The runtime's Vertex resolver reads this specific filename.
 		content := values["GOOGLE_APPLICATION_CREDENTIALS_JSON"]

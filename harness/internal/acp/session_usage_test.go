@@ -20,7 +20,7 @@ func TestUsageSnapshotsAcrossChannels(t *testing.T) {
 	result := &PromptResult{}
 	sawCost := false
 	update := `{"sessionUpdate":"usage_update","inputTokens":100,"outputTokens":25,"cost":{"amount":1.5,"currency":"USD"}}`
-	for _, method := range []string{"session/update", gooseUpdateMethod, "session/update"} {
+	for _, method := range []string{"session/update", gooseUpdateMethod, "_lightspeed/session/update", "session/update"} {
 		trackUsage(usageNotification(t, method, update), result, &sawCost)
 	}
 	if result.InputTokens == nil || *result.InputTokens != 100 || result.OutputTokens == nil || *result.OutputTokens != 25 || result.Cost != 1.5 || !result.CostReported || !sawCost {
@@ -114,6 +114,64 @@ func TestAuthoritativeStopReasonSurvivesDisconnect(t *testing.T) {
 	s.mu.Unlock()
 	<-done
 	if err != ErrConnectionLost || result == nil || !result.StopReasonAuthoritative || result.TurnsUsed != 1 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestPromptTurnLimitMetadata(t *testing.T) {
+	s := newDemuxServer(t)
+	c := s.dial(t)
+	sc := NewSessionClient(c)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	var err error
+	go func() {
+		_, err = sc.SendPromptWithTurnLimit(ctx, "s1", []ContentBlock{{Type: "text", Text: "handoff"}}, 0, 3)
+		close(done)
+	}()
+	request := s.next()
+	params := request["params"].(map[string]any)
+	meta := params["_meta"].(map[string]any)["lightspeed"].(map[string]any)
+	if meta["maxTurns"] != float64(3) {
+		t.Fatalf("metadata=%v", meta)
+	}
+	s.push(`{"jsonrpc":"2.0","id":` + jsonInt(int64(request["id"].(float64))) + `,"result":{"stopReason":"end_turn"}}`)
+	<-done
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sc.SendPromptWithTurnLimit(ctx, "s1", nil, 0, 0); err == nil {
+		t.Fatal("empty remaining budget accepted")
+	}
+}
+
+func TestContextCancellationPreservesObservedUsage(t *testing.T) {
+	s := newDemuxServer(t)
+	c := s.dial(t)
+	sc := NewSessionClient(c)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	observed := make(chan struct{})
+	sc.SetTurnHandler(func(int) { close(observed) })
+	done := make(chan struct{})
+	var result *PromptResult
+	var err error
+	go func() {
+		result, err = sc.SendPrompt(ctx, "s1", []ContentBlock{{Type: "text", Text: "go"}}, 0)
+		close(done)
+	}()
+	s.next()
+	s.push(`{"jsonrpc":"2.0","method":"_lightspeed/session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"usage_update","inputTokens":20,"outputTokens":5}}}`)
+	s.push(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"tool_call","toolCallId":"one"}}}`)
+	select {
+	case <-observed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("usage notification was not processed")
+	}
+	cancel()
+	<-done
+	if err != context.Canceled || result == nil || result.InputTokens == nil || *result.InputTokens != 20 || result.OutputTokens == nil || *result.OutputTokens != 5 {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }

@@ -645,9 +645,17 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		// handoff no room to write .konveyor/handoff.md and commit
 		// before being cancelled itself.
 		var handoffErr error
-		handoffResult, handoffErr = session.SendPrompt(ctx, sessionID, []acp.ContentBlock{
-			{Type: "text", Text: handoffPromptText},
-		}, cfg.MaxCost)
+		handoffContent := []acp.ContentBlock{{Type: "text", Text: handoffPromptText}}
+		if cfg.Runtime == "lightspeed" {
+			remaining := cfg.MaxTurns - primaryResult.TurnsUsed
+			if remaining > 0 {
+				handoffResult, handoffErr = session.SendPromptWithTurnLimit(ctx, sessionID, handoffContent, cfg.MaxCost, remaining)
+			} else {
+				logging.Warn("handoff skipped: no turns remain in the configured maxTurns budget")
+			}
+		} else {
+			handoffResult, handoffErr = session.SendPrompt(ctx, sessionID, handoffContent, cfg.MaxCost)
+		}
 		if handoffErr != nil {
 			logging.Warn("handoff prompt: %s — continuing, the limit-reached outcome stands", red.redact(handoffErr.Error()))
 		}
