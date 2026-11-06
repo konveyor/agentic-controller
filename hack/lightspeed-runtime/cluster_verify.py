@@ -293,6 +293,14 @@ async def execute_case(cluster, case):
         "secret-key"
     ]
     secret = base64.b64decode(key).decode()
+    await cluster.wait(
+        "agentrun",
+        prefix,
+        lambda r: any(
+            c.get("type") == "ACPReady" and c.get("status") == "True"
+            for c in r.get("status", {}).get("conditions", [])
+        ),
+    )
     done = asyncio.Event()
     frames = []
     with cluster.forward(
