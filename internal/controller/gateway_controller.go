@@ -23,7 +23,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
+	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -66,9 +68,96 @@ const (
 	anthropicAPIVersion = "2023-06-01"
 
 	// endpointModelsProbe is the models endpoint the connectivity probe
-	// requests. Only providers with an OpenAI-compatible surface are probed
-	// at all; the rest skip verification (see providersWithoutModelsProbe).
+	// requests. Only providers with an OpenAI-compatible surface get this
+	// probe; see providerProbeKind for the rest.
 	endpointModelsProbe = "$LLM_ENDPOINT/v1/models"
+
+	// endpointBedrockConverseProbe is the bedrock-runtime operation the
+	// SigV4 probe calls. ConverseStream rather than Converse on purpose:
+	// goose streams, so this is the operation a run actually performs and
+	// the one an IAM policy or SCP has to allow
+	// (bedrock:InvokeModelWithResponseStream). Both the endpoint and the
+	// model id travel as env vars, so nothing from the spec is interpolated
+	// into the command string.
+	//
+	// $LLM_ENDPOINT here is not spec.endpoint: it is the bedrock-runtime
+	// address the run itself will reach, derived from the credential Secret
+	// by bedrockProbeEndpoint. A Bedrock run ignores spec.endpoint entirely
+	// (the AWS SDK builds the host from AWS_REGION - see providerEnv in
+	// harness/internal/goose/lifecycle.go), so signing for spec.endpoint
+	// would probe a host no run talks to.
+	//
+	// $LLM_MODEL is percent-encoded by the controller
+	// (awsEscapePathSegment), because modelId is one path label and an
+	// inference-profile ARN contains slashes. Raw, those split the path and
+	// bedrock-runtime no longer recognizes the route - answering HTTP 200
+	// with a coral UnknownOperationException body, which a plain 2xx check
+	// reads as a pass.
+	endpointBedrockConverseProbe = "$LLM_ENDPOINT/model/$LLM_MODEL/converse-stream"
+
+	// bedrockErrorBodyPattern marks a response body as an AWS error even
+	// when the status line said 2xx: "__type" is how the coral stack names
+	// an exception, and every AWS error type ends in "Exception". A real
+	// ConverseStream success is an application/vnd.amazon.eventstream whose
+	// events carry neither. This is the second guard on the false pass
+	// above: the encoding closes the known trigger, and this closes the
+	// shape of it. A one-token completion that happened to be the word
+	// "Exception" would fail the probe instead, which is the safe direction
+	// to be wrong in.
+	bedrockErrorBodyPattern = `__type|Exception`
+
+	// envLLMModel carries the probed model id into the verification pod,
+	// already percent-encoded (see awsEscapePathSegment).
+	envLLMModel = "LLM_MODEL"
+
+	// envLLMEndpoint carries the address the probe calls: spec.endpoint for
+	// the models probe, and the resolved bedrock-runtime host for Bedrock
+	// (see bedrockProbeEndpoint).
+	envLLMEndpoint = "LLM_ENDPOINT"
+
+	// bedrockSigningService is the service name in the SigV4 credential
+	// scope for bedrock-runtime. The region comes from the credential
+	// Secret's AWS_REGION, which is what the run signs with too.
+	bedrockSigningService = "bedrock"
+
+	// bedrockProbeBody is the smallest ConverseStream request that still
+	// exercises the model: one short user turn, capped at a single output
+	// token. A verification therefore costs a handful of tokens, and only
+	// on a spec change or a credential rotation - not on every reconcile.
+	bedrockProbeBody = `{"messages":[{"role":"user","content":[{"text":"ping"}]}],` +
+		`"inferenceConfig":{"maxTokens":1}}`
+
+	// AWS credential Secret keys. These are the names the AWS SDK itself
+	// reads, which is why a Bedrock Gateway's Secret uses them and why
+	// envFrom can hand them straight to curl.
+	awsAccessKeyIDEnv     = "AWS_ACCESS_KEY_ID"
+	awsSecretAccessKeyEnv = "AWS_SECRET_ACCESS_KEY"
+	awsRegionEnv          = "AWS_REGION"
+
+	// AWS SDK endpoint overrides, in the precedence the SDK applies them.
+	// A Secret carrying one of these is a Secret whose runs reach Bedrock
+	// somewhere other than the public regional host - a PrivateLink or
+	// FIPS address - so the probe has to follow it to probe what the run
+	// probes (see bedrockProbeEndpoint).
+	awsBedrockEndpointURLEnv = "AWS_ENDPOINT_URL_BEDROCK_RUNTIME"
+	awsEndpointURLEnv        = "AWS_ENDPOINT_URL"
+
+	// bedrockRuntimeHostPrefix and the AWS DNS suffixes are how the SDK
+	// builds a bedrock-runtime host from a region, and so how the probe
+	// does. The China partition uses its own suffix.
+	bedrockRuntimeHostPrefix = "bedrock-runtime."
+	awsDNSSuffix             = ".amazonaws.com"
+	awsDNSSuffixChina        = ".amazonaws.com.cn"
+	awsChinaRegionPrefix     = "cn-"
+
+	// verificationDetailLimit bounds the provider error text a probe copies
+	// into its termination message, which the kubelet caps at 4KiB.
+	verificationDetailLimit = 300
+
+	// diagDetailPrefix introduces the free-text tail of a probe diagnostic
+	// (the provider's own error body). It must come last on the line - see
+	// diagDetail.
+	diagDetailPrefix = " detail="
 
 	// Provider identifiers in normalized form (see normalizeProvider), kept
 	// in sync with the harness providerEnv switch.
@@ -99,10 +188,10 @@ const (
 	reasonEndpointUnreachable  = "EndpointUnreachable"
 
 	// reasonVerificationSkipped marks a Gateway the controller deliberately
-	// did not probe because its provider exposes no OpenAI-compatible surface
-	// (see providersWithoutModelsProbe). Ready is True so the Gateway is
-	// usable; ConnectionVerified stays false so status does not claim a check
-	// that never ran.
+	// did not probe, because no probe it can run would describe this Gateway
+	// (see gatewayProbeSkip). Ready is True so the Gateway is usable;
+	// ConnectionVerified stays false so status does not claim a check that
+	// never ran.
 	reasonVerificationSkipped = "VerificationSkipped"
 )
 
@@ -213,15 +302,21 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		readyCond.ObservedGeneration == gateway.Generation &&
 		gateway.Status.VerifiedCredentialHash == credHash
 
-	// Step 2: A provider with no OpenAI-compatible surface is not probed at
-	// all - the Job could only ever fail. This is decided ahead of the
-	// terminal early return below on purpose: a controller from before the
-	// skip parks such a Gateway at ConnectionFailed, which is terminal, and
-	// the early return would then keep that stale verdict for good (#227).
-	// Drop any Job left behind by a previous provider value and settle the
-	// Gateway as skipped.
-	if !hasModelsProbe(gateway.Spec.Provider) {
-		if settled && readyCond.Reason == reasonVerificationSkipped {
+	// Step 2: A Gateway no probe can describe is not probed at all - the Job
+	// could only ever fail, or would have to send a credential somewhere it
+	// does not belong. This is decided ahead of the terminal early return
+	// below on purpose: a controller from before the skip parks such a
+	// Gateway at ConnectionFailed, which is terminal, and the early return
+	// would then keep that stale verdict for good (#227). Drop any Job left
+	// behind by a previous provider value and settle the Gateway as skipped.
+	probe := providerProbeKind(gateway.Spec.Provider)
+	if skipReason, skipped := gatewayProbeSkip(&gateway, probe, &secret); skipped {
+		// The message is compared along with the reason: a Gateway skipped by
+		// an older controller is settled against a wording that no longer
+		// says why, and on reason alone it would keep that stale sentence
+		// until its generation or credential changed.
+		if settled && readyCond.Reason == reasonVerificationSkipped &&
+			readyCond.Message == skipReason {
 			return ctrl.Result{}, nil
 		}
 		if err := r.deleteVerificationJobs(ctx, &gateway, ""); err != nil {
@@ -236,18 +331,31 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: gateway.Generation,
 			Reason:             reasonVerificationSkipped,
-			Message: fmt.Sprintf(
-				"Provider %q has no OpenAI-compatible /v1/models to probe; "+
-					"endpoint and credentials are unverified",
-				gateway.Spec.Provider),
+			Message:            skipReason,
 		})
 		return r.patchStatus(ctx, &gateway, original)
 	}
 
 	// Step 2b: If already verified (or failed) for the current generation and
 	// the credential it was verified against, skip re-verification.
-	if settled && isTerminalReadyReason(readyCond.Reason) {
+	//
+	// VerificationSkipped is excluded: reaching here means a probe does now
+	// describe this Gateway, so a skipped verdict left by an older controller
+	// - every native aws-bedrock Gateway, before this - must be re-probed
+	// rather than carried forward. The mirror of the #227 case above.
+	if settled && isTerminalReadyReason(readyCond.Reason) &&
+		readyCond.Reason != reasonVerificationSkipped {
 		return ctrl.Result{}, nil
+	}
+
+	// The address the probe will actually call. For every provider but
+	// Bedrock that is spec.endpoint; for Bedrock it comes from the credential
+	// Secret, because that is where a Bedrock run's endpoint comes from too
+	// (see bedrockProbeEndpoint). Status messages name this rather than
+	// spec.endpoint, so a failure points at the host that produced it.
+	probeEndpoint := gateway.Spec.Endpoint
+	if probe == probeBedrockConverse {
+		probeEndpoint = bedrockProbeEndpoint(&secret)
 	}
 
 	// Clean up verification Jobs from prior generations and prior credentials.
@@ -267,7 +375,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.Get(ctx, jobKey, &job); err != nil {
 		if errors.IsNotFound(err) {
 			// No verification Job exists - create one.
-			if err := r.createVerificationJob(ctx, &gateway, jobName); err != nil {
+			if err := r.createVerificationJob(ctx, &gateway, jobName, probeEndpoint); err != nil {
 				logger.Error(err, "Failed to create verification Job")
 				return ctrl.Result{}, err
 			}
@@ -293,7 +401,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// transport error) survives on status. Falls back to a generic
 		// message when no diagnostic is available.
 		diag := r.verificationDiagnostic(ctx, gateway.Namespace, jobName, job.UID)
-		reason, message := gatewayVerifyReason(diag, gateway.Spec.Endpoint, jobName, succeeded)
+		reason, message := gatewayVerifyReason(diag, probeEndpoint, jobName, succeeded, probe)
 
 		status := metav1.ConditionFalse
 		if succeeded {
@@ -342,33 +450,208 @@ var knownProviders = map[string]bool{
 	providerAWSBedrock: true,
 }
 
-// providersWithoutModelsProbe are the providers whose native API the
-// verification probe cannot speak. Both reach their service through a cloud
-// SDK rather than an HTTP endpoint guarded by a bearer token: there is no
-// /v1/models to GET, and the credential is a SigV4 triple or an ADC service
-// account rather than a single key, so credentialRef is keyless and the probe
-// pod is handed no credential at all (includeAuth is false). Probing them can
-// only ever produce a non-2xx - Bedrock answers 404 - which under the ^2 check
-// parks the Gateway at ConnectionFailed permanently and holds every
-// referencing Agent at DependenciesNotReady.
+// gatewayProbeKind is the verification probe a provider's API can answer.
+type gatewayProbeKind int
+
+const (
+	// probeNone: nothing the controller can call would tell the truth about
+	// this provider, so the Gateway settles as reasonVerificationSkipped.
+	probeNone gatewayProbeKind = iota
+
+	// probeModels: GET /v1/models with a bearer-style credential, the
+	// OpenAI-compatible default every unrecognized provider also gets.
+	probeModels
+
+	// probeBedrockConverse: a SigV4-signed ConverseStream against
+	// bedrock-runtime, which exercises the credential, the region, the model
+	// id and bedrock:InvokeModelWithResponseStream - everything a run needs.
+	probeBedrockConverse
+)
+
+// providerProbes maps a normalized provider to the probe its API can answer.
+// A provider absent from the map gets probeModels; the controller logs the
+// mismatch for one it does not recognize (see createVerificationJob),
+// mirroring the fallthrough warning in providerEnv.
 //
-// These Gateways are marked Ready without a probe, carrying
-// reasonVerificationSkipped and ConnectionVerified false, so status says
-// plainly that nothing was checked. A provider-aware probe (SigV4
-// ListFoundationModels, a Vertex token check) is the real fix and is not this.
+// gcp_vertex_ai stays unprobed: its credential is an ADC service account and
+// a call needs an OAuth2 token minted from that account's RSA key, which is
+// not something curl can do. Until that probe exists, skip-with-reason (#167)
+// remains the honest answer for it.
 //
 // Kept in lockstep with the harness providerEnv switch
 // (harness/internal/goose/lifecycle.go), where these same two providers are
 // the ones that take neither an API key nor an endpoint.
-var providersWithoutModelsProbe = map[string]bool{
-	providerAWSBedrock: true,
-	providerGCPVertex:  true,
+var providerProbes = map[string]gatewayProbeKind{
+	providerAWSBedrock: probeBedrockConverse,
+	providerGCPVertex:  probeNone,
 }
 
-// hasModelsProbe reports whether the provider exposes an OpenAI-compatible
-// /v1/models the verification Job can meaningfully GET.
-func hasModelsProbe(provider string) bool {
-	return !providersWithoutModelsProbe[normalizeProvider(provider)]
+// providerProbeKind returns the probe to run for a provider.
+func providerProbeKind(provider string) gatewayProbeKind {
+	if kind, ok := providerProbes[normalizeProvider(provider)]; ok {
+		return kind
+	}
+	return probeModels
+}
+
+// bedrockProbeSecretKeys are the Secret keys the SigV4 probe needs to sign a
+// request. They are the static-credential names the AWS SDK reads, so a
+// Secret that carries them is one the probe can reproduce exactly.
+var bedrockProbeSecretKeys = []string{
+	awsAccessKeyIDEnv,
+	awsSecretAccessKeyEnv,
+	awsRegionEnv,
+}
+
+// gatewayProbeSkip reports whether this Gateway is settled without being
+// probed, and the status message saying why. Three cases, all of which leave
+// the Gateway exactly where #167 left it - Ready, unverified, and honest
+// about it - rather than failing a configuration that works:
+//
+//   - the provider has no probe the controller can speak (gcp_vertex_ai);
+//   - a Bedrock Secret without the static SigV4 keys. A cluster that gets its
+//     AWS credentials another way (IRSA, a web identity token) is a working
+//     setup the probe pod cannot reproduce, so a failure here would be the
+//     probe's, not the Gateway's. The message names the missing keys, which
+//     also catches the common case: a Secret missing AWS_REGION;
+//   - a Bedrock Secret the probe cannot turn into a bedrock-runtime address:
+//     an AWS_REGION that is not a region name, or an endpoint override that
+//     is not an https URL. Both would otherwise put something unchecked from
+//     the Secret into the URL the probe signs for, and neither can be the
+//     Gateway's fault in a way a failure would help with.
+func gatewayProbeSkip(
+	gateway *konveyoriov1alpha1.Gateway,
+	probe gatewayProbeKind,
+	secret *corev1.Secret,
+) (string, bool) {
+	switch probe {
+	case probeNone:
+		return fmt.Sprintf(
+			"Provider %q has no API surface the verification probe can speak; "+
+				"endpoint and credentials are unverified",
+			gateway.Spec.Provider), true
+
+	case probeBedrockConverse:
+		if missing := missingSecretKeys(secret, bedrockProbeSecretKeys); len(missing) > 0 {
+			return fmt.Sprintf(
+				"Secret %q does not carry %s, so the SigV4 probe cannot sign a "+
+					"request; endpoint and credentials are unverified",
+				gateway.Spec.CredentialRef.SecretName, strings.Join(missing, ", ")), true
+		}
+		if override := bedrockEndpointOverride(secret); override != "" && !isHTTPSURL(override) {
+			return fmt.Sprintf(
+				"Secret %q sets an endpoint override that is not an https URL (%q), "+
+					"and the probe will not send a signed AWS credential in the clear; "+
+					"endpoint and credentials are unverified",
+				gateway.Spec.CredentialRef.SecretName, override), true
+		}
+		if region := bedrockProbeRegion(secret); !isAWSRegionName(region) {
+			return fmt.Sprintf(
+				"Secret %q carries %s=%q, which is not an AWS region name, so the "+
+					"probe cannot address bedrock-runtime; endpoint and credentials "+
+					"are unverified",
+				gateway.Spec.CredentialRef.SecretName, awsRegionEnv, region), true
+		}
+	}
+
+	return "", false
+}
+
+// missingSecretKeys returns the wanted keys the Secret does not hold, in the
+// order they were asked for. A key present but empty counts as missing: an
+// empty AWS_REGION signs a request into a credential scope that cannot exist.
+func missingSecretKeys(secret *corev1.Secret, want []string) []string {
+	var missing []string
+	for _, key := range want {
+		if len(secret.Data[key]) == 0 {
+			missing = append(missing, key)
+		}
+	}
+	return missing
+}
+
+// bedrockProbeEndpoint returns the bedrock-runtime address the probe calls:
+// the one the run itself will reach, resolved the way the AWS SDK resolves it
+// and from the same input.
+//
+// spec.endpoint is deliberately not consulted. A Bedrock run never uses it -
+// the SDK builds the host from AWS_REGION (providerEnv in
+// harness/internal/goose/lifecycle.go), and getting-started says as much - so
+// a probe signing for spec.endpoint would check a host no run talks to, which
+// is the objection this PR raises against ListFoundationModels. Worse, it
+// could fail a Gateway that works: the credential scope comes from the
+// Secret's AWS_REGION while the host came from the spec, and AWS rejects a
+// signature whose scope region disagrees with the endpoint it reached
+// ("Credential should be scoped to a valid region"), so a Gateway left on the
+// sample's us-east-1 endpoint with a eu-west-1 Secret would be parked at
+// AuthenticationFailed with every referencing Agent held at
+// DependenciesNotReady - for a Gateway whose runs are fine.
+//
+// Deriving the host from the Secret also closes the #102 exfiltration path
+// outright rather than narrowing it: there is no longer any route from an
+// attacker-chosen spec.endpoint to a host the probe will sign an AWS
+// credential for. The only remaining input is the Secret, which is where the
+// credential already lives - whoever can write it holds the credential, and a
+// run already sends it wherever the Secret's endpoint override points.
+func bedrockProbeEndpoint(secret *corev1.Secret) string {
+	if override := bedrockEndpointOverride(secret); override != "" {
+		return override
+	}
+	region := bedrockProbeRegion(secret)
+	suffix := awsDNSSuffix
+	if strings.HasPrefix(region, awsChinaRegionPrefix) {
+		suffix = awsDNSSuffixChina
+	}
+	return "https://" + bedrockRuntimeHostPrefix + region + suffix
+}
+
+// bedrockEndpointOverride returns the endpoint the AWS SDK would use instead
+// of the regional host, in the SDK's own precedence: the service-specific
+// variable wins over the global one. A Secret that sets either is one whose
+// runs reach Bedrock through a PrivateLink or FIPS address, and the probe has
+// to follow it to be probing the same thing.
+func bedrockEndpointOverride(secret *corev1.Secret) string {
+	for _, key := range []string{awsBedrockEndpointURLEnv, awsEndpointURLEnv} {
+		if v := strings.TrimSpace(string(secret.Data[key])); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// bedrockProbeRegion is the Secret's AWS_REGION, trimmed. This is the region
+// the probe signs with and, absent an override, the region whose host it
+// calls - the same single source of truth the run uses.
+func bedrockProbeRegion(secret *corev1.Secret) string {
+	return strings.TrimSpace(string(secret.Data[awsRegionEnv]))
+}
+
+// isAWSRegionName reports whether s has the shape of an AWS region name
+// (us-east-1, cn-north-1, us-gov-west-1). The probe puts this value in a URL
+// host and in the SigV4 credential scope, so it is checked rather than
+// trusted: anything else is skipped, not signed for.
+func isAWSRegionName(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		case c == '-' && i > 0 && i < len(s)-1:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isHTTPSURL reports whether s parses as an https URL with a host. The probe
+// signs the request it sends, so plain http would put a usable signature -
+// and the session token it forwards - on the wire in the clear.
+func isHTTPSURL(s string) bool {
+	parsed, err := url.Parse(s)
+	return err == nil && parsed.Scheme == "https" && parsed.Hostname() != ""
 }
 
 // normalizeProvider lowercases and converts hyphens to underscores so provider
@@ -376,6 +659,104 @@ func hasModelsProbe(provider string) bool {
 // harness/internal/goose/lifecycle.go), which keys off the same normalization.
 func normalizeProvider(provider string) string {
 	return strings.ReplaceAll(strings.ToLower(provider), "-", "_")
+}
+
+// gatewayVerificationCommand builds the shell command for a probe kind.
+// probeNone never reaches here: such a Gateway settles without a Job.
+func gatewayVerificationCommand(probe gatewayProbeKind, provider string, includeAuth bool) string {
+	if probe == probeBedrockConverse {
+		return gatewayVerificationBedrockCommand()
+	}
+	return gatewayVerificationCurlCommand(provider, includeAuth)
+}
+
+// awsEscapePathSegment percent-encodes s for use as a single path label,
+// following AWS's own UriEncode: every byte except the RFC 3986 unreserved
+// characters is escaped, with uppercase hex digits.
+//
+// A Bedrock modelId is one path label, and it can be an inference-profile ARN
+// (arn:aws:bedrock:<region>:<account>:inference-profile/<id>). Its slashes must
+// not become path separators: raw, bedrock-runtime answers HTTP 200 carrying a
+// coral UnknownOperationException instead of routing to ConverseStream, so the
+// probe would record a Gateway that cannot work as verified.
+//
+// This also keeps the signature right. curl canonicalizes the path it was given
+// by encoding it once, and AWS does the same to the path it receives, so the
+// two agree whatever escaping is already in the URL - verified against
+// bedrock-runtime, where an escaped ARN is rejected on its credential (HTTP 403)
+// rather than on its signature.
+func awsEscapePathSegment(s string) string {
+	const unreserved = "-._~"
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9',
+			strings.IndexByte(unreserved, c) >= 0:
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
+}
+
+// gatewayVerificationBedrockCommand builds the shell command for the
+// aws-bedrock probe: a SigV4-signed ConverseStream capped at one output
+// token. curl 8 signs with --aws-sigv4 (the verification image ships 8.12),
+// which is what keeps this a one-container-shells-curl probe like the other
+// one rather than a new signing binary in the Job.
+//
+// The diagnostic vocabulary is the models probe's, plus the provider's own
+// error body as a free-text detail= tail (see diagDetail):
+//   - "ok code=<n>"                      a 2xx - the credential invoked the model
+//   - "auth code=<n> detail=<body>"      401/403 - rejected or denied by IAM/SCP
+//   - "http code=<n> detail=<body>"      any other non-2xx
+//   - "errorbody code=<n> detail=<body>" a 2xx carrying an AWS error, which
+//     means the request never reached the model (see bedrockErrorBodyPattern)
+//   - "unreachable rc=<n>"               curl transport error
+//
+// Carrying the body is the point of the whole change: an SCP denial answers
+// 403 with the operation it refused ("not authorized to perform:
+// bedrock:InvokeModelWithResponseStream on ..."), and that sentence is what
+// the Gateway status should say. The body names an IAM principal, never the
+// secret - and nothing is written anywhere but the termination log.
+//
+// Credentials stay in env vars the same way the models probe keeps them: the
+// Secret is mounted whole via envFrom, so no value is interpolated into the
+// command string. curl takes SigV4 keys only through -u, so they do reach
+// this process's argv inside its own pod - where the same values are already
+// in the environment - and nowhere else.
+func gatewayVerificationBedrockCommand() string {
+	// A session token is part of the credential, not a header curl can be
+	// handed empty: an empty x-amz-security-token would still be signed and
+	// sent, and AWS rejects it. Build it as an argument only when set.
+	curl := `curl -s --max-time 10` +
+		` --aws-sigv4 "aws:amz:$` + awsRegionEnv + `:` + bedrockSigningService + `"` +
+		` -u "$` + awsAccessKeyIDEnv + `:$` + awsSecretAccessKeyEnv + `"` +
+		` -H "content-type: application/json"` +
+		` -d '` + bedrockProbeBody + `'` +
+		` -w '\n%{http_code}' "$@" "` + endpointBedrockConverseProbe + `"`
+
+	return `set --
+if [ -n "$AWS_SESSION_TOKEN" ]; then set -- -H "x-amz-security-token: $AWS_SESSION_TOKEN"; fi
+resp=$(` + curl + `); rc=$?
+if [ "$rc" -ne 0 ]; then echo "unreachable rc=$rc" > /dev/termination-log; exit 1; fi
+code=$(printf '%s' "$resp" | tail -n1)
+body=$(printf '%s' "$resp" | sed '$d')
+detail=$(printf '%s' "$body" | tr -d '\r' | tr '\n' ' ' | cut -c1-` + strconv.Itoa(verificationDetailLimit) + `)
+if echo "$code" | grep -qE '` + verificationHTTPCodePattern + `'; then
+  if printf '%s' "$body" | grep -qE '` + bedrockErrorBodyPattern + `'; then
+    printf 'errorbody code=%s detail=%s\n' "$code" "$detail" > /dev/termination-log; exit 1
+  fi
+  echo "ok code=$code" > /dev/termination-log; exit 0
+fi
+case "$code" in
+401|403) printf 'auth code=%s detail=%s\n' "$code" "$detail" > /dev/termination-log ;;
+*) printf 'http code=%s detail=%s\n' "$code" "$detail" > /dev/termination-log ;;
+esac
+exit 1`
 }
 
 // gatewayVerificationCurlCommand builds the shell command used by the
@@ -470,33 +851,69 @@ func (r *GatewayReconciler) deleteVerificationJobs(
 }
 
 // createVerificationJob creates a Job that verifies connectivity to the
-// gateway endpoint using the agent base image.
+// gateway endpoint using the agent base image. probeEndpoint is the address
+// the probe calls: spec.endpoint for every provider but Bedrock, whose
+// endpoint comes from the credential Secret instead (bedrockProbeEndpoint).
 func (r *GatewayReconciler) createVerificationJob(
 	ctx context.Context,
 	gateway *konveyoriov1alpha1.Gateway,
 	jobName string,
+	probeEndpoint string,
 ) error {
 	image := r.VerificationImage
 	if image == "" {
 		image = DefaultVerificationImage
 	}
 
-	// The verification Job runs a simple curl against the endpoint.
-	// The agent base image includes curl. Only 2xx counts as success so
-	// 401/403 (invalid or missing API key) fail verification instead of
-	// marking ConnectionVerified. Keyless credentialRef (empty key,
-	// e.g. AWS SigV4) omits the auth header entirely - an empty
-	// credential would 401 under the ^2 check.
-	includeAuth := gateway.Spec.CredentialRef.Key != ""
-	if !knownProviders[normalizeProvider(gateway.Spec.Provider)] {
+	// The verification Job runs a single curl against the endpoint. The agent
+	// base image includes curl. Only 2xx counts as success so 401/403
+	// (invalid or missing credential) fail verification instead of marking
+	// ConnectionVerified.
+	probe := providerProbeKind(gateway.Spec.Provider)
+
+	// Keyless credentialRef (empty key, e.g. AWS SigV4) omits the auth header
+	// entirely for the models probe - an empty credential would 401 under the
+	// ^2 check. The Bedrock probe ignores it: SigV4 spans several variables,
+	// so the credential always arrives through envFrom.
+	includeAuth := probe != probeBedrockConverse && gateway.Spec.CredentialRef.Key != ""
+	if probe == probeModels && !knownProviders[normalizeProvider(gateway.Spec.Provider)] {
 		log.FromContext(ctx).Info(
 			"unrecognized gateway provider; verifying with default "+
 				"Authorization: Bearer against /v1/models",
 			"provider", gateway.Spec.Provider,
 		)
 	}
-	env := []corev1.EnvVar{{Name: "LLM_ENDPOINT", Value: gateway.Spec.Endpoint}}
-	if includeAuth {
+	env := []corev1.EnvVar{{Name: envLLMEndpoint, Value: probeEndpoint}}
+	var envFrom []corev1.EnvFromSource
+	switch {
+	case probe == probeBedrockConverse:
+		// The whole Secret, with its own keys as the variable names - the
+		// same shape the run gets (see the Gateway credential block in
+		// buildSandboxEnv), so the probe signs with exactly what goose will.
+		// AWS_REGION arrives this way too, which is what makes the signing
+		// scope and the host above the same region by construction: both are
+		// this Secret's AWS_REGION.
+		//
+		// The model id is spec data rather than a credential, but it travels
+		// as an env var too so the command string stays free of anything
+		// user-supplied. It is percent-encoded here, not in the shell: it is
+		// one path label, and an inference-profile ARN's slashes would
+		// otherwise break the route (see awsEscapePathSegment). LLM_ENDPOINT
+		// and LLM_MODEL are set in Env rather than EnvFrom, which is also
+		// what keeps a same-named Secret key from redefining either: Env
+		// wins over EnvFrom.
+		env = append(env, corev1.EnvVar{
+			Name:  envLLMModel,
+			Value: awsEscapePathSegment(gateway.Spec.Model.Name),
+		})
+		envFrom = []corev1.EnvFromSource{{
+			SecretRef: &corev1.SecretEnvSource{
+				LocalObjectReference: corev1.LocalObjectReference{
+					Name: gateway.Spec.CredentialRef.SecretName,
+				},
+			},
+		}}
+	case includeAuth:
 		env = append(env, corev1.EnvVar{
 			Name: "LLM_API_KEY",
 			ValueFrom: &corev1.EnvVarSource{
@@ -553,9 +970,10 @@ func (r *GatewayReconciler) createVerificationJob(
 							Command: []string{
 								"sh", "-c",
 								// Use env vars to avoid shell injection.
-								gatewayVerificationCurlCommand(gateway.Spec.Provider, includeAuth),
+								gatewayVerificationCommand(probe, gateway.Spec.Provider, includeAuth),
 							},
-							Env: env,
+							Env:     env,
+							EnvFrom: envFrom,
 						},
 					},
 				},
@@ -738,9 +1156,14 @@ func (r *GatewayReconciler) verificationDiagnostic(ctx context.Context, namespac
 // gatewayVerifyReason maps a probe diagnostic line to a Ready-condition reason
 // and a human-readable message. succeeded is the Job's own Complete/Failed
 // outcome and takes precedence for the status; the diagnostic only enriches the
-// message and refines the failure reason. When diag is empty or unrecognized it
-// falls back to the historical generic messages.
-func gatewayVerifyReason(diag, endpoint, jobName string, succeeded bool) (reason, message string) {
+// message and refines the failure reason. probe says which probe wrote the
+// diagnostic, so the message names the surface actually called. When diag is
+// empty or unrecognized it falls back to the historical generic messages.
+func gatewayVerifyReason(
+	diag, endpoint, jobName string,
+	succeeded bool,
+	probe gatewayProbeKind,
+) (reason, message string) {
 	fields := strings.Fields(diag)
 	code := diagValue(fields, "code")
 
@@ -748,9 +1171,17 @@ func gatewayVerifyReason(diag, endpoint, jobName string, succeeded bool) (reason
 		// Only quote the code when the probe reported success ("ok code=<n>");
 		// a mismatched or empty diagnostic must not produce "reachable (HTTP 401)".
 		if len(fields) > 0 && fields[0] == "ok" && code != "" {
-			return reasonConnectionVerified, fmt.Sprintf("Endpoint %s is reachable (HTTP %s)", endpoint, code)
+			return reasonConnectionVerified, fmt.Sprintf("%s (HTTP %s)", probeSuccessPhrase(probe, endpoint), code)
 		}
-		return reasonConnectionVerified, fmt.Sprintf("Endpoint %s is reachable", endpoint)
+		return reasonConnectionVerified, probeSuccessPhrase(probe, endpoint)
+	}
+
+	// The provider's own error text, when the probe captured one. This is
+	// what carries an IAM or SCP denial - naming the operation it refused -
+	// onto the Gateway status.
+	var detail string
+	if d := diagDetail(diag); d != "" {
+		detail = ": " + d
 	}
 
 	if len(fields) > 0 {
@@ -758,13 +1189,23 @@ func gatewayVerifyReason(diag, endpoint, jobName string, succeeded bool) (reason
 		case "auth":
 			if code != "" {
 				return reasonAuthenticationFailed, fmt.Sprintf(
-					"Endpoint %s/v1/models returned HTTP %s - check the credential secret's API key",
-					endpoint, code)
+					"%s returned HTTP %s - %s%s",
+					probeSurface(probe, endpoint), code, probeAuthAdvice(probe), detail)
 			}
 		case "http":
 			if code != "" {
 				return reasonConnectionFailed, fmt.Sprintf(
-					"Endpoint %s/v1/models returned HTTP %s", endpoint, code)
+					"%s returned HTTP %s%s", probeSurface(probe, endpoint), code, detail)
+			}
+		case "errorbody":
+			// A 2xx is not a pass when the body is an AWS error: the request
+			// did not reach the model. Said plainly, because "returned HTTP
+			// 200" on a failed verification reads like a contradiction.
+			if code != "" {
+				return reasonConnectionFailed, fmt.Sprintf(
+					"%s answered HTTP %s with an AWS error body, so the request "+
+						"never reached the model%s",
+					probeSurface(probe, endpoint), code, detail)
 			}
 		case "unreachable":
 			return reasonEndpointUnreachable, fmt.Sprintf(
@@ -773,6 +1214,38 @@ func gatewayVerifyReason(diag, endpoint, jobName string, succeeded bool) (reason
 	}
 
 	return reasonConnectionFailed, fmt.Sprintf("Verification Job %q failed", jobName)
+}
+
+// probeSurface names what the probe actually called, so a failure message
+// points at the request that produced it rather than at the bare endpoint.
+func probeSurface(probe gatewayProbeKind, endpoint string) string {
+	if probe == probeBedrockConverse {
+		return "Bedrock ConverseStream at " + endpoint
+	}
+	return "Endpoint " + endpoint + "/v1/models"
+}
+
+// probeSuccessPhrase says what a passing probe actually established. The
+// models probe proves reachability and a credential the endpoint accepts; the
+// Bedrock probe proves the stronger thing, that the credential invoked the
+// configured model.
+func probeSuccessPhrase(probe gatewayProbeKind, endpoint string) string {
+	if probe == probeBedrockConverse {
+		return fmt.Sprintf("Endpoint %s accepted a signed ConverseStream call for the configured model", endpoint)
+	}
+	return fmt.Sprintf("Endpoint %s is reachable", endpoint)
+}
+
+// probeAuthAdvice is the "what to check" half of an AuthenticationFailed
+// message. Bedrock's 403 covers two different mistakes - a credential the
+// account rejects and one an IAM policy or SCP denies - so it names the
+// permission as well as the Secret.
+func probeAuthAdvice(probe gatewayProbeKind) string {
+	if probe == probeBedrockConverse {
+		return "check the AWS credential in the Secret, and that it is allowed " +
+			"bedrock:InvokeModelWithResponseStream on this model"
+	}
+	return "check the credential secret's API key"
 }
 
 // diagValue extracts the value of a "key=value" token from a diagnostic line's
@@ -785,6 +1258,18 @@ func diagValue(fields []string, key string) string {
 		}
 	}
 	return ""
+}
+
+// diagDetail returns the free-text tail a probe appended as " detail=<text>",
+// or "" when there is none. Unlike diagValue it keeps spaces, because the tail
+// is a provider error sentence rather than a token - which is also why it is
+// always written last on the diagnostic line.
+func diagDetail(diag string) string {
+	_, tail, ok := strings.Cut(diag, diagDetailPrefix)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(tail)
 }
 
 // curlErrorPhrase turns a curl exit code into a human-readable cause.
