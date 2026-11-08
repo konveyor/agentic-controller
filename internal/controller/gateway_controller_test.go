@@ -750,7 +750,7 @@ var _ = Describe("Gateway Controller", func() {
 	// so bad credentials are caught here rather than mid-run as a bare
 	// "Authentication required".
 	Context("when the provider is aws-bedrock", func() {
-		It("should probe with a signed ConverseStream and mount the whole credential Secret", func() {
+		It("should replay a controller-signed ConverseStream and never mount the credential", func() {
 			const (
 				name       = "llm-ctrl-bedrock"
 				secretName = "llm-secret-bedrock"
@@ -759,28 +759,40 @@ var _ = Describe("Gateway Controller", func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
 
-			By("verifying the Job signs for bedrock-runtime with the Secret's own keys")
+			By("verifying the pod replays a signature rather than computing one")
 			job := awaitVerificationJob(name)
 			container := job.Spec.Template.Spec.Containers[0]
 			Expect(container.Command).To(HaveLen(3))
-			Expect(container.Command[2]).To(ContainSubstring("--aws-sigv4"))
-			Expect(container.Command[2]).To(ContainSubstring("converse-stream"))
-			// The credential arrives whole via envFrom, and the model id as
-			// an env var - nothing is interpolated into the command string.
-			Expect(container.EnvFrom).To(HaveLen(1))
-			Expect(container.EnvFrom[0].SecretRef.Name).To(Equal(secretName))
-			Expect(container.Env).To(ContainElement(corev1.EnvVar{
-				Name: envLLMModel, Value: testLLMModelName,
-			}))
+			// curl 8.12.1, which this image ships, signs SigV4's canonical URI
+			// wrong, so the probe must not sign at all. The operation and the
+			// model id are no longer in the command either - they are inside
+			// the signed URL, asserted below.
+			Expect(container.Command[2]).NotTo(ContainSubstring("--aws-sigv4"))
+			Expect(container.Command[2]).To(ContainSubstring("$" + envProbeURL))
+
+			env := map[string]string{}
+			for _, e := range container.Env {
+				env[e.Name] = e.Value
+			}
 			// The host is the one the run reaches: built from the Secret's
 			// AWS_REGION, the same value the signature is scoped to.
-			Expect(container.Env).To(ContainElement(corev1.EnvVar{
-				Name:  envLLMEndpoint,
-				Value: "https://bedrock-runtime." + testAWSRegion + ".amazonaws.com",
-			}))
+			Expect(env[envProbeURL]).To(HavePrefix(
+				"https://bedrock-runtime." + testAWSRegion + ".amazonaws.com/model/"))
+			Expect(env[envProbeURL]).To(HaveSuffix("/converse-stream"))
+			Expect(env[envSigV4Authorization]).To(ContainSubstring(
+				"Credential=AKIAEXAMPLE/"))
+			Expect(env[envSigV4Authorization]).To(ContainSubstring(
+				"/" + testAWSRegion + "/bedrock/aws4_request"))
+			Expect(env[envSigV4Date]).NotTo(BeEmpty())
+
+			// The Secret is not mounted at all any more, and the secret
+			// access key never leaves the controller.
+			Expect(container.EnvFrom).To(BeEmpty())
 			for _, e := range container.Env {
-				Expect(e.Value).NotTo(ContainSubstring("AKIAEXAMPLE"))
+				Expect(e.Value).NotTo(ContainSubstring(testAWSSecretKey))
 			}
+			// A static credential has no session token to forward.
+			Expect(env).NotTo(HaveKey(envSigV4SecurityToken))
 
 			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())
@@ -805,18 +817,18 @@ var _ = Describe("Gateway Controller", func() {
 			job := awaitVerificationJob(name)
 			container := job.Spec.Template.Spec.Containers[0]
 
-			var model string
+			var probeURL string
 			for _, e := range container.Env {
-				if e.Name == envLLMModel {
-					model = e.Value
+				if e.Name == envProbeURL {
+					probeURL = e.Value
 				}
 			}
-			// One path label: no separator survives, and the raw ARN - the
-			// thing that produced the false pass - is not what we send.
-			Expect(model).NotTo(BeEmpty())
-			Expect(model).NotTo(ContainSubstring("/"))
-			Expect(model).NotTo(Equal(modelARN))
-			Expect(model).To(Equal(awsEscapePathSegment(modelARN)))
+			// One path label: the ARN's own slashes are escaped, so the only
+			// separators left are the ones framing /model/<id>/converse-stream.
+			Expect(probeURL).NotTo(BeEmpty())
+			Expect(probeURL).To(ContainSubstring(
+				"/model/" + awsEscapePathSegment(modelARN) + "/converse-stream"))
+			Expect(probeURL).NotTo(ContainSubstring(modelARN))
 
 			Expect(k8sClient.Delete(ctx, gateway)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, secret)).To(Succeed())

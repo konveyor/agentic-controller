@@ -5,7 +5,7 @@ description: "Defines the Gateway CRD and direct Agent Sandbox path as the accep
 status: accepted
 status_note: "Supersedes two clauses of ADR 0004. OpenShell remains under evaluation; ADR 0021 supersedes its predetermined destination without changing the current Gateway/Sandbox default."
 date: "2026-08-17"
-last_updated: "2026-11-03"
+last_updated: "2026-11-07"
 authors:
   - "David Zager"
 last_reviewed: "2026-10-20"
@@ -15,12 +15,19 @@ review_note: "Gateway CRD, direct Agent Sandbox creation, verification Jobs, and
 
 # ADR 0016: Gateway CRD as Interim Execution Interface
 
-**Update (2026-11-03):** `aws-bedrock` is verified rather than skipped. The
+**Update (2026-11-07):** `aws-bedrock` is verified rather than skipped. The
 verification Job now picks a probe per provider: the OpenAI-compatible
 `GET <endpoint>/v1/models` as before, or — for `aws-bedrock` — a
 SigV4-signed `ConverseStream` against `bedrock-runtime` capped at one
 output token, signed with the credential Secret's own
-`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`. That probe
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION`. **The controller
+signs it**, not the probe pod: `curl` 8.12.1, which is what the
+verification image's `ubi10-minimal` base ships, builds SigV4's canonical
+URI wrong (it signs the path verbatim instead of URI-encoding it once
+more), and a Bedrock model id always contains a character that exposes
+the difference. Signing in the controller is correct on any curl version
+and keeps the secret access key out of the probe pod, which gets only a
+signed URL and an `Authorization` header. That probe
 exercises what a run exercises, so `connectionVerified` finally means
 something for Bedrock: a credential an IAM policy or SCP denies
 `bedrock:InvokeModelWithResponseStream` now fails verification, carrying
@@ -166,8 +173,8 @@ It is a Konveyor custom resource, not an OpenShell Gateway Service.
   SDK rather than an HTTP endpoint (`aws-bedrock`, `gcp-vertex-ai`) have no
   such surface to probe, so they are marked `Ready` without one, with
   `reason=VerificationSkipped` and `connectionVerified` left false.
-  *(Refined by the 2026-11-03 update above: `aws-bedrock` is probed with a
-  SigV4 `ConverseStream`; `gcp-vertex-ai` still is not.)*
+  *(Refined by the 2026-11-07 update above: `aws-bedrock` is probed with a
+  controller-signed SigV4 `ConverseStream`; `gcp-vertex-ai` still is not.)*
 - **An AgentRun selects exactly one Gateway.** Multi-model-per-run stays
   dropped — this half of ADR 0004 (and the retirement of
   `KONVEYOR_MODEL_<ROLE>_*`) is honoured, not superseded.

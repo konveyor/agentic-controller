@@ -223,12 +223,10 @@ func TestGatewayVerificationBedrockCommand(t *testing.T) {
 	cmd := gatewayVerificationCommand(probeBedrockConverse, testProviderBedrock, false)
 
 	for _, want := range []string{
-		// SigV4, scoped to the region the run signs with.
-		`--aws-sigv4 "aws:amz:$AWS_REGION:bedrock"`,
-		`-u "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY"`,
-		// Streaming, because that is what goose calls and what an SCP
-		// denying bedrock:InvokeModelWithResponseStream would refuse.
-		"$LLM_ENDPOINT/model/$LLM_MODEL/converse-stream",
+		// The controller signed this; the pod only replays it.
+		`-H "Authorization: $SIGV4_AUTHORIZATION"`,
+		`-H "x-amz-date: $SIGV4_DATE"`,
+		`"$PROBE_URL"`,
 		`"inferenceConfig":{"maxTokens":1}`,
 		// Diagnostic vocabulary shared with the models probe.
 		"/dev/termination-log",
@@ -240,20 +238,27 @@ func TestGatewayVerificationBedrockCommand(t *testing.T) {
 		// A 2xx carrying an AWS error must not be recorded as a pass.
 		"'errorbody code=%s detail=%s\\n'",
 		bedrockErrorBodyPattern,
-		// A session token is part of an STS credential, and an empty one
-		// must not be signed and sent.
-		`if [ -n "$AWS_SESSION_TOKEN" ];`,
+		// A session token is part of an STS credential and a signed header,
+		// so it is forwarded only when the controller signed one in; an
+		// empty one would be sent and rejected.
+		`if [ -n "$SIGV4_SECURITY_TOKEN" ];`,
+		// A 403 about the clock is not a 403 about the credential.
+		"'skew code=%s detail=%s\\n'",
+		bedrockSkewBodyPattern,
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("expected %q in bedrock probe command %q", want, cmd)
 		}
 	}
 
-	// Nothing from the spec, and no credential, may be interpolated into the
-	// command string: both travel as env vars (-k is also gone, because an
-	// AWS endpoint has a public certificate and a signed credential should
-	// not be handed to whatever answers).
-	for _, notWant := range []string{headerAuthBearer, endpointModelsProbe, "curl -sk"} {
+	// Nothing from the spec, and nothing to sign with, may be interpolated
+	// into the command string: the signed request travels as env vars, and
+	// the probe no longer signs at all (-k is also gone, because an AWS
+	// endpoint has a public certificate and a signed request should not be
+	// handed to whatever answers).
+	for _, notWant := range []string{
+		headerAuthBearer, endpointModelsProbe, "curl -sk", "--aws-sigv4",
+	} {
 		if strings.Contains(cmd, notWant) {
 			t.Errorf("did not expect %q in bedrock probe command %q", notWant, cmd)
 		}
@@ -690,6 +695,16 @@ func TestGatewayVerifyReason(t *testing.T) {
 		{
 			"bedrock unreachable", "unreachable rc=6", false, probeBedrockConverse,
 			reasonEndpointUnreachable, "resolve host", "",
+		},
+		// A 403 about time, not about the credential. Reporting this as
+		// AuthenticationFailed would send someone to check a Secret that is
+		// fine, which is the class of misleading verdict this probe exists to
+		// remove.
+		{
+			"bedrock expired signature does not blame the credential",
+			`skew code=403 detail={"message":"Signature expired: 20261107T120000Z is now earlier than 20261107T121000Z"}`,
+			false, probeBedrockConverse, reasonConnectionFailed,
+			"clock is probably wrong", "check the AWS credential",
 		},
 		// An empty detail= tail must not leave a dangling colon on the message.
 		{

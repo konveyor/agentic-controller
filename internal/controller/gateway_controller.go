@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -27,6 +28,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -72,28 +74,20 @@ const (
 	// probe; see providerProbeKind for the rest.
 	endpointModelsProbe = "$LLM_ENDPOINT/v1/models"
 
-	// endpointBedrockConverseProbe is the bedrock-runtime operation the
-	// SigV4 probe calls. ConverseStream rather than Converse on purpose:
-	// goose streams, so this is the operation a run actually performs and
-	// the one an IAM policy or SCP has to allow
-	// (bedrock:InvokeModelWithResponseStream). Both the endpoint and the
-	// model id travel as env vars, so nothing from the spec is interpolated
-	// into the command string.
+	// bedrockConverseStreamOperation is the bedrock-runtime operation the
+	// probe calls. ConverseStream rather than Converse on purpose: goose
+	// streams, so this is the operation a run actually performs and the one
+	// an IAM policy or SCP has to allow
+	// (bedrock:InvokeModelWithResponseStream).
 	//
-	// $LLM_ENDPOINT here is not spec.endpoint: it is the bedrock-runtime
-	// address the run itself will reach, derived from the credential Secret
-	// by bedrockProbeEndpoint. A Bedrock run ignores spec.endpoint entirely
-	// (the AWS SDK builds the host from AWS_REGION - see providerEnv in
-	// harness/internal/goose/lifecycle.go), so signing for spec.endpoint
-	// would probe a host no run talks to.
-	//
-	// $LLM_MODEL is percent-encoded by the controller
-	// (awsEscapePathSegment), because modelId is one path label and an
-	// inference-profile ARN contains slashes. Raw, those split the path and
-	// bedrock-runtime no longer recognizes the route - answering HTTP 200
-	// with a coral UnknownOperationException body, which a plain 2xx check
-	// reads as a pass.
-	endpointBedrockConverseProbe = "$LLM_ENDPOINT/model/$LLM_MODEL/converse-stream"
+	// The controller builds and signs the whole URL (signBedrockProbeRequest),
+	// so neither the operation, the host nor the model id is interpolated into
+	// the probe's command string. The host is not spec.endpoint: it is the
+	// bedrock-runtime address the run itself will reach, derived from the
+	// credential Secret by bedrockProbeEndpoint, because a Bedrock run ignores
+	// spec.endpoint entirely (the AWS SDK builds the host from AWS_REGION -
+	// see providerEnv in harness/internal/goose/lifecycle.go).
+	bedrockConverseStreamOperation = "converse-stream"
 
 	// bedrockErrorBodyPattern marks a response body as an AWS error even
 	// when the status line said 2xx: "__type" is how the coral stack names
@@ -106,14 +100,28 @@ const (
 	// to be wrong in.
 	bedrockErrorBodyPattern = `__type|Exception`
 
-	// envLLMModel carries the probed model id into the verification pod,
-	// already percent-encoded (see awsEscapePathSegment).
-	envLLMModel = "LLM_MODEL"
-
 	// envLLMEndpoint carries the address the probe calls: spec.endpoint for
 	// the models probe, and the resolved bedrock-runtime host for Bedrock
 	// (see bedrockProbeEndpoint).
 	envLLMEndpoint = "LLM_ENDPOINT"
+
+	// awsSigV4Algorithm is the SigV4 algorithm name, used both in the string
+	// to sign and in the Authorization header.
+	awsSigV4Algorithm = "AWS4-HMAC-SHA256"
+
+	// Env vars carrying the controller-signed request into the probe pod. The
+	// signature covers the URL and the date, so all three travel together.
+	envProbeURL           = "PROBE_URL"
+	envSigV4Authorization = "SIGV4_AUTHORIZATION"
+	envSigV4Date          = "SIGV4_DATE"
+	envSigV4SecurityToken = "SIGV4_SECURITY_TOKEN"
+
+	// bedrockSkewBodyPattern marks a 403 that is about time rather than about
+	// the credential: the signature aged out, or the controller's clock
+	// disagrees with AWS's. Reporting those as AuthenticationFailed would send
+	// someone to check a credential that is fine - the same class of
+	// misleading verdict this probe exists to remove.
+	bedrockSkewBodyPattern = `Signature expired|RequestTimeTooSkewed|too skewed`
 
 	// bedrockSigningService is the service name in the SigV4 credential
 	// scope for bedrock-runtime. The region comes from the credential
@@ -134,6 +142,10 @@ const (
 	awsSecretAccessKeyEnv = "AWS_SECRET_ACCESS_KEY"
 	awsRegionEnv          = "AWS_REGION"
 
+	// awsSessionTokenEnv is the temporary-credential token. It is a signed
+	// header when present, so the probe cannot omit it.
+	awsSessionTokenEnv = "AWS_SESSION_TOKEN"
+
 	// AWS SDK endpoint overrides, in the precedence the SDK applies them.
 	// A Secret carrying one of these is a Secret whose runs reach Bedrock
 	// somewhere other than the public regional host - a PrivateLink or
@@ -152,7 +164,12 @@ const (
 
 	// verificationDetailLimit bounds the provider error text a probe copies
 	// into its termination message, which the kubelet caps at 4KiB.
-	verificationDetailLimit = 300
+	//
+	// 300 was too tight to diagnose with: AWS's SignatureDoesNotMatch names
+	// the canonical string it expected, which is the whole diagnosis, and it
+	// starts past 300 characters. 2000 leaves room for that and still sits
+	// well inside both the kubelet's cap and a condition message.
+	verificationDetailLimit = 2000
 
 	// diagDetailPrefix introduces the free-text tail of a probe diagnostic
 	// (the provider's own error body). It must come last on the line - see
@@ -374,8 +391,22 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	var job batchv1.Job
 	if err := r.Get(ctx, jobKey, &job); err != nil {
 		if errors.IsNotFound(err) {
+			// Sign the Bedrock request here rather than in the pod: the curl
+			// this image ships cannot build SigV4's canonical URI correctly
+			// (see signBedrockProbeRequest). Signed at Job creation, and the
+			// Job's own deadline bounds how stale the signature can get.
+			var signed bedrockProbeRequest
+			if probe == probeBedrockConverse {
+				var err error
+				signed, err = signBedrockProbeRequest(
+					&secret, probeEndpoint, gateway.Spec.Model.Name, time.Now())
+				if err != nil {
+					logger.Error(err, "Failed to sign the Bedrock verification request")
+					return ctrl.Result{}, err
+				}
+			}
 			// No verification Job exists - create one.
-			if err := r.createVerificationJob(ctx, &gateway, jobName, probeEndpoint); err != nil {
+			if err := r.createVerificationJob(ctx, &gateway, jobName, probeEndpoint, signed); err != nil {
 				logger.Error(err, "Failed to create verification Job")
 				return ctrl.Result{}, err
 			}
@@ -680,11 +711,10 @@ func gatewayVerificationCommand(probe gatewayProbeKind, provider string, include
 // coral UnknownOperationException instead of routing to ConverseStream, so the
 // probe would record a Gateway that cannot work as verified.
 //
-// This also keeps the signature right. curl canonicalizes the path it was given
-// by encoding it once, and AWS does the same to the path it receives, so the
-// two agree whatever escaping is already in the URL - verified against
-// bedrock-runtime, where an escaped ARN is rejected on its credential (HTTP 403)
-// rather than on its signature.
+// The escaped form is what goes on the wire. SigV4's canonical URI is that
+// path encoded once more (awsEscapeURIPath), which is why the controller signs
+// the request itself rather than letting curl do it - see
+// signBedrockProbeRequest.
 func awsEscapePathSegment(s string) string {
 	const unreserved = "-._~"
 	var b strings.Builder
@@ -702,11 +732,154 @@ func awsEscapePathSegment(s string) string {
 	return b.String()
 }
 
+// awsEscapeURIPath percent-encodes each segment of path while keeping the
+// separators, which is SigV4's canonical URI for every service but S3: the
+// path as sent, URI-encoded once more.
+func awsEscapeURIPath(path string) string {
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		segments[i] = awsEscapePathSegment(segment)
+	}
+	return strings.Join(segments, "/")
+}
+
+// bedrockProbeRequest is the signed ConverseStream request the probe performs.
+// The controller builds and signs it; the pod only replays it.
+type bedrockProbeRequest struct {
+	// URL is the full request URL, model id already escaped as one segment.
+	URL string
+	// Authorization is the SigV4 header, which carries the access key id and
+	// the signature but never the secret access key.
+	Authorization string
+	// AMZDate is the x-amz-date the signature covers.
+	AMZDate string
+	// SecurityToken is the Secret's AWS_SESSION_TOKEN when it has one. It is
+	// a signed header, so a temporary credential cannot be probed without it.
+	SecurityToken string
+}
+
+// signBedrockProbeRequest signs the probe's ConverseStream call with SigV4,
+// in the controller, using only crypto/hmac and crypto/sha256.
+//
+// The controller signs rather than curl because curl 8.12.1 - the version
+// ubi10/ubi-minimal ships, which is the verification image's base - gets the
+// canonical URI wrong. SigV4 requires the canonical path to be the path as
+// sent, URI-encoded once more (every service but S3). curl 8.12.1 encodes a
+// raw path once and then signs that, leaving any percent-escape already in the
+// URL untouched, so:
+//
+//   - send the raw colon in a model id, and curl signs "%3A" where AWS also
+//     expects "%3A" - those agree, which is why this probe appeared to work;
+//   - send "%3A", and curl signs "%3A" where AWS expects "%253A" - they
+//     disagree, and AWS answers SignatureDoesNotMatch.
+//
+// The second is the shape this probe needs, because an inference-profile ARN
+// has to arrive percent-escaped or bedrock-runtime does not route it at all
+// (see awsEscapePathSegment). So there is no spelling of the URL that both
+// routes and verifies on this curl. The behaviour is fixed in curl 8.14.1,
+// which the image does not have and this change deliberately does not require.
+//
+// Signing here also keeps the secret access key out of the probe pod: it never
+// leaves the controller. What the pod does receive is the access key id and
+// signature inside the Authorization header, and the session token when the
+// credential is temporary - enough to replay this one request until the
+// signature ages out, not enough to sign another.
+//
+// The signature is good for AWS's clock-skew window of about five minutes. The
+// verification Job's ActiveDeadlineSeconds (verificationDeadline, 120s) bounds
+// how long it can sit unused, so a slow image pull fails the Job on its own
+// deadline rather than producing an expired signature; a controller whose clock
+// is wrong is the remaining case, and it is classified as such rather than
+// reported as a bad credential (see bedrockSkewBodyPattern).
+func signBedrockProbeRequest(
+	secret *corev1.Secret,
+	probeEndpoint, modelID string,
+	now time.Time,
+) (bedrockProbeRequest, error) {
+	region := bedrockProbeRegion(secret)
+	keyID := strings.TrimSpace(string(secret.Data[awsAccessKeyIDEnv]))
+	secretKey := strings.TrimSpace(string(secret.Data[awsSecretAccessKeyEnv]))
+	token := strings.TrimSpace(string(secret.Data[awsSessionTokenEnv]))
+
+	parsed, err := url.Parse(probeEndpoint)
+	if err != nil {
+		return bedrockProbeRequest{}, fmt.Errorf("parsing probe endpoint: %w", err)
+	}
+	host := parsed.Host
+	if host == "" {
+		return bedrockProbeRequest{}, fmt.Errorf("probe endpoint %q has no host", probeEndpoint)
+	}
+
+	// The path as sent, and the canonical path AWS will reconstruct from it.
+	wirePath := "/model/" + awsEscapePathSegment(modelID) + "/" + bedrockConverseStreamOperation
+	canonicalPath := awsEscapeURIPath(wirePath)
+
+	amzDate := now.UTC().Format("20060102T150405Z")
+	dateStamp := amzDate[:8]
+	scope := dateStamp + "/" + region + "/" + bedrockSigningService + "/aws4_request"
+
+	// Canonical headers, lowercase and sorted. content-type is signed because
+	// the probe sends it; host because SigV4 always requires it.
+	headers := []struct{ name, value string }{
+		{"content-type", "application/json"},
+		{"host", host},
+		{"x-amz-date", amzDate},
+	}
+	if token != "" {
+		headers = append(headers, struct{ name, value string }{"x-amz-security-token", token})
+	}
+	var canonicalHeaders strings.Builder
+	signedNames := make([]string, 0, len(headers))
+	for _, h := range headers {
+		canonicalHeaders.WriteString(h.name + ":" + h.value + "\n")
+		signedNames = append(signedNames, h.name)
+	}
+	signedHeaders := strings.Join(signedNames, ";")
+
+	payloadHash := sha256.Sum256([]byte(bedrockProbeBody))
+	canonicalRequest := strings.Join([]string{
+		"POST",
+		canonicalPath,
+		"", // no query string
+		canonicalHeaders.String(),
+		signedHeaders,
+		hex.EncodeToString(payloadHash[:]),
+	}, "\n")
+
+	canonicalHash := sha256.Sum256([]byte(canonicalRequest))
+	stringToSign := strings.Join([]string{
+		awsSigV4Algorithm,
+		amzDate,
+		scope,
+		hex.EncodeToString(canonicalHash[:]),
+	}, "\n")
+
+	signingKey := []byte("AWS4" + secretKey)
+	for _, part := range []string{dateStamp, region, bedrockSigningService, "aws4_request"} {
+		signingKey = hmacSHA256(signingKey, part)
+	}
+	signature := hex.EncodeToString(hmacSHA256(signingKey, stringToSign))
+
+	return bedrockProbeRequest{
+		URL: strings.TrimSuffix(probeEndpoint, "/") + wirePath,
+		Authorization: fmt.Sprintf("%s Credential=%s/%s, SignedHeaders=%s, Signature=%s",
+			awsSigV4Algorithm, keyID, scope, signedHeaders, signature),
+		AMZDate:       amzDate,
+		SecurityToken: token,
+	}, nil
+}
+
+// hmacSHA256 is one round of the SigV4 signing-key derivation.
+func hmacSHA256(key []byte, data string) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write([]byte(data))
+	return h.Sum(nil)
+}
+
 // gatewayVerificationBedrockCommand builds the shell command for the
-// aws-bedrock probe: a SigV4-signed ConverseStream capped at one output
-// token. curl 8 signs with --aws-sigv4 (the verification image ships 8.12),
-// which is what keeps this a one-container-shells-curl probe like the other
-// one rather than a new signing binary in the Job.
+// aws-bedrock probe: the ConverseStream request the controller already signed
+// (see signBedrockProbeRequest), replayed with curl. The pod does no signing,
+// so the probe is correct on any curl version.
 //
 // The diagnostic vocabulary is the models probe's, plus the provider's own
 // error body as a free-text detail= tail (see diagDetail):
@@ -715,6 +888,9 @@ func awsEscapePathSegment(s string) string {
 //   - "http code=<n> detail=<body>"      any other non-2xx
 //   - "errorbody code=<n> detail=<body>" a 2xx carrying an AWS error, which
 //     means the request never reached the model (see bedrockErrorBodyPattern)
+//   - "skew code=<n> detail=<body>"      403 because the signature has aged
+//     out or the controller's clock is wrong, not because the credential is
+//     bad (see bedrockSkewBodyPattern)
 //   - "unreachable rc=<n>"               curl transport error
 //
 // Carrying the body is the point of the whole change: an SCP denial answers
@@ -723,24 +899,23 @@ func awsEscapePathSegment(s string) string {
 // the Gateway status should say. The body names an IAM principal, never the
 // secret - and nothing is written anywhere but the termination log.
 //
-// Credentials stay in env vars the same way the models probe keeps them: the
-// Secret is mounted whole via envFrom, so no value is interpolated into the
-// command string. curl takes SigV4 keys only through -u, so they do reach
-// this process's argv inside its own pod - where the same values are already
-// in the environment - and nowhere else.
+// Nothing is interpolated into the command string: the signed URL, the
+// Authorization header and the session token all arrive as env vars, and the
+// secret access key never reaches the pod at all.
 func gatewayVerificationBedrockCommand() string {
 	// A session token is part of the credential, not a header curl can be
-	// handed empty: an empty x-amz-security-token would still be signed and
-	// sent, and AWS rejects it. Build it as an argument only when set.
+	// handed empty: an empty x-amz-security-token would be sent and rejected,
+	// and it is a signed header, so it is added only when the controller
+	// signed one in.
 	curl := `curl -s --max-time 10` +
-		` --aws-sigv4 "aws:amz:$` + awsRegionEnv + `:` + bedrockSigningService + `"` +
-		` -u "$` + awsAccessKeyIDEnv + `:$` + awsSecretAccessKeyEnv + `"` +
 		` -H "content-type: application/json"` +
+		` -H "x-amz-date: $` + envSigV4Date + `"` +
+		` -H "Authorization: $` + envSigV4Authorization + `"` +
 		` -d '` + bedrockProbeBody + `'` +
-		` -w '\n%{http_code}' "$@" "` + endpointBedrockConverseProbe + `"`
+		` -w '\n%{http_code}' "$@" "$` + envProbeURL + `"`
 
 	return `set --
-if [ -n "$AWS_SESSION_TOKEN" ]; then set -- -H "x-amz-security-token: $AWS_SESSION_TOKEN"; fi
+if [ -n "$` + envSigV4SecurityToken + `" ]; then set -- -H "x-amz-security-token: $` + envSigV4SecurityToken + `"; fi
 resp=$(` + curl + `); rc=$?
 if [ "$rc" -ne 0 ]; then echo "unreachable rc=$rc" > /dev/termination-log; exit 1; fi
 code=$(printf '%s' "$resp" | tail -n1)
@@ -753,7 +928,11 @@ if echo "$code" | grep -qE '` + verificationHTTPCodePattern + `'; then
   echo "ok code=$code" > /dev/termination-log; exit 0
 fi
 case "$code" in
-401|403) printf 'auth code=%s detail=%s\n' "$code" "$detail" > /dev/termination-log ;;
+401|403)
+  if printf '%s' "$body" | grep -qE '` + bedrockSkewBodyPattern + `'; then
+    printf 'skew code=%s detail=%s\n' "$code" "$detail" > /dev/termination-log; exit 1
+  fi
+  printf 'auth code=%s detail=%s\n' "$code" "$detail" > /dev/termination-log ;;
 *) printf 'http code=%s detail=%s\n' "$code" "$detail" > /dev/termination-log ;;
 esac
 exit 1`
@@ -854,11 +1033,14 @@ func (r *GatewayReconciler) deleteVerificationJobs(
 // gateway endpoint using the agent base image. probeEndpoint is the address
 // the probe calls: spec.endpoint for every provider but Bedrock, whose
 // endpoint comes from the credential Secret instead (bedrockProbeEndpoint).
+// signed carries the controller-signed Bedrock request and is the zero value
+// for every other probe.
 func (r *GatewayReconciler) createVerificationJob(
 	ctx context.Context,
 	gateway *konveyoriov1alpha1.Gateway,
 	jobName string,
 	probeEndpoint string,
+	signed bedrockProbeRequest,
 ) error {
 	image := r.VerificationImage
 	if image == "" {
@@ -887,32 +1069,24 @@ func (r *GatewayReconciler) createVerificationJob(
 	var envFrom []corev1.EnvFromSource
 	switch {
 	case probe == probeBedrockConverse:
-		// The whole Secret, with its own keys as the variable names - the
-		// same shape the run gets (see the Gateway credential block in
-		// buildSandboxEnv), so the probe signs with exactly what goose will.
-		// AWS_REGION arrives this way too, which is what makes the signing
-		// scope and the host above the same region by construction: both are
-		// this Secret's AWS_REGION.
+		// The controller signed the request (signBedrockProbeRequest), so the
+		// pod gets the signed URL, the Authorization header and the date -
+		// and, only for a temporary credential, the session token the
+		// signature covers. The secret access key stays in the controller.
 		//
-		// The model id is spec data rather than a credential, but it travels
-		// as an env var too so the command string stays free of anything
-		// user-supplied. It is percent-encoded here, not in the shell: it is
-		// one path label, and an inference-profile ARN's slashes would
-		// otherwise break the route (see awsEscapePathSegment). LLM_ENDPOINT
-		// and LLM_MODEL are set in Env rather than EnvFrom, which is also
-		// what keeps a same-named Secret key from redefining either: Env
-		// wins over EnvFrom.
-		env = append(env, corev1.EnvVar{
-			Name:  envLLMModel,
-			Value: awsEscapePathSegment(gateway.Spec.Model.Name),
-		})
-		envFrom = []corev1.EnvFromSource{{
-			SecretRef: &corev1.SecretEnvSource{
-				LocalObjectReference: corev1.LocalObjectReference{
-					Name: gateway.Spec.CredentialRef.SecretName,
-				},
-			},
-		}}
+		// The Secret is deliberately not mounted via envFrom any more: the
+		// probe has nothing left to sign with, so nothing to be handed.
+		env = append(env,
+			corev1.EnvVar{Name: envProbeURL, Value: signed.URL},
+			corev1.EnvVar{Name: envSigV4Authorization, Value: signed.Authorization},
+			corev1.EnvVar{Name: envSigV4Date, Value: signed.AMZDate},
+		)
+		if signed.SecurityToken != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  envSigV4SecurityToken,
+				Value: signed.SecurityToken,
+			})
+		}
 	case includeAuth:
 		env = append(env, corev1.EnvVar{
 			Name: "LLM_API_KEY",
@@ -1196,6 +1370,17 @@ func gatewayVerifyReason(
 			if code != "" {
 				return reasonConnectionFailed, fmt.Sprintf(
 					"%s returned HTTP %s%s", probeSurface(probe, endpoint), code, detail)
+			}
+		case "skew":
+			// Not the credential: the signature aged out or the controller's
+			// clock disagrees with AWS's. Say that, so nobody goes looking at
+			// a Secret that is fine.
+			if code != "" {
+				return reasonConnectionFailed, fmt.Sprintf(
+					"%s rejected the request's signature as expired (HTTP %s) - the "+
+						"controller's clock is probably wrong, the credential is not "+
+						"implicated%s",
+					probeSurface(probe, endpoint), code, detail)
 			}
 		case "errorbody":
 			// A 2xx is not a pass when the body is an AWS error: the request
