@@ -166,9 +166,15 @@ def main():
                 "harnessRevision": labels["io.konveyor.controller.revision"],
                 "runtimeConfigDigest": cri["status"]["id"],
                 "expectedSessionSourceSha256": hashlib.sha256(
-                    (
-                        args.runtime_dir / "src/lightspeed_agentic/session.py"
-                    ).read_bytes()
+                    subprocess.check_output(
+                        [
+                            "git",
+                            "-C",
+                            str(args.runtime_dir),
+                            "show",
+                            "HEAD:src/lightspeed_agentic/session.py",
+                        ]
+                    )
                 ).hexdigest(),
             }
         )
