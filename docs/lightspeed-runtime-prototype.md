@@ -36,6 +36,14 @@ servers continue through Lightspeed's admission path.
 Sessions and replay history last only for the runtime process. Viewer reconnect
 and further prompts during that lifetime do not imply recovery after pod restart.
 
+The harness explicitly maps the UI's logical `/workspace` directory to the
+prepared `/workspace/repo` session. This alias does not change the runtime's
+execution directory. It also enables primary-session replay for read-only viewer
+sessions after the harness has created the execution session. The adapter reports
+active run identifiers and discovery errors in the format the existing UI uses
+for steering. These compatibility details are covered separately from the core,
+transport-independent session behavior.
+
 ## Usage and limits
 
 The runtime emits cumulative token observations as model calls complete. The
@@ -50,6 +58,9 @@ cost, but this Lightspeed fork supplies none. A Lightspeed run configured with
 `maxCost` therefore fails before model execution with an unsupported-budget error.
 Token reporting and turn limits can be demonstrated without claiming monetary
 budget enforcement. Full adoption still requires preserving that behavior.
+The companion UI change accepts `_lightspeed/session/update`, displays token-only
+usage, and retains the same absent-versus-zero distinction for live updates and
+final termination data. It does not display a zero-dollar cost when cost is unknown.
 The proposed [usage telemetry contract in PR 282](https://github.com/konveyor/agentic-controller/pull/282)
 and the existing accounting research remain separate work.
 
@@ -114,6 +125,12 @@ Local scripted results do not substitute for cluster/UI evidence. Operator
 placement, per-invocation image/entrypoint control, and provider/secret access
 remain the separate operator adoption work.
 
+For a repeatable browser demonstration, use the
+[Playwright recording helper](../hack/lightspeed-runtime/browser/README.md).
+It creates the AgentRun through Tackle UI and sends questions, approvals, and
+steering through the UI's actual Hub connection. Its local model is explicitly
+scripted; runtime inspection, tools, verification, and Git operations are real.
+
 ## Recorded verification (2026-11-06)
 
 The pinned runtime passed 1,988 tests, with 13 skipped, plus mypy and Ruff checks.
@@ -151,9 +168,58 @@ directory:
   --evidence .scratch/lightspeed-cluster-verification
 ```
 
-The deployed `tackle2-ui` assets and Hub APIs responded, but the first browser
-observation showed a blank page and subsequent browser-control calls stalled.
-No browser-created AgentRun or browser interaction was verified. That manual UI
-check remains outstanding. Source revisions, image IDs, outcomes, and local
-evidence paths are recorded in
+At that point, the deployed `tackle2-ui` assets and Hub APIs responded, but the
+first browser observation showed a blank page and subsequent browser-control
+calls stalled. No browser-created AgentRun or browser interaction had been
+verified. The later Playwright check below closes that gap. Source revisions,
+image IDs, outcomes, and local evidence paths are recorded in
 [`reference.json`](../hack/lightspeed-runtime/reference.json).
+
+## Browser recording and compatibility fixes (2026-11-09)
+
+Playwright rendered the actual UI without the earlier blank page. Exercising its
+real ACP client exposed three gaps missed by the direct WebSocket viewer: the
+logical workspace path in `session/new`, active-run discovery for steering, and
+Lightspeed token updates in the UI. The runtime/harness and companion UI changes
+above address these gaps. The updated runtime passed 2,002 tests with 13 skipped;
+ACP type and lint checks, Go runtime race tests, and the UI's 594 tests with three
+skipped also passed. The UI production build, type checking, formatting, and lint
+checks passed with existing unrelated warnings.
+
+The recorded AgentRun `ui-n8fz9` was created entirely through Tackle UI, backed by
+the real Hub and the Podman-based Kind installation. Playwright opened its
+session, answered `staging`, approved runtime inspection, sent `Use the canary
+rollout label.` while a tool was active, and approved the resulting commit.
+The next model call received the answer and steering. Live usage showed 40 input
+and 10 output tokens at the steering step, then 80 input and 20 output tokens at
+completion. Unknown monetary cost remained absent.
+
+The run reached `Succeeded`; Hub reported `Verified=True` and successful harness
+verification. Its actual local Git remote received commit
+`d32704b1cd87b6d074ce2a97817d072ccf1a1b87`, containing the selected target, canary
+rollout, and runtime provenance. The UI displays `Succeeded`; verification is
+asserted separately through Hub because the UI does not render that condition.
+The harness revoked the real Hub token (HTTP 204); subsequent lookup returned
+HTTP 404. There were no browser page, console, request, or HTTP errors in the
+successful take.
+
+An actual runtime tool and a separate active-pod inspection agreed on the imported
+Lightspeed package, `RuntimeSession` source hash, DeepAgents version, and running
+`python -m lightspeed_agentic.acp` process. The pod image digest and source labels
+matched runtime revision `ecbd76a` and harness revision `3c8088c`. The recording
+uses UI revision `aa4f9b93` from the companion `tackle2-ui` branch
+`fix/lightspeed-acp-ui`.
+
+This is explicitly a scripted-local-model demonstration of the modified runtime.
+The four model responses supply deterministic usage; two real inspection calls
+exercise the classifier path using scripted classifier responses. The browser,
+Hub, controller, Agent Sandbox, harness, runtime, tools, verification, and Git
+operations are real. It does not establish live-model reasoning, classifier
+quality, monetary accounting, production authentication, pod-restart recovery,
+or adoption of the Lightspeed operator. UI/Hub login was disabled locally.
+
+The successful take, sanitized evidence, raw WebM, and presentation MP4 are stored
+locally under `output/lightspeed-runtime-demo-2026-11-09/` in the main controller
+checkout. Earlier failed recording attempts remain separate diagnostic evidence;
+one stopped at a recorder selector and another at the independent image lookup,
+before its paused tool was released.

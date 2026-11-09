@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
-  "date": "2026-11-06",
+  "date": "2026-11-09",
   "controller": {
     "base": "8c3c7cdabcf81ddd020c0374724af6a72adff40d",
     "branch": "feat/lightspeed-runtime-integration",
-    "verifiedRevision": "66b216a73c6d4f41aacb1400b7105d02ede9ab14"
+    "verifiedRevision": "3c8088c312cd371d8bd541f8a2fe5a1407397af8"
   },
   "runtime": {
     "upstream": "https://github.com/openshift/lightspeed-agentic-sandbox.git",
     "base": "5ea23f34ad2ad5fc01fb6264fb9304116664dd3d",
     "branch": "feat/reusable-sessions-acp",
-    "revision": "25772dab469a3a2089e2b052201197f7060e956a"
+    "revision": "ecbd76a613ed43e580c2481fac4cb1f2781edb67"
   },
   "localIntegration": {
     "scope": "Actual harness/runtime/graph/ACP; scripted HTTP model/Hub; local Git. Not a browser UI or paid-model test.",
@@ -93,7 +93,9 @@
         "verification": "notRun",
         "tokenRevoked": true
       }
-    ]
+    ],
+    "date": "2026-11-06",
+    "runtimeRevision": "25772dab469a3a2089e2b052201197f7060e956a"
   },
   "monetaryUsage": "Unavailable; configured maxCost rejected before model execution",
   "clusterVerification": {
@@ -159,6 +161,15 @@
       "passed": 16,
       "failed": 0,
       "skipped": 0
+    },
+    "date": "2026-11-06",
+    "runtimeRevision": "25772dab469a3a2089e2b052201197f7060e956a",
+    "runtimeImage": {
+      "tag": "localhost/agent-lightspeed:prototype",
+      "configDigest": "sha256:71468efe1ff5ad30485886df6dc66332222e2ca40ad92c70c0717f856cc1617c",
+      "controllerRevision": "e620860b825b6096482b2b7fc61260739d9b1035",
+      "runtimeRevision": "25772dab469a3a2089e2b052201197f7060e956a",
+      "podImageID": "docker.io/library/import-2026-11-06@sha256:ea231dfd17da84446507dff070d272895549db5fc0fd89f44e045d4be09122a8"
     }
   },
   "verification": {
@@ -171,24 +182,122 @@
     "controller": "make test passed, including workflow regression coverage",
     "api": "go test ./... passed",
     "harness": "go test ./... and race checks for acp, runtime, tee, config and migration-harness passed",
-    "independentIntegration": "All six cases passed in parent rerun"
+    "independentIntegration": "All six cases passed in parent rerun",
+    "date": "2026-11-06",
+    "runtimeRevision": "25772dab469a3a2089e2b052201197f7060e956a",
+    "note": "Historical full baseline; later compatibility checks are recorded in uiVerification."
   },
   "image": {
-    "tag": "localhost/agent-lightspeed:prototype",
-    "configDigest": "sha256:71468efe1ff5ad30485886df6dc66332222e2ca40ad92c70c0717f856cc1617c",
-    "controllerRevision": "e620860b825b6096482b2b7fc61260739d9b1035",
-    "runtimeRevision": "25772dab469a3a2089e2b052201197f7060e956a",
-    "podImageID": "docker.io/library/import-2026-11-06@sha256:ea231dfd17da84446507dff070d272895549db5fc0fd89f44e045d4be09122a8"
+    "date": "2026-11-09",
+    "tag": "localhost/agent-lightspeed:demo-ecbd76a",
+    "configDigest": "sha256:1854eca5c9ef6b00651e2aa60a79c4e0f1d3100648e12fcb2dab3cdcb9776a43",
+    "controllerRevision": "3c8088c312cd371d8bd541f8a2fe5a1407397af8",
+    "runtimeRevision": "ecbd76a613ed43e580c2481fac4cb1f2781edb67",
+    "podImageID": "docker.io/library/import-2026-11-09@sha256:98d5bd4065731e8cecfed5705f708fbf48de26ae175b7b36c81e562dfc524d4f"
   },
   "uiVerification": {
-    "status": "unverified",
-    "components": [
-      "tackle2-ui",
-      "tackle2-hub"
-    ],
+    "date": "2026-11-09",
+    "status": "passed",
+    "method": "Playwright Chromium, real Tackle UI and Hub ACP route",
     "namespace": "lightspeed-konveyor",
-    "observations": "Published UI and Hub deployed; UI assets and Hub APIs returned HTTP 200. First browser observation showed a blank page; browser-control calls then stalled. No UI-created AgentRun or human-interaction flow was verified.",
-    "liveModel": "not tested; model calls in completed tests used scripted local endpoints"
+    "agentRun": "ui-n8fz9",
+    "scope": "Actual browser, Hub, controller, Agent Sandbox, harness, modified Lightspeed runtime, tools, inspection and Git. Local scripted model/classifier responses and Git fixture; login disabled.",
+    "ui": {
+      "uiRevision": "aa4f9b93b98d029ba2652e8b645b53018dd1de1c",
+      "uiBranch": "fix/lightspeed-acp-ui",
+      "baseImage": "quay.io/konveyor/tackle2-ui@sha256:f655b3e584768be266dbf65b2ffab872cc4f225536dc3a38ae414f07c687d148",
+      "imageTag": "localhost/lightspeed-ui:aa4f9b93",
+      "imageConfigID": "306e775122fc5c4b4f49ef13b9968a9b3018fd46c45f22b79980979ad7c7139d",
+      "podImageID": "docker.io/library/import-2026-11-09@sha256:b2ecae32e29be7a115ef12561aaab72ccea5bbfe3b0d7c06507cb1adeeeb3d49"
+    },
+    "phase": "Succeeded",
+    "verification": "passed (Hub condition and termination data)",
+    "sessionNew": {
+      "cwd": "/workspace",
+      "status": "created"
+    },
+    "questionAnswer": "staging",
+    "toolApprovals": 2,
+    "steering": "Use the canary rollout label.",
+    "steeringAccepted": true,
+    "steeringApplied": true,
+    "liveUsageAtSteering": {
+      "inputTokens": 40,
+      "outputTokens": 10
+    },
+    "finalUsage": {
+      "inputTokens": 80,
+      "outputTokens": 20,
+      "turnsUsed": 4
+    },
+    "modelCalls": 4,
+    "classifierCalls": 2,
+    "pushedCommit": "d32704b1cd87b6d074ce2a97817d072ccf1a1b87",
+    "tokenRevoked": true,
+    "tokenRevokeHTTPStatus": 204,
+    "tokenAfterHTTPStatus": 404,
+    "runtimeProof": {
+      "sessionSourceSha256": "6589d1a577caa10ee303434ae580e3b599006de6261b353ac615988b7fb469bf",
+      "module": "/opt/lightspeed/src/lightspeed_agentic/__init__.py",
+      "deepagentsVersion": "0.7.22",
+      "activeACPProcessObserved": true,
+      "independentPodInspectionMatched": true,
+      "podImageDigestAssociationVerified": true,
+      "harnessCredentialsInToolEnvironment": false
+    },
+    "errors": {
+      "pageErrors": [],
+      "consoleErrors": [],
+      "failedRequests": [],
+      "badResponses": []
+    },
+    "checks": {
+      "runtime": {
+        "passed": 2002,
+        "skipped": 13,
+        "acpMypy": "passed",
+        "ruff": "check and format passed"
+      },
+      "goRuntime": "race tests passed",
+      "ui": {
+        "unitTests": {
+          "passed": 594,
+          "skipped": 3,
+          "snapshotsPassed": 21
+        },
+        "focusedRegressionTests": 14,
+        "format": "passed",
+        "lint": "passed; changed files have zero warnings; existing client total is20warnings",
+        "typecheck": "passed via workspace production build",
+        "productionBuild": "passed;9CSSorder/asset-sizewarnings",
+        "lockfile": "passed"
+      },
+      "demoFixture": "5 guard tests and Ruff passed"
+    },
+    "recording": {
+      "presentationMP4": "output/lightspeed-runtime-demo-2026-11-09/lightspeed-runtime-scripted-demo.mp4",
+      "rawWebM": "output/lightspeed-runtime-demo-2026-11-09/lightspeed-runtime-raw.webm",
+      "location": "Paths relative to main controller checkout; local artifacts, not committed.",
+      "presentationDurationSeconds": 36.2,
+      "editing": "Four-second title and footer label; complete browser take at original speed; no audio."
+    },
+    "limitations": [
+      "Scripted model and classifier; no live-model or classifier-quality claim.",
+      "No monetary cost data or maxCost enforcement.",
+      "Local UI/Hub login disabled; unauthenticated local Git fixture, not production SCM authentication.",
+      "No browser demonstration of restart recovery, cancellation or workflow execution."
+    ],
+    "previousAttempt": {
+      "date": "2026-11-06",
+      "status": "unverified",
+      "components": [
+        "tackle2-ui",
+        "tackle2-hub"
+      ],
+      "namespace": "lightspeed-konveyor",
+      "observations": "Published UI and Hub deployed; UI assets and Hub APIs returned HTTP 200. First browser observation showed a blank page; browser-control calls then stalled. No UI-created AgentRun or human-interaction flow was verified.",
+      "liveModel": "not tested; model calls in completed tests used scripted local endpoints"
+    }
   },
   "localEvidence": {
     "parentIntegration": ".scratch/lightspeed-parent-verified/summary.json",
@@ -197,7 +306,15 @@
     "infrastructure": ".scratch/lightspeed-kind/infra-evidence.md",
     "uiAssets": ".scratch/lightspeed-kind/ui-asset-health.json",
     "note": "Raw local evidence is ignored by Git; kubeconfigs and tokens must not be committed.",
-    "realHub": ".scratch/lightspeed-final/real-hub-run/summary.json"
+    "realHub": ".scratch/lightspeed-final/real-hub-run/summary.json",
+    "browser": ".scratch/lightspeed-browser/rehearsal-03/evidence.json",
+    "independentRuntime": ".scratch/lightspeed-demo/rehearsal-20261109-02/runtime-provenance-independent.json",
+    "uiTokenRevocation": ".scratch/lightspeed-demo/rehearsal-20261109-02/hub-token-lifecycle.json",
+    "uiImage": ".scratch/lightspeed-ui-aa4f9b93/source.json",
+    "failedRecordings": [
+      ".scratch/lightspeed-browser/rehearsal-01/evidence.json",
+      ".scratch/lightspeed-browser/rehearsal-02/evidence.json"
+    ]
   },
   "hubIntegration": {
     "agentRun": "lightspeed-real-hub-approve-ask",
@@ -228,6 +345,15 @@
     "tokenAfter": "revoke POST204, GET404 (deleted)",
     "tokenRevoked": true,
     "harnessCredentialsAbsentFromModel": true,
-    "proofUsesPaidModel": false
+    "proofUsesPaidModel": false,
+    "date": "2026-11-06",
+    "runtimeRevision": "25772dab469a3a2089e2b052201197f7060e956a",
+    "runtimeImage": {
+      "tag": "localhost/agent-lightspeed:prototype",
+      "configDigest": "sha256:71468efe1ff5ad30485886df6dc66332222e2ca40ad92c70c0717f856cc1617c",
+      "controllerRevision": "e620860b825b6096482b2b7fc61260739d9b1035",
+      "runtimeRevision": "25772dab469a3a2089e2b052201197f7060e956a",
+      "podImageID": "docker.io/library/import-2026-11-06@sha256:ea231dfd17da84446507dff070d272895549db5fc0fd89f44e045d4be09122a8"
+    }
   }
 }
