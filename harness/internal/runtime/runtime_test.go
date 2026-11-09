@@ -136,6 +136,14 @@ func TestLightspeedProcessContractAndCleanup(t *testing.T) {
 	if cfg.Mode != "approve" || cfg.Cwd != "/workspace/repo" || cfg.MaxTurns != 17 || cfg.AskUser == nil {
 		t.Fatalf("config=%+v", cfg)
 	}
+	var wireConfig map[string]any
+	if err := json.Unmarshal(data, &wireConfig); err != nil {
+		t.Fatal(err)
+	}
+	aliases, ok := wireConfig["cwd_aliases"].([]any)
+	if !ok || len(aliases) != 1 || aliases[0] != "/workspace" || wireConfig["replay_primary_session"] != true {
+		t.Fatalf("viewer configuration=%+v", wireConfig)
+	}
 	if !srv.Alive() || srv.Port() != 4001 || srv.SecretKey() != "fixture-key" {
 		t.Fatal("process state incorrect")
 	}
@@ -154,6 +162,37 @@ func TestLightspeedProcessContractAndCleanup(t *testing.T) {
 func TestLightspeedRequiresViewerTee(t *testing.T) {
 	if err := Validate("lightspeed", 0, false); err == nil || !strings.Contains(err.Error(), "HARNESS_ACP_TEE=off") {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestLightspeedDoesNotAliasOtherWorkingDirectories(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\ntrap 'exit 0' TERM\nwhile :; do /bin/sleep 0.05; done\n"
+	if err := os.WriteFile(filepath.Join(bin, "python3"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	for _, cwd := range []string{"/workspace/other", "/other/repo", "workspace/repo"} {
+		t.Run(cwd, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			process, err := Start(ctx, Config{Name: "lightspeed", Provider: "openai", Model: "fixture", Cwd: cwd, MaxTurns: 20, BindLoopback: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer process.Stop()
+			data, err := os.ReadFile(filepath.Join(process.(*lightspeedProcess).tempDir, "acp.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cfg lightspeedConfig
+			if err := json.Unmarshal(data, &cfg); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Cwd != cwd || len(cfg.CwdAliases) != 0 || !cfg.ReplayPrimarySession {
+				t.Fatalf("config=%+v", cfg)
+			}
+		})
 	}
 }
 

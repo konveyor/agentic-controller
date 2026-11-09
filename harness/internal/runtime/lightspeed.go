@@ -17,11 +17,13 @@ import (
 )
 
 type lightspeedConfig struct {
-	Cwd          string         `json:"cwd"`
-	SystemPrompt string         `json:"system_prompt"`
-	MaxTurns     int            `json:"max_turns"`
-	Mode         string         `json:"mode"`
-	AskUser      *AskUserConfig `json:"ask_user,omitempty"`
+	Cwd                  string         `json:"cwd"`
+	CwdAliases           []string       `json:"cwd_aliases,omitempty"`
+	ReplayPrimarySession bool           `json:"replay_primary_session"`
+	SystemPrompt         string         `json:"system_prompt"`
+	MaxTurns             int            `json:"max_turns"`
+	Mode                 string         `json:"mode"`
+	AskUser              *AskUserConfig `json:"ask_user,omitempty"`
 }
 
 type lightspeedProcess struct {
@@ -61,8 +63,18 @@ func startLightspeed(ctx context.Context, cfg Config) (Process, error) {
 	if err != nil {
 		return nil, err
 	}
+	var cwdAliases []string
+	if filepath.Clean(cfg.Cwd) == "/workspace/repo" {
+		// The browser names the prepared checkout by its logical workspace root.
+		// This alias never changes the model or shell execution directory.
+		cwdAliases = []string{"/workspace"}
+	}
 	data, err := json.Marshal(lightspeedConfig{
-		Cwd: cfg.Cwd, SystemPrompt: "", MaxTurns: params.NativeTurnLimit(cfg.MaxTurns), Mode: cfg.Mode, AskUser: cfg.AskUser,
+		Cwd: cfg.Cwd, CwdAliases: cwdAliases,
+		// main.go creates the harness session before opening the viewer tee.
+		// Reserve that first session for scoped reconnect transcript replay.
+		ReplayPrimarySession: true,
+		SystemPrompt:         "", MaxTurns: params.NativeTurnLimit(cfg.MaxTurns), Mode: cfg.Mode, AskUser: cfg.AskUser,
 	})
 	if err != nil {
 		return nil, err
