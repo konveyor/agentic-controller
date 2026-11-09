@@ -1,0 +1,4 @@
+# Agentic skill content - the prompts the agents execute. Changes need
+# review from an owner; see PROMPT_GOVERNANCE.md.
+/catalog/skills/    @djzager @fabianvf @ibolton336 @hhpatel14
+/catalog/examples/  @djzager @fabianvf @ibolton336 @hhpatel14
