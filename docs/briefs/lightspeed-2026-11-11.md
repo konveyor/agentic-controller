@@ -14,7 +14,8 @@ selection, and direct Agent Sandbox execution. It does not deploy Lightspeed's o
 controller remains a stateless reconciler and does not interpret Hub data or participate in ACP
 sessions.
 
-The [presentation outline](../slides/lightspeed-2026-11-11-outline.md) puts runtime integration and
+The [slide deck](../slides/lightspeed-2026-11-11.md) and
+[presentation guide](../slides/lightspeed-2026-11-11-outline.md) put runtime integration and
 feedback first, targeting eight to ten minutes. Operator topics follow a deliberate stopping point
 for continued discussion or later review. The [demo guide](../slides/lightspeed-2026-11-11-demo.md)
 covers the planned live run.
