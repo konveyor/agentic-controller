@@ -18,53 +18,55 @@ belong in the brief and speaker notes.
 
 ## Runtime section
 
-Slides 1–10 target **8 minutes 50 seconds**, including a 2 minute 30 second demo.
+Slides 1–7 target **8 minutes 40 seconds**, including a 2 minute 30 second demo.
 Discussion time is additional. Timings are rehearsal guides.
 
-1. **Trying Lightspeed in Konveyor** — 20 seconds. State the change directly:
-   replacing Goose with Lightspeed's DeepAgents runtime.
-2. **What we'll walk through** — 20 seconds. Explain the runtime-first agenda
-   and optional operator discussion.
-3. **How a run works today** — 35 seconds. Use the current-flow diagram to show
+1. **Adopting Lightspeed’s DeepAgents runtime in Konveyor** — 20 seconds.
+   Introduce the prototype and interest in contributing reusable changes.
+2. **Runtime integration** — 20 seconds. Follow the agenda from the Goose setup
+   through the Lightspeed prototype and runtime changes, then demo and questions.
+3. **Konveyor with Goose** — 70 seconds. Use the current-flow diagram to explain
    application selection, repository preparation, Goose's work and the Git result.
-4. **Lightspeed takes Goose's place** — 40 seconds. Show the same controller,
-   Agent Sandbox and harness, with the runtime box changed. The harness still
-   prepares the repository, verifies work and pushes.
-5. **What we changed in Lightspeed** — 70 seconds. Name the additions: reusable
-   sessions, human controls, an optional ACP adapter and token reporting. Explain
-   that we reused their existing DeepAgents engine, tools and inspection.
-6. **Why we need another prompt** — 60 seconds. Use the turn-limit example:
-   ask the same conversation to write down its progress before stopping.
-7. **Demo: a plan for Coolstore** — 150 seconds. Establish the application and
-   task, show the human interaction, then inspect its effect in the plan.
-8. **What works so far** — 45 seconds. Explain what the scripted integration
-   tests establish and identify the live-model work still pending.
-9. **Token counts now, cost limits next** — 45 seconds. State the gaps plainly
-   and propose improving runtime reporting together.
-10. **What do you think?** — 45 seconds. Ask about the session changes, optional
-    ACP contribution and how they would like to review them. Stop for feedback.
+4. **Konveyor with Lightspeed** — 70 seconds. Show the same controller, Agent
+   Sandbox and Go harness with the runtime changed. Explain both sides of the
+   integration before discussing the runtime contribution.
+5. **Lightspeed runtime changes** — 160 seconds. Explain what changed in their
+   runtime: reusable sessions, human controls, the optional ACP adapter and token
+   observations. Use limit-triggered handoff as the same-session example. Cover
+   preserved inspection, evidence boundaries and the remaining cost/accounting
+   work in the notes before the demo, without separate detour slides.
+6. **Coolstore planning demo** — 150 seconds. Establish the application and task,
+   show the human interaction, then inspect its effect in the plan and Git result.
+7. **Runtime questions** — 30 seconds to invite feedback, then stop. Ask whether
+   session support and the optional ACP contribution are useful, and how the
+   community would like to review them. No slide walkthrough follows this demo
+   before questions.
 
-The live Coolstore recording remains pending cluster/model access and rehearsal.
-Replace that placeholder and update the evidence slide with the observed result
-when available. Keep the existing scripted evidence distinct from the live demo.
-A planning result does not establish a completed application migration.
+The live Coolstore recording remains pending setup and rehearsal. Cluster access
+has been supplied and is being checked separately. Keep the recording placeholder
+until actual evidence is reported. Before presenting, update the demo notes with
+its observed result and scope. Keep the existing scripted evidence distinct from
+the live demo. Planning does not establish a completed application migration.
 
 ## Optional operator discussion
 
-Slides 11–14 add about **four minutes** before discussion.
+After runtime questions, slides 8–12 add about **four minutes** before discussion.
 
-11. **Could your operator run our workloads?** — 50 seconds. Explain the need
-    to choose an image per run and start its harness. The image's normal entrypoint
-    may satisfy startup; a separate command override is not prescribed.
-12. **Where would the workload run?** — 65 seconds. Ask how it will reach Hub,
-    receive model settings and credentials, and accept the UI connection. Discuss
-    the complete access path before choosing a namespace.
-13. **Finishing or stopping a run** — 65 seconds. Explain why stopping the agent
-    must leave room for verification, Git push, reporting and cleanup. Use successful
-    Git push followed by failed Result publication as a concrete failure case.
-14. **Working through this together** — 60 seconds. Propose tests with different
-    images, credentials, cancellation and reporting failures. Agree a useful
-    follow-up without assuming upstream acceptance or a delivery schedule.
+8. **Lightspeed operator discussion** — 20 seconds. A separate agenda makes the
+   transition explicit. The group can continue immediately or read these slides
+   later. The runtime demo and tour have not deployed the Lightspeed operator.
+9. **Workload images and startup** — 50 seconds. Explain the need to choose an
+   image per run and start its harness. The image's normal entrypoint may satisfy
+   startup; a separate command override is not prescribed.
+10. **Placement and credentials** — 65 seconds. Discuss how the workload reaches
+    Hub, receives model settings and credentials, and accepts the UI connection.
+    Work through that complete access path before choosing a namespace.
+11. **Run completion and cancellation** — 65 seconds. Explain why stopping the
+    agent must leave room for verification, Git push, reporting and cleanup.
+    Use successful push followed by failed Result publication as a failure case.
+12. **Operator questions** — 40 seconds. Propose tests with different images,
+    credentials, cancellation and reporting failures. Agree useful follow-up
+    without assuming upstream acceptance or a delivery schedule.
 
 ## Diagrams and rendering
 
@@ -81,14 +83,17 @@ The deck uses the existing Konveyor Marp theme. Render a PDF with:
 make slides DECK=docs/slides/lightspeed-2026-11-11.md
 ```
 
-For a scrollable browser preview, render HTML beside the source so its image
-links resolve:
+For a scrollable browser preview, render bare HTML and copy the three SVG assets
+into the same local preview directory:
 
 ```sh
+mkdir -p .scratch/lightspeed-slides
+cp docs/slides/konveyor-logo.svg docs/slides/konveyor-run-today.svg \
+  docs/slides/lightspeed-runtime-swap.svg .scratch/lightspeed-slides/
 npx --yes @marp-team/marp-cli \
   --theme docs/slides/konveyor-theme.css \
   --template bare docs/slides/lightspeed-2026-11-11.md \
-  -o docs/slides/lightspeed-2026-11-11.html
+  -o .scratch/lightspeed-slides/index.html
 ```
 
 Keep generated preview files local. Commit edits to the Markdown and SVG sources.

@@ -2,8 +2,8 @@
 marp: true
 theme: konveyor
 paginate: true
-title: Trying Lightspeed in Konveyor
-description: Replacing Goose with Lightspeed's DeepAgents runtime
+title: Adopting Lightspeed’s DeepAgents runtime in Konveyor
+description: Konveyor setup, runtime changes and planning demonstration
 author: David Zager
 style: |
   section.diagram { justify-content: flex-start; }
@@ -17,9 +17,7 @@ style: |
 
 ![w:160](konveyor-logo.svg)
 
-# Trying Lightspeed in Konveyor
-
-Replacing Goose with Lightspeed’s DeepAgents runtime
+# Adopting Lightspeed’s DeepAgents runtime in Konveyor
 
 November 11, 2026
 
@@ -37,33 +35,33 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 ---
 
-# What we’ll walk through
+# Runtime integration
 
-- Where Lightspeed fits in Konveyor
-- What we changed to keep today’s experience
-- A planning run against Coolstore
-- Your thoughts on contributing these changes
-
-If useful afterward: could your operator run our workloads too?
+- Konveyor with Goose
+- The prototype with Lightspeed
+- Changes in Lightspeed’s runtime
+- Coolstore planning demo
+- Questions
 
 <!--
 20 seconds.
 
-The first part is about the runtime. Our controller and Agent Sandbox still
-run the workload. We also brought a few slides about using your operator,
-which we can get into if there's time and interest.
+First show our setup with Goose, then the prototype with Lightspeed in its
+place. Explain the changes we made in your runtime before showing the demo.
+Stop for runtime questions afterward. A separate operator agenda follows
+only if the group wants to continue.
 -->
 
 ---
 
 <!-- _class: diagram -->
 
-# How a run works today
+# Konveyor with Goose
 
 ![w:1135](konveyor-run-today.svg)
 
 <!--
-35 seconds.
+70 seconds.
 
 A user chooses an application and task in Konveyor. Our harness gets the
 application details from Hub, prepares the repository and starts Goose.
@@ -81,14 +79,14 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 <!-- _class: diagram -->
 
-# Lightspeed takes Goose’s place
+# Konveyor with Lightspeed
 
 ![w:1135](lightspeed-runtime-swap.svg)
 
 Our harness still prepares the repo, verifies the work and pushes to Git.
 
 <!--
-40 seconds.
+70 seconds.
 
 The highlighted box is the swap. Our controller still creates the Sandbox,
 and our Go harness still prepares the application workspace and launches the
@@ -110,80 +108,67 @@ https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f422
 
 ---
 
-# What we changed in Lightspeed
+# Lightspeed runtime changes
 
-- **Sessions:** send another prompt without starting over
-- **Human interaction:** approve actions, answer questions, give guidance and stop work
-- **Optional ACP adapter:** connect those controls to our existing UI
-- **Token reporting:** send usage back to Konveyor
+- **Sessions:** keep conversation state across prompts
+- **Controls:** approve tools, answer questions, steer and cancel
+- **Optional ACP adapter:** connect sessions to our existing UI
+- **Usage:** report cumulative token observations
+
+Inspection remains in the tool-result path.
 
 <!--
-70 seconds.
+2 minutes 40 seconds.
 
-These are the main additions in our runtime fork. The session is the reusable
-part. It keeps the conversation alive and gives callers a way to interact
-with or stop the running agent. The ACP adapter connects that to the UI
-through the protocol we already use, and can be left out by other callers.
+These are changes in our Lightspeed runtime fork. We reused your DeepAgents
+implementation, including its tools, skills, MCP and inspection, and added a
+session interface that callers can reuse. The session owns graph/checkpoint
+state and model clients. It keeps the conversation alive across prompts.
 
-We reused Lightspeed's DeepAgents implementation, tools and inspection.
-We preserved inspection before tool output reaches the model or the viewer.
-Our harness and UI also needed integration changes, but they stay on the
-Konveyor side. The demo uses both sets of changes.
+A concrete example is our turn-limit handoff. After asking the agent to plan
+a migration, our harness may need a second prompt: write down where you got
+to before stopping. That prompt needs the same conversation. Prompt completion
+and workload finalization are different events. This session lasts for the
+runtime process. Recovery after process loss is separate work, as is a fresh
+workflow stage reading a committed handoff from Git.
 
-The usage reporting is partial. We'll cover the remaining accounting work
-later. These are changes on review branches, not features already merged
-into your upstream runtime.
+Approval and questions use callbacks. Steering enters at a safe model boundary.
+Cancellation awaits active work and stops shell child processes. The optional
+ACP adapter connects these controls to our existing UI through the harness tee.
+Other callers can use the session core without installing that adapter.
+Our harness and UI also needed changes on the Konveyor side.
 
-Sources: runtime session core, ACP adapter and integration report
+We preserved inspection before untrusted tool results reach either the model
+or viewers. These are checks on tool output for prompt injection, not a general
+command-safety guarantee. Existing integration tests used scripted model and
+classifier responses. They verify the interaction and inspection paths, not
+model reasoning or classifier quality. The UI recording covers questions,
+approvals and guidance. Separate cases cover cancellation and same-session
+turn-limit handoff. Planning alone will not establish all runtime requirements.
+
+Token reporting is partial: agent, subagent, summarization and shaping calls
+are observed, while isolated inspection classifier calls are excluded. No
+monetary cost is supplied. A configured maxCost is rejected before execution.
+We want to improve runtime reporting together and consume it in Konveyor,
+including timely updates and cancellation for monetary budget enforcement.
+That remains required for full adoption. It is follow-on work to this prototype,
+not functionality demonstrated today. These changes are on review branches,
+not already merged into Lightspeed upstream.
+
+Sources: runtime session core, optional ACP adapter, evidence and usage limits
 https://github.com/djzager/lightspeed-agentic-sandbox/blob/ecbd76a613ed43e580c2481fac4cb1f2781edb67/src/lightspeed_agentic/session.py
 https://github.com/djzager/lightspeed-agentic-sandbox/blob/ecbd76a613ed43e580c2481fac4cb1f2781edb67/src/lightspeed_agentic/acp/README.md
 https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/docs/lightspeed-runtime-prototype.md
--->
-
----
-
-# Why we need another prompt
-
-First:
-
-> “Please plan this migration.”
-
-When the run reaches its turn limit:
-
-> “Before you stop, write down where you got to.”
-
-The second prompt needs **the same conversation**.
-
-<!--
-60 seconds.
-
-This is a concrete reason for adding sessions, even when nobody is watching.
-Our harness needs to ask the agent to save its progress before stopping.
-A fresh agent would lose the context of the work it had just done.
-
-People watching a run also need to approve a command, answer a question,
-give guidance or stop it. ACP, the Agent Client Protocol, carries those
-interactions between the UI and runtime. We kept that adapter separate so
-the session support is useful even if you don't want ACP upstream.
-
-The session lasts while the runtime process runs. Restoring it after a pod
-restart is separate work. A later workflow stage can already read the handoff
-from Git, which is different from continuing this live conversation.
-
-Source: session implementation and interaction contract
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/ecbd76a613ed43e580c2481fac4cb1f2781edb67/src/lightspeed_agentic/session.py
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/ecbd76a613ed43e580c2481fac4cb1f2781edb67/src/lightspeed_agentic/acp/README.md
+https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
 ---
 
 <!-- _class: lead -->
 
-# Demo: a plan for Coolstore
+# Coolstore planning demo
 
 A Java EE application we want to move to Quarkus
-
-Ask a question. Give guidance. Read the resulting plan.
 
 **Live recording still to come**
 
@@ -195,7 +180,8 @@ and available analysis, then write a migration plan. Show which Agent and
 model we selected before starting. Explain the human decision, then find its
 effect in the plan and resulting Git changes. Also show which runtime ran.
 
-The live recording is pending cluster/model access and rehearsal. The earlier
+The live recording is pending setup and rehearsal. Supplied cluster access
+is being checked separately. No live-demo evidence is claimed yet. The earlier
 recording used scripted model responses. Keep that distinction visible.
 Planning does not demonstrate a completed application migration. The selected
 verification checks must match what this run actually produces.
@@ -208,79 +194,18 @@ https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-20
 
 ---
 
-# What works so far
-
-The prototype runs through Konveyor’s UI and Hub.
-
-- We tested approvals, questions and guidance during a run
-- We tested stopping a run and saving progress at a turn limit
-- We kept Lightspeed’s checks on tool output
-
-**So far, the recorded tests use scripted model responses.**\
-The live Coolstore run is next.
-
-<!--
-45 seconds.
-
-The UI and Hub are real, and the workload really runs the modified Lightspeed
-runtime. The tools, Git operations and verification also execute. Scripted
-model responses made those integration tests repeatable.
-
-The UI recording shows questions, approval and guidance. Separate integration
-cases cover cancellation and the second prompt used to save progress at a
-turn limit. They were not all demonstrated in the same UI recording.
-
-We preserved inspection before tool output reaches either the model or UI.
-That checks untrusted tool output for prompt injection; it isn't a promise
-that every command is safe. Tests with scripted classifier responses verify
-the integration path, not the classifier's detection quality.
-
-Source: prototype evidence and limitations
-https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/docs/lightspeed-runtime-prototype.md
--->
-
----
-
-# Token counts now, cost limits next
-
-- We report token counts from the runtime
-- Some calls, including inspection, are still missing from those counts
-- We still need dollar costs and spending limits
-
-We’d like to improve Lightspeed’s reporting together and use it in Konveyor.
-
-<!--
-45 seconds.
-
-The runtime should tell us what it used. Konveyor can show that information
-and use it for execution limits, without building a second billing calculator.
-
-The prototype reports agent, subagent, summarization and shaping calls.
-It doesn't count the separate inspection classifier calls or calculate cost.
-It rejects maxCost before execution rather than pretending to enforce it.
-Spending limits remain necessary for full adoption, but they don't block
-this runtime demonstration. Timely updates and cancellation are both needed
-to stop work at a budget and ask the agent to save its progress.
-
-Source: prototype usage and limits
-https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/docs/lightspeed-runtime-prototype.md#usage-and-limits
--->
-
----
-
-# What do you think?
+# Runtime questions
 
 - Would session support be useful to you?
 - Does an optional ACP adapter make sense?
 - How would you like to review these changes?
 
-[Runtime changes](https://github.com/djzager/lightspeed-agentic-sandbox/tree/feat/reusable-sessions-acp)
-and [our integration](https://github.com/djzager/agentic-controller/tree/feat/lightspeed-runtime-integration)
+[Runtime changes](https://github.com/djzager/lightspeed-agentic-sandbox/tree/feat/reusable-sessions-acp) and [Konveyor integration](https://github.com/djzager/agentic-controller/tree/feat/lightspeed-runtime-integration)
 
 We can pause here, or talk about your operator.
 
 <!--
-45 seconds, then discussion.
+30 seconds, then discussion.
 
 We have review branches for both sides. I want to review the code before
 opening implementation PRs, and hear whether this direction is useful to
@@ -295,7 +220,25 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 ---
 
-# Could your operator run our workloads?
+# Lightspeed operator discussion
+
+- Workload images and startup
+- Placement and credentials
+- Run completion and cancellation
+- Questions and follow-up
+
+<!--
+20 seconds. Optional operator section begins after runtime questions.
+
+Ask whether the group wants to continue now or review this material later.
+These are operator-adoption requirements and open design questions. The demo
+and cluster tour use our controller and Agent Sandbox. We have not deployed
+the Lightspeed operator for that demonstration.
+-->
+
+---
+
+# Workload images and startup
 
 **We need to choose an image for each run.**
 
@@ -306,7 +249,7 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 Today, the operator’s image setting is shared across runs.
 
 <!--
-50 seconds. Optional operator discussion starts here.
+50 seconds.
 
 This would be a second step after using your runtime. Our demo still uses
 our controller and direct Agent Sandbox integration.
@@ -323,7 +266,7 @@ https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-20
 
 ---
 
-# Where would the workload run?
+# Placement and credentials
 
 Hub and its Secrets live in our namespace.\
 Your operator uses its namespace for workloads and provider Secrets.
@@ -355,7 +298,7 @@ https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-20
 
 ---
 
-# Finishing or stopping a run
+# Run completion and cancellation
 
 We need time to:
 
@@ -386,7 +329,7 @@ https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-20
 
 ---
 
-# Working through this together
+# Operator questions
 
 - Try two runs with different images
 - Work through access to Hub and model credentials
@@ -396,7 +339,7 @@ https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-20
 We can keep moving on the runtime while we work out operator integration.
 
 <!--
-60 seconds, then discussion.
+40 seconds, then discussion.
 
 Those are candidate experiments, and we'd like your thoughts on where to
 start. We can go deeper next Wednesday or with a smaller group if useful.

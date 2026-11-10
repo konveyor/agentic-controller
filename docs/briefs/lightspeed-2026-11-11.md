@@ -16,9 +16,10 @@ sessions.
 
 The [slide deck](../slides/lightspeed-2026-11-11.md) and
 [presentation guide](../slides/lightspeed-2026-11-11-outline.md) put runtime integration and
-feedback first, targeting eight to ten minutes. Operator topics follow a deliberate stopping point
-for continued discussion or later review. The [demo guide](../slides/lightspeed-2026-11-11-demo.md)
-covers the planned live run.
+feedback first, targeting eight to ten minutes. They explain the Goose setup, the Lightspeed
+prototype and changes in Lightspeed’s runtime before the demo and questions. A separate operator
+agenda follows the runtime questions for continued discussion or later review. The
+[demo guide](../slides/lightspeed-2026-11-11-demo.md) covers the planned live run.
 
 ## Runtime contribution for review
 
@@ -73,7 +74,8 @@ both revisions.
 
 A **new live-model Coolstore planning demo is planned, not completed**. Use [Coolstore
 `mta-test`][coolstore-branch], pinned during preparation to [`32c1722`][coolstore-pin], with results
-on a separate branch. Environment access and model configuration remain pending. Explain the
+on a separate branch. Cluster access has been supplied; environment checks, model configuration
+and rehearsal remain pending. No live-demo evidence is claimed yet. Explain the
 application and selected Agent/model/runtime; show questions, approval and steering; inspect the
 committed plan and runtime evidence. Planning does not demonstrate a working migration or all
 runtime controls. The demo guide supplies the rehearsal/verification sequence.
