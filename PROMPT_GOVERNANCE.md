@@ -3,10 +3,12 @@
 This document defines the change-management lifecycle for the **skills** the
 agentic controller ships: the `SKILL.md` instruction sets under
 [`catalog/skills/`](catalog/skills/) that agents load and execute at run time.
-It satisfies ISO/IEC 42001 Control **A.5.2 (Governance and lifecycle of AI
-systems)**: skills are the instruction set defining agent behavior, so they
-are treated as governed source code - version-controlled, peer-reviewed, and
-validated by CI before distribution.
+It is evidence for ISO/IEC 42001 **A.6.1.3 (Processes for responsible AI
+system design and development)**, whose guidance covers change control and
+approvals for AI systems: skills are the instruction set defining agent
+behavior, so they are treated as governed source code - version-controlled,
+peer-reviewed, and validated by CI before distribution. The review
+enforcement also evidences A.3.2, and the CI validation A.6.2.4 and A.6.2.5.
 
 ## Scope - what is governed
 
