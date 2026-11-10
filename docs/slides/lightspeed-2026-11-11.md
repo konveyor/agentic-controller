@@ -110,20 +110,22 @@ https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f422
 
 # Lightspeed runtime changes
 
-- **Sessions:** keep conversation state across prompts
-- **Controls:** approve tools, answer questions, steer and cancel
+- **Sessions:** send another prompt without starting over
+- **Controls:** approve a tool, answer a question, give guidance and stop work
 - **Optional ACP adapter:** connect sessions to our existing UI
-- **Usage:** report cumulative token observations
+- **Token counts:** send usage back to Konveyor
 
-Inspection remains in the tool-result path.
+We kept Lightspeed’s checks on tool output.
 
 <!--
 2 minutes 40 seconds.
 
-These are changes in our Lightspeed runtime fork. We reused your DeepAgents
-implementation, including its tools, skills, MCP and inspection, and added a
-session interface that callers can reuse. The session owns graph/checkpoint
-state and model clients. It keeps the conversation alive across prompts.
+We reused your DeepAgents runtime and made a few changes so our users can
+keep working with it the way they do today. The agent can receive another
+prompt without losing the conversation. People watching can approve a tool,
+answer a question, give guidance or stop the work. The optional ACP adapter
+connects this to our existing UI. The session support can also be used without
+that adapter.
 
 A concrete example is our turn-limit handoff. After asking the agent to plan
 a migration, our harness may need a second prompt: write down where you got
@@ -132,11 +134,11 @@ and workload finalization are different events. This session lasts for the
 runtime process. Recovery after process loss is separate work, as is a fresh
 workflow stage reading a committed handoff from Git.
 
-Approval and questions use callbacks. Steering enters at a safe model boundary.
-Cancellation awaits active work and stops shell child processes. The optional
-ACP adapter connects these controls to our existing UI through the harness tee.
-Other callers can use the session core without installing that adapter.
-Our harness and UI also needed changes on the Konveyor side.
+Guidance is picked up before the next model call. Cancelling waits for active
+work to stop and terminates shell child processes. Our harness and UI also
+needed changes on the Konveyor side. The runtime keeps the conversation and
+model clients alive, and offers approval/question callbacks independently of
+ACP. The adapter uses those controls through our existing harness tee.
 
 We preserved inspection before untrusted tool results reach either the model
 or viewers. These are checks on tool output for prompt injection, not a general
