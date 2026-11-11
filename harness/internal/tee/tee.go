@@ -118,6 +118,9 @@ const (
 	// (usage_update, status_message), enabled by the harness's
 	// customNotifications client capability and teed like session/update.
 	gooseUpdateMethod = "_goose/unstable/session/update"
+	// Lightspeed publishes cumulative token snapshots without inventing
+	// standard ACP context-occupancy measurements.
+	lightspeedUpdateMethod = "_lightspeed/session/update"
 
 	// steerMethod injects user input into a session's active turn.
 	steerMethod = "_goose/unstable/session/steer"
@@ -327,7 +330,7 @@ func (s *Server) AttachRun(ws *acp.WSClient, runSessionID string) {
 	go func() {
 		defer recoverWarn("tee broadcast")
 		for n := range ch {
-			if n.Method != "session/update" && n.Method != gooseUpdateMethod {
+			if n.Method != "session/update" && n.Method != gooseUpdateMethod && n.Method != lightspeedUpdateMethod {
 				continue
 			}
 			s.broadcast(n.Frame)

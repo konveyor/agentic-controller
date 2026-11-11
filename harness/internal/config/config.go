@@ -41,6 +41,8 @@ const (
 )
 
 type Config struct {
+	// Runtime selects the image's ACP runtime; Goose remains the default.
+	Runtime  string
 	Model    string
 	Provider string
 	Endpoint string
@@ -197,6 +199,7 @@ func LoadFromEnv() (*Config, error) {
 	gitAuthorName, gitAuthorEmail := gitAuthorFromEnv()
 
 	cfg := &Config{
+		Runtime:      strings.ToLower(strings.TrimSpace(os.Getenv("HARNESS_RUNTIME"))),
 		Model:        model,
 		Provider:     envWithFallback("KONVEYOR_LLM_PROVIDER", "KONVEYOR_MODEL_PRIMARY_PROVIDER"),
 		Endpoint:     envWithFallback("KONVEYOR_LLM_ENDPOINT", "KONVEYOR_MODEL_PRIMARY_ENDPOINT"),
@@ -218,6 +221,12 @@ func LoadFromEnv() (*Config, error) {
 		AgentPrompt:       os.Getenv("KONVEYOR_PROMPT"),
 		WorkflowGuide:     workflowGuideFromEnv(),
 		StageInstructions: os.Getenv("KONVEYOR_INSTRUCTIONS"),
+	}
+	if cfg.Runtime == "" {
+		cfg.Runtime = "goose"
+	}
+	if cfg.Runtime != "goose" && cfg.Runtime != "lightspeed" {
+		return nil, fmt.Errorf("HARNESS_RUNTIME %q is unsupported (use goose or lightspeed)", cfg.Runtime)
 	}
 
 	paramsFile, err := params.Load(paramsFilePath())
