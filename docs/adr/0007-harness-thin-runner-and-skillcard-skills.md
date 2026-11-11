@@ -4,15 +4,22 @@ title: "Harness as Thin Single-Stage Runner with SkillCard-Based Skills"
 description: "Defines the harness as a thin, single-stage runner responsible for git lifecycle, skill delivery, and agent runtime lifecycle."
 status: accepted
 date: "2026-07-21"
-last_updated: "2026-11-04"
+last_updated: "2026-11-11"
 authors:
   - "Savitha Raghunathan"
-last_reviewed: "2026-11-04"
+last_reviewed: "2026-11-11"
 implementation_status: amended
-review_note: "Hub proxy lookup and shared validation remain strict. Unsupported Maven proxy conversion warns and preserves supplied settings without blocking runs. Deployed MTA 8.3 token scopes and image verification remain a release check."
+review_note: "Hub proxy lookup and shared validation remain strict. Unsupported Maven proxy conversion warns and preserves supplied settings without blocking runs. Deployed MTA 8.3 token scopes and image verification remain a release check. Scoped review: ADR 0024 proposes pinned learning-file preparation; it is unimplemented."
 ---
 
 # ADR 0007: Harness as Thin Single-Stage Runner with SkillCard-Based Skills
+
+**Update (2026-11-11):** Proposed [ADR 0024](./0024-agent-learnings.md)
+extends harness preparation to materialize pinned learning snapshots as memory
+files. The runtime owns context assembly and selective reads; the harness
+persists delivery attribution. This is proposed generic input preparation,
+not migration intelligence. Git ownership, credential boundaries, and existing
+execution controls remain unchanged.
 
 **Update (2026-08-27):** The harness was slimmed to a minimal entry point — it no longer injects `.gitignore` entries for build artifacts (§3, "Thin single-stage runner" step 3) or authors the grounding-data commit (Alternatives, "Harness commits instead of agent"). See `docs/entry-point.md` for the current contract.
 
