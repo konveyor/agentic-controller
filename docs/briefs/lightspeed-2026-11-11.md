@@ -21,7 +21,7 @@ The PR includes the [Markdown slide deck](../slides/lightspeed-2026-11-11.md),
 [rendered PDF](../slides/lightspeed-2026-11-11.pdf), and
 [separate demo video](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4).
 The slide deck and [presentation guide](../slides/lightspeed-2026-11-11-outline.md)
-explain the Goose setup and runtime swap, then seven specific runtime changes
+explain the Goose setup and runtime swap, then eight focused runtime topics
 before the demo. A dedicated Questions slide leads into the operator problems:
 image selection, complete access, batch/outcome adaptation, shutdown/deadlines,
 and the OpenShell roadmap. The [demo guide](../slides/lightspeed-2026-11-11-demo.md)
@@ -41,8 +41,9 @@ in ADRs 0021 and 0016; it does not select a new backend, placement or API.
 
 ### Architecture and upstream baseline
 
-The [20-slide deck](../slides/lightspeed-2026-11-11.md) describes the runtime work
-at the component level, with immutable source references in its speaker notes:
+The [21-slide deck](../slides/lightspeed-2026-11-11.md) describes the runtime work
+with the same structure on each runtime slide: what it does, what we changed,
+and why Konveyor needs it. Component links and notes retain the technical references:
 
 - `RuntimeSession` owns graph, checkpoint and model-client lifetime across prompts,
   instead of a new graph/thread for each `DeepAgentsProvider.query()`.
@@ -54,8 +55,10 @@ at the component level, with immutable source references in its speaker notes:
   main-model prompt budgets, enabling harness-owned same-session handoff.
 - Existing baseline tool-output inspection and approved viewer release are retained;
   registered human answers and native classifier thinking blocks are handled narrowly.
-- Anthropic effort mapping, an optional main-output allowance, and known-cutoff
-  failure handling qualify the selected provider without changing global defaults.
+- Model configuration delivery ensures the chosen reasoning effort and optional
+  response allowance reach the provider, without changing global defaults.
+- A separate response-limit check reports known provider cutoffs as errors before
+  tools execute, so an unfinished response cannot appear to be normal completion.
 
 The recorded fork is based on upstream `5ea23f3`. Current upstream, checked on
 November 11, is [`a23005e8`][runtime-current]. It retains the per-query lifecycle,
