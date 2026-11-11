@@ -13,11 +13,25 @@ opt-in through `HARNESS_RUNTIME=lightspeed`; Goose remains the default.
 
 ## Runtime contribution
 
-The companion repository is `openshift/lightspeed-agentic-sandbox`, branch
-`feat/reusable-sessions-acp`, starting at upstream commit
-`5ea23f34ad2ad5fc01fb6264fb9304116664dd3d`. The controller branch starts at
-`8c3c7cd` on upstream main. Final runtime and verification revisions are recorded
-in `hack/lightspeed-runtime/reference.json`.
+The companion runtime is based on `openshift/lightspeed-agentic-sandbox`, starting
+at upstream commit `5ea23f34ad2ad5fc01fb6264fb9304116664dd3d`. Its review fork is
+[`djzager/lightspeed-agentic-sandbox`](https://github.com/djzager/lightspeed-agentic-sandbox/tree/403916314aa4f869fc7733bef6e20fff32cf2680),
+branch `feat/reusable-sessions-acp`. Use the pinned revision for the November 11
+demo; it includes the later provider and reasoning fixes. The Konveyor integration
+starts at `8c3c7cd` on upstream main and is included in this draft PR.
+`hack/lightspeed-runtime/reference.json` records the earlier scripted verification
+revisions; it does not describe a rerun against the later live-demo runtime.
+
+## Presentation and live demo
+
+The review package includes the [Markdown slide deck](slides/lightspeed-2026-11-11.md),
+[rendered PDF](slides/lightspeed-2026-11-11.pdf), and
+[separate demo video](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4).
+The [demo guide](slides/lightspeed-2026-11-11-demo.md) records the live result,
+deployed source revisions, limitations, and cluster tour. The
+[discussion brief](briefs/lightspeed-2026-11-11.md#runtime-contribution-for-review)
+links to the exact Konveyor harness, Lightspeed runtime, UI changes, and Coolstore
+plan. The video ending names each repository and explains its role.
 
 The reusable session owns graph/checkpoint state and model clients. It accepts
 additional prompts on the same in-memory thread, including automatic
