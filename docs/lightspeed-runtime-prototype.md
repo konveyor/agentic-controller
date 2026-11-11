@@ -22,6 +22,13 @@ starts at `8c3c7cd` on upstream main and is included in this draft PR.
 `hack/lightspeed-runtime/reference.json` records the earlier scripted verification
 revisions; it does not describe a rerun against the later live-demo runtime.
 
+Current upstream reviewed on November 11 is
+[`a23005e8`](https://github.com/openshift/lightspeed-agentic-sandbox/commit/a23005e8f9ed0edc6e430072f50e4698590de71f).
+It still has query-scoped execution, but adds tool-output redaction and shaping
+work after our prototype baseline. The recorded fork does not contain those
+changes. Reconcile them when porting the session contribution; baseline inspection
+preservation does not establish current-upstream safety parity.
+
 ## Presentation and live demo
 
 The review package includes the [Markdown slide deck](slides/lightspeed-2026-11-11.md),

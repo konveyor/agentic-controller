@@ -20,12 +20,13 @@ sessions.
 The PR includes the [Markdown slide deck](../slides/lightspeed-2026-11-11.md),
 [rendered PDF](../slides/lightspeed-2026-11-11.pdf), and
 [separate demo video](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4).
-The slide deck and
-[presentation guide](../slides/lightspeed-2026-11-11-outline.md) put runtime integration and
-feedback first, targeting eight to ten minutes. They explain the Goose setup, the Lightspeed
-prototype and changes in Lightspeed’s runtime before the demo and questions. A separate operator
-agenda follows the runtime questions for continued discussion or later review. The
-[demo guide](../slides/lightspeed-2026-11-11-demo.md) records the live result and cluster tour.
+The slide deck and [presentation guide](../slides/lightspeed-2026-11-11-outline.md)
+explain the Goose setup and runtime swap, then seven specific runtime changes
+before the demo. A dedicated Questions slide leads into the operator problems:
+image selection, complete access, batch/outcome adaptation, shutdown/deadlines,
+and the OpenShell roadmap. The [demo guide](../slides/lightspeed-2026-11-11-demo.md)
+records the result and cluster tour. The deck preserves the decision boundaries
+in ADRs 0021 and 0016; it does not select a new backend, placement or API.
 
 ## Runtime contribution for review
 
@@ -37,6 +38,32 @@ agenda follows the runtime questions for continued discussion or later review. T
   compatibility should not determine the core session interface.
 - **Harness integration:** preserves Hub/Git preparation and finalization, interaction controls,
   and turn-limit handoff through that adapter.
+
+### Architecture and upstream baseline
+
+The [20-slide deck](../slides/lightspeed-2026-11-11.md) describes the runtime work
+at the component level, with immutable source references in its speaker notes:
+
+- `RuntimeSession` owns graph, checkpoint and model-client lifetime across prompts,
+  instead of a new graph/thread for each `DeepAgentsProvider.query()`.
+- Session tool middleware invokes independent approval/question callbacks; the
+  optional ACP adapter projects those controls through the existing Go harness tee.
+- Steering is consumed at the main-model boundary. Cancellation awaits active
+  work, reaps local shell process groups and repairs pending tool history.
+- Model-completion callbacks provide cumulative observed tokens and explicit
+  main-model prompt budgets, enabling harness-owned same-session handoff.
+- Existing baseline tool-output inspection and approved viewer release are retained;
+  registered human answers and native classifier thinking blocks are handled narrowly.
+- Anthropic effort mapping, an optional main-output allowance, and known-cutoff
+  failure handling qualify the selected provider without changing global defaults.
+
+The recorded fork is based on upstream `5ea23f3`. Current upstream, checked on
+November 11, is [`a23005e8`][runtime-current]. It retains the per-query lifecycle,
+but has added [tool-output redaction][current-redaction] and shaping improvements
+that are not in the demo fork. Porting the session contribution must reconcile
+that work. Preserving baseline inspection is not a claim that the recorded
+image includes all current-upstream safety changes. This is a source comparison,
+not a new runtime qualification run.
 
 Same-session handoff differs from viewer reconnect, a later workflow stage, or recovery after
 process loss. Sessions/replay last only for the runtime process. With inspection enabled, untrusted
@@ -174,7 +201,7 @@ change.
 
 The runtime emits cumulative observed tokens for agent, subagent, summarization, and shaping calls.
 Consumers replace snapshots; absent values remain absent and measured zero remains zero. Isolated
-inspection classifier calls are excluded. The fork supplies no monetary cost and rejects `maxCost`
+inspection classifier calls are excluded. The runtime supplies no monetary cost, so the Konveyor harness rejects configured `maxCost`
 before execution. These observations are not a billing total. The UI's live turn label currently
 approximates tool calls. Use the final runtime-provided count for native model calls. [Contract][acp],
 [limitations][prototype].
@@ -184,9 +211,9 @@ consumes runtime reporting, with timely updates and cancellation for budget-trig
 handoff; it should not maintain a parallel cost estimator. This sequences work beyond the prototype
 without removing ADR 0021's full-adoption requirement to preserve `maxCost` behavior.
 
-## Optional operator adoption
+## Operator adoption problems
 
-November 10 source review used [`9973d000`][operator-pin]. The firm requirement is **image selection
+November 11 live upstream check confirms the November 10 review pin [`9973d000`][operator-pin]. The firm requirement is **image selection
 per invocation and startup of that image's Konveyor harness**, including concurrent runs with
 different toolchains. Current Agent/AgenticRun APIs have no workload image selector. One shared
 `sandbox-pod-spec` supplies the base image/command/args, which the builder preserves. A global
@@ -216,8 +243,8 @@ Agree on the complete contract before choosing placement or prescribing a soluti
 - **Lifecycle:** preserve input delivery, Result publication/outcome translation,
   cancellation/deadlines, ownership, and cleanup through finalization. Pod success requires a
   valid completed Result; publication failure is already visible. Agree how successful work/push
-  plus failed publication is reported. Global suspension hard-stops workloads; native per-run
-  cancellation was pending at this pin. No native operator ACP contract is established; that does
+  plus failed publication is reported. Global suspension hard-stops workloads. [PR 588][operator-cancel-proposal]
+  currently proposes per-run hard-stop cancellation and is unmerged at this pin. No native operator ACP contract is established; that does
   not prove a custom harness endpoint cannot work. [Completion][operator-completion],
   [implemented/planned stop behavior][operator-stop].
 
@@ -225,6 +252,32 @@ The SandboxClaim path already uses Agent Sandbox. Adoption could replace our **d
 while retaining Agent Sandbox beneath Lightspeed. Its separate bare-Pod mode does not qualify
 Konveyor's chosen execution path. [Mode dispatch][operator-sandbox], [Sandbox
 resources][operator-template].
+
+### Batch adaptation, shutdown and OpenShell
+
+The [current source research](../research/lightspeed-operator-integration-2026-11-11.md)
+expands the startup and lifecycle contract. The operator mounts batch `/input`
+files and a Result template; it already supplies a per-step publication identity.
+A custom harness adapter can potentially consume that envelope and publish the
+required Result after its complete work lifecycle. The missing work includes a
+truthful mapping of Konveyor outcomes and evidence into the accepted Result
+schema. A process exit alone is insufficient, and success in Git followed by
+publication failure must retain the work and expose an integration failure.
+
+Runtime ACP cancellation can leave the Pod alive for handoff and harness
+finalization. Operator suspension, hard-stop cancellation proposals and
+whole-process deadlines can end that opportunity. Agree normal cancellation,
+remaining finalization time, emergency teardown and publication-failure behavior.
+Existing batch completion can already wait for a long-lived harness; not every
+adapter requirement implies an operator change.
+
+No public Lightspeed OpenShell adoption decision or dated commitment was found
+in the bounded November 11 search. Ask whether it is planned, when, and which
+custom-workload contract should be targeted. If adopted, its policy and identity
+arrangements require qualification of image/startup, Hub/Git/model/MCP/ACP access
+and Result publication. This is a conditional integration consequence, not an
+asserted roadmap or an automatic removal of Konveyor Gateway. ADRs 0016/0021
+leave OpenShell separate and retain today's selection/default execution contracts.
 
 ## Questions for joint design
 
@@ -269,7 +322,7 @@ resources][operator-template].
 [operator-template]: https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/controller/agenticrun/sandbox_manager.go#L601-L723
 [operator-identity]: https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/controller/agenticrun/sandbox_manager.go#L300-L358
 [operator-completion]: https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/controller/agenticrun/pod_handler.go#L253-L324
-[operator-stop]: https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/.ai/spec/what/run-lifecycle.md#L117-L119
+[operator-stop]: https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/.ai/spec/what/sandbox-execution.md#L117-L119
 [operator-sandbox]: https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/controller/agenticrun/sandbox_manager.go#L249-L276
 
 [inspection-fix]: https://github.com/djzager/lightspeed-agentic-sandbox/commit/9def73417c250364df54e3d27980b6acedc6874e
@@ -293,3 +346,7 @@ resources][operator-template].
 [controller-diff]: https://github.com/djzager/agentic-controller/compare/8c3c7cdabcf81ddd020c0374724af6a72adff40d...73a44d59f9e4cf6644ab4fc48f42211a7eff2548
 [runtime-diff]: https://github.com/djzager/lightspeed-agentic-sandbox/compare/5ea23f34ad2ad5fc01fb6264fb9304116664dd3d...403916314aa4f869fc7733bef6e20fff32cf2680
 [ui-diff]: https://github.com/djzager/tackle2-ui/compare/65d76136142966f23a6bf01d7765b948da433214...10dc62e6b44036920d3e050ee04d75343fc859a7
+
+[runtime-current]: https://github.com/openshift/lightspeed-agentic-sandbox/commit/a23005e8f9ed0edc6e430072f50e4698590de71f
+[current-redaction]: https://github.com/openshift/lightspeed-agentic-sandbox/blob/a23005e8f9ed0edc6e430072f50e4698590de71f/src/lightspeed_agentic/providers/tool_result_middleware.py#L188-L230
+[operator-cancel-proposal]: https://github.com/openshift/lightspeed-agentic-operator/pull/588

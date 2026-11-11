@@ -151,7 +151,7 @@ Keep failed rehearsal takes and diagnostic evidence private.
    failure for an explicit cutoff. Short provider checks establish configuration
    acceptance; every complete planning run still needs its own result checks.
 5. Use `mode: approve`, `askUser: true`, and steering, with a bounded turn allowance
-   and enough time to answer. Omit `maxCost`: the runtime rejects it before
+   and enough time to answer. Omit `maxCost`: the Konveyor harness rejects it before
    execution. Token observations exclude inspection-classifier calls and supply
    no monetary cost. The live UI turn label approximates tool calls. Use the final
    runtime-provided count for native model calls. [Usage and limits][prototype]
