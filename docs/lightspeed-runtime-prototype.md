@@ -64,6 +64,30 @@ final termination data. It does not display a zero-dollar cost when cost is unkn
 The proposed [usage telemetry contract in PR 282](https://github.com/konveyor/agentic-controller/pull/282)
 and the existing accounting research remain separate work.
 
+### Model output limits
+
+The companion runtime accepts an optional `LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS`
+environment variable for the main model's per-generation output limit. Set it
+explicitly for models whose SDK default is too small for reasoning and an answer.
+For example, the GLM 5.3 rehearsal uses this Agent setting:
+
+```yaml
+spec:
+  env:
+    - name: LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS
+      value: "16384"
+```
+
+An omitted value preserves the SDK default. This setting does not change the
+separate inspection and shaping budgets, impose an aggregate token budget, or
+provide monetary enforcement. Explicit provider output-limit reasons raise a
+payload-free runtime error instead of producing a successful result; observed
+usage is retained. This does not automatically retry an incomplete generation.
+
+Check the actual deliverable and pushed commit as well as the AgentRun phase.
+With verification enforcement disabled, a missing `docs/plan.md` can leave
+verification `notRun`; a green phase alone does not establish a completed plan.
+
 ## Local verification
 
 Install the companion runtime with pinned dependencies, then run the checks:
