@@ -77,13 +77,20 @@ spec:
   env:
     - name: LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS
       value: "16384"
+    - name: LIGHTSPEED_REASONING_CONFIG
+      value: '{"thinking":{"type":"enabled"},"effort":"low"}'
 ```
 
-An omitted value preserves the SDK default. This setting does not change the
-separate inspection and shaping budgets, impose an aggregate token budget, or
+Omitting the output-token setting preserves the SDK default. This setting does
+not change the separate inspection and shaping budgets, impose an aggregate token budget, or
 provide monetary enforcement. Explicit provider output-limit reasons raise a
 payload-free runtime error instead of producing a successful result; observed
 usage is retained. This does not automatically retry an incomplete generation.
+
+The reasoning configuration is also optional. Anthropic routes forward the
+normalized `effort` value as `output_config.effort`, alongside an explicitly
+configured thinking mode. The example selects low effort for the interactive
+GLM rehearsal; it does not change the runtime's default reasoning behavior.
 
 Check the actual deliverable and pushed commit as well as the AgentRun phase.
 With verification enforcement disabled, a missing `docs/plan.md` can leave
