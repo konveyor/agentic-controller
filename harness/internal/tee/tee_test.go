@@ -414,23 +414,28 @@ func TestForwardPermission(t *testing.T) {
 	}
 }
 
-func TestGooseCustomUpdatesTeed(t *testing.T) {
-	g, _, s := startTee(t, Config{})
+func TestRuntimeCustomUpdatesTeed(t *testing.T) {
+	for _, method := range []string{gooseUpdateMethod, lightspeedUpdateMethod} {
+		t.Run(method, func(t *testing.T) {
+			g, _, s := startTee(t, Config{})
 
-	v, err := dialViewer(t, s, testKey)
-	if err != nil {
-		t.Fatalf("viewer dial: %v", err)
-	}
+			v, err := dialViewer(t, s, testKey)
+			if err != nil {
+				t.Fatalf("viewer dial: %v", err)
+			}
 
-	// goose's custom notification channel (usage_update, status_message)
-	// tees exactly like session/update.
-	teed := `{"jsonrpc":"2.0","method":"_goose/unstable/session/update","params":{"sessionId":"run-s1","update":{"sessionUpdate":"usage_update","used":1234,"contextLimit":200000}}}`
-	g.pushTo(1, teed)
-	got := v.expect("teed usage update", func(f string) bool {
-		return strings.Contains(f, "usage_update")
-	})
-	if got != teed {
-		t.Fatalf("custom update altered:\n got %s\nwant %s", got, teed)
+			// goose's custom notification channel (usage_update, status_message)
+			// tees exactly like session/update.
+			teed := `{"jsonrpc":"2.0","method":"` + method + `","params":{"sessionId":"run-s1","update":{"sessionUpdate":"usage_update","used":1234,"contextLimit":200000}}}`
+			g.pushTo(1, teed)
+			got := v.expect("teed usage update", func(f string) bool {
+				return strings.Contains(f, "usage_update")
+			})
+			if got != teed {
+				t.Fatalf("custom update altered:\n got %s\nwant %s", got, teed)
+			}
+
+		})
 	}
 }
 

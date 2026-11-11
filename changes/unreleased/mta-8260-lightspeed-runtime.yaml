@@ -1,0 +1,6 @@
+kind: feature
+description: >
+  Add an opt-in Lightspeed runtime prototype to the migration harness, with
+  reusable ACP sessions, human interaction, turn-limit handoff, and cumulative
+  token reporting. The companion runtime changes are required; monetary budgets
+  remain unsupported for this prototype.

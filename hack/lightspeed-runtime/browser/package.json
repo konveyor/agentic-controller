@@ -1,0 +1,12 @@
+{
+  "name": "lightspeed-ui-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "inspect": "node inspect.mjs",
+    "record": "node record.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.58.0"
+  }
+}

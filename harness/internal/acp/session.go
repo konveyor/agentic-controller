@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -36,7 +37,8 @@ type SessionClient struct {
 	sessionID atomic.Value // string
 	// hitlUnanswered latches when an ask_user question went unanswered, so
 	// runStage fails the run instead of letting the model guess past it.
-	hitlUnanswered atomic.Bool
+	hitlUnanswered           atomic.Bool
+	authoritativeStopReasons atomic.Bool
 
 	turnMu      sync.Mutex
 	turnHandler func(turnsUsed int)
@@ -84,6 +86,12 @@ func (c *SessionClient) SetPermissionForwarder(f PermissionForwarder) {
 	c.fwdMu.Lock()
 	c.forwarder = f
 	c.fwdMu.Unlock()
+}
+
+// SetAuthoritativeStopReasons opts out of Goose's legacy disconnect/tool-count
+// limit inference, including when a prompt never returns its final metadata.
+func (c *SessionClient) SetAuthoritativeStopReasons(enabled bool) {
+	c.authoritativeStopReasons.Store(enabled)
 }
 
 // SetTurnHandler registers a callback invoked from SendPrompt each time
@@ -321,6 +329,7 @@ type ContentBlock struct {
 type PromptParams struct {
 	SessionID string         `json:"sessionId"`
 	Prompt    []ContentBlock `json:"prompt"`
+	Meta      map[string]any `json:"_meta,omitempty"`
 }
 
 // PromptResult is the final response from session/prompt.
@@ -329,10 +338,19 @@ type PromptResult struct {
 	Chunks     []string `json:"-"`
 
 	CostLimitReached bool `json:"-"`
+	// Lightspeed reports native limits explicitly; Goose still needs the
+	// historical tool-count/disconnect heuristic in the harness classifier.
+	StopReasonAuthoritative bool `json:"-"`
 	// Cost is the last cost.amount observed during THIS call via
 	// usage_update (0 if the provider never reported one — ACP 0011
 	// documents cost as optional).
 	Cost float64 `json:"-"`
+	// CostReported distinguishes a measured zero from absent monetary data.
+	CostReported bool `json:"-"`
+	// Token usage is a cumulative session snapshot, never a per-frame delta.
+	// nil means unavailable; a pointer to zero is a reported measurement.
+	InputTokens  *int64 `json:"-"`
+	OutputTokens *int64 `json:"-"`
 	// TurnsUsed counts tool_call notifications observed during THIS
 	// call. Reporting only — nothing reads this to decide when to stop;
 	// the runtime enforces turn limits natively now (ADR 0011).
@@ -448,9 +466,29 @@ func ProviderErrorText(text string) string {
 // when to stop; TurnsUsed on the result is for reporting only (ADR
 // 0011).
 func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, content []ContentBlock, costLimit float64) (*PromptResult, error) {
+	return c.sendPrompt(ctx, sessionID, content, costLimit, 0)
+}
+
+// SendPromptWithTurnLimit supplies an opt-in Lightspeed model-cycle budget for
+// this prompt, so wind-down spends only the turns remaining in the run budget.
+// Other runtime calls keep using SendPrompt with their existing native limit.
+func (c *SessionClient) SendPromptWithTurnLimit(ctx context.Context, sessionID string, content []ContentBlock, costLimit float64, maxTurns int) (*PromptResult, error) {
+	if maxTurns <= 0 {
+		return nil, fmt.Errorf("prompt maxTurns must be positive")
+	}
+	return c.sendPrompt(ctx, sessionID, content, costLimit, maxTurns)
+}
+
+func (c *SessionClient) sendPrompt(ctx context.Context, sessionID string, content []ContentBlock, costLimit float64, maxTurns int) (*PromptResult, error) {
+	var meta map[string]any
+	if maxTurns > 0 {
+		meta = map[string]any{"lightspeed": map[string]any{"maxTurns": maxTurns}}
+	}
+
 	req := newRequest("session/prompt", &PromptParams{
 		SessionID: sessionID,
 		Prompt:    content,
+		Meta:      meta,
 	})
 
 	respCh := c.ws.registerPending(req.ID)
@@ -462,7 +500,7 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 		return nil, fmt.Errorf("send prompt: %w", err)
 	}
 
-	result := &PromptResult{}
+	result := &PromptResult{StopReasonAuthoritative: c.authoritativeStopReasons.Load()}
 	sawCost := false
 	cancelSent := false
 
@@ -476,7 +514,7 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 	}
 
 	maybeCancelForCost := func() {
-		if costLimit > 0 && !cancelSent && result.Cost >= costLimit {
+		if costLimit > 0 && sawCost && !cancelSent && result.Cost >= costLimit {
 			cancelSent = true
 			result.CostLimitReached = true
 			if err := c.ws.Notify("session/cancel", map[string]any{"sessionId": sessionID}); err != nil {
@@ -491,7 +529,10 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			for _, n := range drainNotifications(notifCh) {
+				process(n)
+			}
+			return result, ctx.Err()
 		case <-c.ws.Done():
 			// readLoop exited. The response may already be routed to
 			// respCh — drain it before giving up.
@@ -505,7 +546,7 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 					// message is worth most when the turn ends this way.
 					return result, fmt.Errorf("prompt error %d: %w", msg.Error.Code, msg.Error)
 				}
-				if err := json.Unmarshal(msg.Result, result); err != nil {
+				if err := decodePromptResult(msg.Result, result); err != nil {
 					return nil, fmt.Errorf("parse prompt result: %w", err)
 				}
 				return result, nil
@@ -530,7 +571,7 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 				// message is worth most when the turn ends this way.
 				return result, fmt.Errorf("prompt error %d: %w", msg.Error.Code, msg.Error)
 			}
-			if err := json.Unmarshal(msg.Result, result); err != nil {
+			if err := decodePromptResult(msg.Result, result); err != nil {
 				return nil, fmt.Errorf("parse prompt result: %w", err)
 			}
 			if costLimit > 0 && !sawCost {
@@ -539,6 +580,31 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 			return result, nil
 		}
 	}
+}
+
+// decodePromptResult applies optional runtime measurement metadata without
+// turning absent measurements into a reported zero.
+func decodePromptResult(raw json.RawMessage, result *PromptResult) error {
+	if err := json.Unmarshal(raw, result); err != nil {
+		return err
+	}
+	var metadata struct {
+		Meta struct {
+			Lightspeed *struct {
+				TurnsUsed *int `json:"turnsUsed"`
+			} `json:"lightspeed"`
+		} `json:"_meta"`
+	}
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return err
+	}
+	if m := metadata.Meta.Lightspeed; m != nil {
+		result.StopReasonAuthoritative = true
+		if m.TurnsUsed != nil && *m.TurnsUsed >= 0 {
+			result.TurnsUsed = *m.TurnsUsed
+		}
+	}
+	return nil
 }
 
 // PermissionOption is one choice offered by a session/request_permission
@@ -730,7 +796,10 @@ const gooseUpdateMethod = "_goose/unstable/session/update"
 // concept. Both are accepted defensively; "size" wins if a frame
 // somehow carries both.
 func trackUsage(msg *RPCResponse, result *PromptResult, sawCost *bool) {
-	if msg.Method != gooseUpdateMethod {
+	// Runtimes may publish the same cumulative snapshot through both the
+	// standard ACP channel and Goose's extension. Assign snapshots instead of
+	// summing them so dual publication and two prompts cannot double count.
+	if msg.Method != gooseUpdateMethod && msg.Method != "_lightspeed/session/update" && msg.Method != "session/update" {
 		return
 	}
 	var params struct {
@@ -739,30 +808,42 @@ func trackUsage(msg *RPCResponse, result *PromptResult, sawCost *bool) {
 			Used          int    `json:"used"`
 			Size          int    `json:"size"`
 			ContextLimit  int    `json:"contextLimit"`
+			InputTokens   *int64 `json:"inputTokens"`
+			OutputTokens  *int64 `json:"outputTokens"`
 			Cost          *struct {
-				Amount float64 `json:"amount"`
+				Amount   *float64 `json:"amount"`
+				Currency string   `json:"currency"`
 			} `json:"cost"`
 		} `json:"update"`
 	}
-	if err := json.Unmarshal(msg.Params, &params); err != nil {
+	if err := json.Unmarshal(msg.Params, &params); err != nil || params.Update.SessionUpdate != "usage_update" {
 		return
 	}
-	if params.Update.SessionUpdate != "usage_update" {
-		return
+	u := params.Update
+	if u.Cost != nil && u.Cost.Amount != nil && (u.Cost.Currency == "" || u.Cost.Currency == "USD") {
+		amount := *u.Cost.Amount
+		if !math.IsNaN(amount) && !math.IsInf(amount, 0) && amount >= 0 {
+			result.Cost = amount
+			result.CostReported = true
+			*sawCost = true
+		}
 	}
-	if params.Update.Cost != nil {
-		result.Cost = params.Update.Cost.Amount
-		*sawCost = true
+	if u.InputTokens != nil && *u.InputTokens >= 0 {
+		result.InputTokens = u.InputTokens
 	}
-	size := params.Update.Size
+	if u.OutputTokens != nil && *u.OutputTokens >= 0 {
+		result.OutputTokens = u.OutputTokens
+	}
+	size := u.Size
 	if size == 0 {
-		size = params.Update.ContextLimit
+		size = u.ContextLimit
 	}
 	if size > 0 {
-		result.ContextUsed = params.Update.Used
+		result.ContextUsed = u.Used
 		result.ContextSize = size
 	}
 }
+
 func handlePromptNotification(msg *RPCResponse, result *PromptResult) {
 	if msg.Method == gooseUpdateMethod {
 		handleGooseNotice(msg, result)
