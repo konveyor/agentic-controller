@@ -21,8 +21,8 @@ The PR includes the [Markdown slide deck](../slides/lightspeed-2026-11-11.md),
 [rendered PDF](../slides/lightspeed-2026-11-11.pdf), and
 [separate demo video](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4).
 The slide deck and [presentation guide](../slides/lightspeed-2026-11-11-outline.md)
-explain the Goose setup and runtime swap, then eight focused runtime topics
-before the demo. A dedicated Questions slide leads into the operator problems:
+explain the Goose setup and runtime swap, a short changes-and-why summary,
+and deeper runtime topics before the demo. A dedicated Questions slide leads into the operator problems:
 image selection, complete access, batch/outcome adaptation, shutdown/deadlines,
 and the OpenShell roadmap. The [demo guide](../slides/lightspeed-2026-11-11-demo.md)
 records the result and cluster tour. The deck preserves the decision boundaries
@@ -33,28 +33,37 @@ in ADRs 0021 and 0016; it does not select a new backend, placement or API.
 - **Core sessions:** keep graph/checkpoint state and model clients alive across prompts in one
   process. Approval/questions use callbacks, normalized events expose inspected output, steering
   enters at a safe model boundary, and cancellation stops active work and shell child processes.
-- **Optional ACP adapter:** maps callbacks/events onto the transport used by Konveyor's
-  harness/UI. Removing it leaves core sessions and the batch entrypoint usable. Transport
+- **Optional ACP integration:** hosts Lightspeed's prepared graph with official
+  `AgentServerACP`, preserving inspection-approved output and authorized viewer replay.
+  Removing it leaves core sessions and the batch entrypoint usable. Transport
   compatibility should not determine the core session interface.
 - **Harness integration:** preserves Hub/Git preparation and finalization, interaction controls,
   and turn-limit handoff through that adapter.
 
 ### Architecture and upstream baseline
 
-The [21-slide deck](../slides/lightspeed-2026-11-11.md) describes the runtime work
-with the same structure on each runtime slide: what it does, what we changed,
-and why Konveyor needs it. Component links and notes retain the technical references:
+The [22-slide deck](../slides/lightspeed-2026-11-11.md) summarizes the changes
+and why Konveyor needs them, then traces the current behavior and contribution
+in deeper technical slides. The [source-level speaking notes](../research/lightspeed-runtime-change-explanations-2026-11-11.md)
+identify the relevant entry points and distinguish Lightspeed wrapper changes
+from capabilities already present in DeepAgents and official ACP:
 
 - `RuntimeSession` owns graph, checkpoint and model-client lifetime across prompts,
-  instead of a new graph/thread for each `DeepAgentsProvider.query()`.
+  instead of a new graph/thread for each `DeepAgentsProvider.query()`. Repeated
+  query calls are possible; retaining the same execution is the missing interface.
+  The harness sends a second `session/prompt` request for handoff before closing it.
 - Session tool middleware invokes independent approval/question callbacks; the
   optional ACP adapter projects those controls through the existing Go harness tee.
 - Steering is consumed at the main-model boundary. Cancellation awaits active
   work, reaps local shell process groups and repairs pending tool history.
 - Model-completion callbacks provide cumulative observed tokens and explicit
   main-model prompt budgets, enabling harness-owned same-session handoff.
+- Lightspeed graph preparation and runtime controls remain in Lightspeed while
+  official `AgentServerACP` supplies the prompt loop and ACP event rendering.
 - Existing baseline tool-output inspection and approved viewer release are retained;
-  registered human answers and native classifier thinking blocks are handled narrowly.
+  a viewer journal replaces raw-checkpoint replay. The replay override uses a
+  private method in the pinned official package and needs upgrade compatibility
+  checks. Registered human answers and native classifier thinking blocks are handled narrowly.
 - Model configuration delivery ensures the chosen reasoning effort and optional
   response allowance reach the provider, without changing global defaults.
 - A separate response-limit check reports known provider cutoffs as errors before
@@ -80,8 +89,9 @@ Published review branches and immutable discussion revisions:
 
 - [Konveyor harness/integration][controller-branch] — documentation at [`447afec`][controller-docs-pin];
   executable Go harness source remains [`73a44d5`][controller-pin].
-- [Lightspeed reusable sessions/ACP][runtime-branch] — [`4039163`][runtime-pin], based on upstream
-  [`5ea23f3`][runtime-base].
+- [Lightspeed reusable sessions/ACP][runtime-branch] — updated implementation
+  [`2291ce9`][official-runtime-pin], based on upstream [`5ea23f3`][runtime-base].
+  The recorded run remains pinned to [`4039163`][runtime-pin].
 - [Tackle UI compatibility][ui-branch] — [`10dc62e`][ui-pin].
 
 Links to the changes shown in the video:
@@ -100,6 +110,40 @@ Links to the changes shown in the video:
 The Konveyor harness integration is included in this draft PR. The companion runtime and UI
 changes remain on their fork review branches. Contribution boundaries, upstream API choices,
 and timing remain open for discussion.
+
+## Revised implementation: official ACP
+
+The updated [runtime revision `2291ce9`][official-runtime-pin] exposes
+`DeepAgentsProvider.prepare_graph()` and streams its actual compiled graph
+through an inspection gate into the unchanged base `AgentServerACP.prompt()`
+implementation. The official SDK router decodes standard requests. Lightspeed
+retains the authenticated WebSocket transport, launcher and owner policies,
+permission/question callbacks and execution controls. This replaces the local
+prompt-rendering loop while preserving the existing harness connection.
+
+`RuntimeSession` owns model/classifier clients and the graph/checkpointer across
+prompts. `InspectedGraph` matches completed acceptance against exact pending
+result signatures and source namespaces. Child graph events remain private.
+Viewer loads replay authorized updates and incoming user prompts from an
+in-memory journal rather than raw checkpoint history. Loading does not replay
+permission/question requests as new executable requests or transfer ownership.
+
+The pinned integration overrides five private official helpers: graph selection,
+thread configuration, checkpoint metadata, viewer replay and edit-result
+presentation. These are compatibility dependencies to review with the upstream
+authors, not claims of a stable supported plugin interface. The
+[composition contract][official-acp-contract] explains each override. No upstream
+ACP package modification was necessary for this implementation.
+
+All six local real-harness cases passed against this exact runtime commit:
+automatic execution, approval, questions, active cancellation, steering/reconnect
+and same-session turn-limit handoff. The tests used the real graph, tools,
+inspection, ACP and temporary Git repositories with scripted HTTP model and Hub
+responses. They checked observed usage, Git results and Hub-token cleanup.
+This is separate from the historical live video and retained cluster, which
+still use `4039163`. No new browser or cluster run is claimed. The
+[pinned verification record](../../hack/lightspeed-runtime/official-acp-reference.json)
+records dependency versions and the final check results.
 
 ## Demonstrated evidence
 
@@ -304,8 +348,8 @@ leave OpenShell separate and retain today's selection/default execution contract
 [runtime-base]: https://github.com/openshift/lightspeed-agentic-sandbox/commit/5ea23f34ad2ad5fc01fb6264fb9304116664dd3d
 [ui-branch]: https://github.com/djzager/tackle2-ui/tree/fix/lightspeed-acp-ui
 [ui-pin]: https://github.com/djzager/tackle2-ui/tree/10dc62e6b44036920d3e050ee04d75343fc859a7
-[session]: https://github.com/djzager/lightspeed-agentic-sandbox/blob/403916314aa4f869fc7733bef6e20fff32cf2680/src/lightspeed_agentic/session.py
-[acp]: https://github.com/djzager/lightspeed-agentic-sandbox/blob/403916314aa4f869fc7733bef6e20fff32cf2680/src/lightspeed_agentic/acp/README.md
+[session]: https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session.py
+[acp]: https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/README.md
 [prototype]: https://github.com/djzager/agentic-controller/blob/447afecfb249b13e95b2c6ef1a156a0f03ce388c/docs/lightspeed-runtime-prototype.md
 [evidence]: https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/hack/lightspeed-runtime/reference.json
 [coolstore-branch]: https://github.com/konveyor-ecosystem/coolstore/tree/mta-test
@@ -353,3 +397,6 @@ leave OpenShell separate and retain today's selection/default execution contract
 [runtime-current]: https://github.com/openshift/lightspeed-agentic-sandbox/commit/a23005e8f9ed0edc6e430072f50e4698590de71f
 [current-redaction]: https://github.com/openshift/lightspeed-agentic-sandbox/blob/a23005e8f9ed0edc6e430072f50e4698590de71f/src/lightspeed_agentic/providers/tool_result_middleware.py#L188-L230
 [operator-cancel-proposal]: https://github.com/openshift/lightspeed-agentic-operator/pull/588
+
+[official-runtime-pin]: https://github.com/djzager/lightspeed-agentic-sandbox/tree/2291ce9e449976d080dd1a287a72a4e8c12f2359
+[official-acp-contract]: https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/README.md#official-server-and-native-graph-composition

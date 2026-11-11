@@ -11,6 +11,10 @@ The final video card names the Konveyor harness, Lightspeed runtime, and Konveyo
 repositories. Their [pinned source changes](../briefs/lightspeed-2026-11-11.md#runtime-contribution-for-review)
 and the [Coolstore plan result][live-plan] are linked for review.
 
+The recording uses the earlier custom ACP implementation at runtime `4039163`.
+It remains unchanged. The deck also explains the subsequent official
+`AgentServerACP` integration, which this recorded run does not validate.
+
 ## Purpose and scope
 
 Show a live model using the reusable Lightspeed runtime inside Konveyor's
@@ -52,7 +56,7 @@ The Gateway selects GLM 5.3 through an Anthropic-compatible service. Hub holds
 the application's Git credential for the harness. Keep endpoints, credentials,
 and account details out of the deck and recording.
 
-Current review revisions:
+Recorded run revisions:
 
 - Go harness in the workload image: [`73a44d5`][controller-revision].
   Later integration documentation at [`447afec`][controller-docs] changes no binaries.

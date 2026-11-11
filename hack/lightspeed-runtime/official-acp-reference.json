@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-11",
+  "runtime": {
+    "repository": "https://github.com/djzager/lightspeed-agentic-sandbox",
+    "branch": "feat/reusable-sessions-acp",
+    "revision": "2291ce9e449976d080dd1a287a72a4e8c12f2359",
+    "base": "5ea23f34ad2ad5fc01fb6264fb9304116664dd3d",
+    "workingTreeAtVerification": "clean"
+  },
+  "officialACP": {
+    "repository": "https://github.com/langchain-ai/deepagents",
+    "revision": "f2a6e02dc8e2dcb05885c5133b94102ccc79b794",
+    "package": "deepagents-acp",
+    "version": "0.0.13",
+    "subdirectory": "libs/acp",
+    "installedServerSha256": "c834c7c994ffac0a707a8a855ef3fc31470b1f333ba012d1db2b3c3c6836e105",
+    "installedSourceMatchesResearchPin": true,
+    "privateOverrides": [
+      "_reset_agent",
+      "_session_config",
+      "_persist_session",
+      "_replay_session",
+      "_process_tool_call_chunks"
+    ]
+  },
+  "dependencies": {
+    "agent-client-protocol": "0.10.1",
+    "deepagents": "0.7.22",
+    "langchain": "1.4.3",
+    "langchain-core": "1.6.12",
+    "langgraph": "1.2.14",
+    "frozenSync": "passed",
+    "lockCheck": "passed",
+    "hermeticCoverage": "passed; pre-existing curated index version-skew warnings"
+  },
+  "controller": {
+    "harnessRevision": "73a44d59f9e4cf6644ab4fc48f42211a7eff2548",
+    "harnessTree": "5f19e6f0d5d56d232e64bb259bcb37fb8c0e7a78",
+    "harnessContentsUnmodified": true,
+    "verificationHelperSha256": "5c1cc8ed85fd725b8e3c916210c3193c03beb10cff0ebaba07d63e63f3344875"
+  },
+  "verification": {
+    "runtimeUnitTests": {
+      "passed": 2119,
+      "skipped": 13,
+      "subtestsPassed": 7,
+      "warnings": "49 existing OTel LoggingHandler deprecations"
+    },
+    "focusedACPUIAndSessionTests": 88,
+    "nativeGraphCases": 23,
+    "ruff": "passed",
+    "format": "passed",
+    "mypy": "passed; 41 source files",
+    "diffCheck": "passed",
+    "harnessGoTests": "go test ./... passed",
+    "demoFixtureGuardTests": 5,
+    "localHarnessIntegration": {
+      "scope": "Real Go harness, native runtime graph, tools, inspection, ACP and temporary Git repositories. Scripted HTTP model/classifier and Hub endpoints; localhost only. No paid model, browser UI or Kubernetes cluster.",
+      "cases": [
+        {
+          "case": "auto",
+          "exitCode": 0,
+          "modelCalls": 2,
+          "classifierCalls": 1,
+          "usage": {
+            "turnsUsed": 2,
+            "inputTokens": 40,
+            "outputTokens": 10
+          },
+          "verification": "passed",
+          "tokenRevoked": true
+        },
+        {
+          "case": "approve",
+          "exitCode": 0,
+          "modelCalls": 2,
+          "classifierCalls": 1,
+          "usage": {
+            "turnsUsed": 2,
+            "inputTokens": 40,
+            "outputTokens": 10
+          },
+          "verification": "passed",
+          "tokenRevoked": true
+        },
+        {
+          "case": "ask-user",
+          "exitCode": 0,
+          "modelCalls": 3,
+          "classifierCalls": 1,
+          "usage": {
+            "turnsUsed": 3,
+            "inputTokens": 60,
+            "outputTokens": 15
+          },
+          "verification": "passed",
+          "tokenRevoked": true
+        },
+        {
+          "case": "cancel",
+          "exitCode": 1,
+          "modelCalls": 1,
+          "classifierCalls": 0,
+          "usage": {
+            "turnsUsed": 1,
+            "inputTokens": 20,
+            "outputTokens": 5
+          },
+          "verification": "notRun",
+          "tokenRevoked": true
+        },
+        {
+          "case": "steer-reconnect",
+          "exitCode": 0,
+          "modelCalls": 2,
+          "classifierCalls": 1,
+          "usage": {
+            "turnsUsed": 2,
+            "inputTokens": 40,
+            "outputTokens": 10
+          },
+          "verification": "passed",
+          "tokenRevoked": true
+        },
+        {
+          "case": "max-turns",
+          "exitCode": 2,
+          "modelCalls": 2,
+          "classifierCalls": 2,
+          "usage": {
+            "turnsUsed": 2,
+            "inputTokens": 40,
+            "outputTokens": 10
+          },
+          "verification": "notRun",
+          "tokenRevoked": true
+        }
+      ],
+      "allAssertionsPassed": true
+    }
+  },
+  "recordedDemo": {
+    "runtimeRevision": "403916314aa4f869fc7733bef6e20fff32cf2680",
+    "recordingUnchanged": true,
+    "verifiesOfficialACPRevision": false,
+    "videoSha256": "0391eb847cd23b4489c3652f0cc42d203fb982ec2ccff77ea53350be65cee3a8"
+  },
+  "limits": [
+    "Private upstream helpers require pinned-version compatibility checks.",
+    "Session and viewer history are process-local; journal retains a bounded tail and announces truncation.",
+    "No new live-model, browser, cluster or operator-backend qualification.",
+    "Current upstream redaction/shaping changes after the original fork baseline still need reconciliation.",
+    "Monetary reporting and maxCost enforcement remain unsupported; no accounting estimator added."
+  ],
+  "localEvidence": ".scratch/lightspeed-official-acp-verification-20261111-03/summary.json"
+}

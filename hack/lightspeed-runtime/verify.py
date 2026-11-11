@@ -372,7 +372,10 @@ async def viewer(fixture: Fixture, process: subprocess.Popen):
                     if (
                         fixture.case == "steer-reconnect"
                         and update.get("sessionUpdate") == "tool_call"
-                        and update.get("title") == "execute"
+                        and (
+                            update.get("kind") == "execute"
+                            or update.get("title") == "execute"
+                        )
                         and not fixture.steer_sent
                     ):
                         assert fixture.run_id, (
@@ -401,7 +404,10 @@ async def viewer(fixture: Fixture, process: subprocess.Popen):
                     if (
                         fixture.case == "cancel"
                         and update.get("sessionUpdate") == "tool_call"
-                        and update.get("title") == "execute"
+                        and (
+                            update.get("kind") == "execute"
+                            or update.get("title") == "execute"
+                        )
                         and not fixture.cancel_sent
                     ):
                         for _ in range(200):

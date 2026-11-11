@@ -15,9 +15,11 @@ opt-in through `HARNESS_RUNTIME=lightspeed`; Goose remains the default.
 
 The companion runtime is based on `openshift/lightspeed-agentic-sandbox`, starting
 at upstream commit `5ea23f34ad2ad5fc01fb6264fb9304116664dd3d`. Its review fork is
-[`djzager/lightspeed-agentic-sandbox`](https://github.com/djzager/lightspeed-agentic-sandbox/tree/403916314aa4f869fc7733bef6e20fff32cf2680),
-branch `feat/reusable-sessions-acp`. Use the pinned revision for the November 11
-demo; it includes the later provider and reasoning fixes. The Konveyor integration
+[`djzager/lightspeed-agentic-sandbox` at `2291ce9`](https://github.com/djzager/lightspeed-agentic-sandbox/tree/2291ce9e449976d080dd1a287a72a4e8c12f2359),
+branch `feat/reusable-sessions-acp`. The revised implementation uses official
+`AgentServerACP`; the November 11 video and retained cluster instead use
+[`4039163`](https://github.com/djzager/lightspeed-agentic-sandbox/tree/403916314aa4f869fc7733bef6e20fff32cf2680),
+with the previous ACP implementation and provider/reasoning fixes. The Konveyor integration
 starts at `8c3c7cd` on upstream main and is included in this draft PR.
 `hack/lightspeed-runtime/reference.json` records the earlier scripted verification
 revisions; it does not describe a rerun against the later live-demo runtime.
@@ -46,9 +48,12 @@ limit-triggered handoff. Tool approval and questions use callbacks with no ACP
 dependency. Steering is consumed at a safe model boundary; cancellation awaits
 active work and terminates shell child processes.
 
-The optional `lightspeed_agentic.acp` package adapts callbacks and normalized
-events to the existing harness connection. Removing it does not remove core
-sessions or the existing batch entrypoint. With Lightspeed inspection enabled,
+The optional `lightspeed_agentic.acp` package hosts the prepared Lightspeed graph
+with official `AgentServerACP` and connects it to the existing harness transport.
+Lightspeed retains graph preparation, inspection and execution controls. The
+integration keeps inspection-approved live output and records authorized viewer
+updates for replay instead of replaying raw graph checkpoints. Removing ACP does
+not remove core sessions or the existing batch entrypoint. With Lightspeed inspection enabled,
 untrusted tool results reach the model and ACP viewers only after inspection
 allows them. The trusted `ask_user` bridge calls the harness's existing MCP
 executable; viewers cannot configure arbitrary local MCP commands. Remote MCP
@@ -56,6 +61,21 @@ servers continue through Lightspeed's admission path.
 
 Sessions and replay history last only for the runtime process. Viewer reconnect
 and further prompts during that lifetime do not imply recovery after pod restart.
+
+The source-level [runtime change explanations](research/lightspeed-runtime-change-explanations-2026-11-11.md)
+trace the current upstream entry point and each contribution. Repeated
+`DeepAgentsProvider.query()` calls are possible, but each creates a new graph
+and thread and closes its model clients. The integration exposes a retained
+graph/client lifetime so the harness can send a second `session/prompt` request
+to the same conversation for handoff. DeepAgents and official ACP already
+support conversation history; the change is in Lightspeed's integration.
+
+The [output/replay investigation](research/deepagents-acp-output-replay-2026-11-11.md)
+explains why model checkpoints alone cannot establish permission to display a
+tool result. The integration uses five private helpers in the pinned official
+server for graph selection, thread configuration, metadata, replay and edit-result
+display. The runtime's [ACP integration contract](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/README.md#official-server-and-native-graph-composition)
+explains each override and its compatibility checks.
 
 The harness explicitly maps the UI's logical `/workspace` directory to the
 prepared `/workspace/repo` session. This alias does not change the runtime's

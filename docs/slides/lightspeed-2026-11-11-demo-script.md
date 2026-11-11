@@ -11,6 +11,10 @@ Final edit: `lightspeed-2026-11-11-demo.mp4` — 2 minutes 44 seconds, silent, w
 - **2:16–2:28 — Result and limits.** “The run succeeded and the harness passed all five planning checks before pushing the approved commit. We have token usage, with classifier calls excluded; this is not a cost total. The result is an approved plan in Git.”
 - **2:28–2:44 — Code behind the demo.** “The Konveyor harness integration is in djzager/agentic-controller. Our runtime changes are in djzager/lightspeed-agentic-sandbox. The UI changes are in djzager/tackle2-ui. The plan is in djzager/coolstore. The deck and PR link to the exact changes in each repository.”
 
+The recorded runtime is `4039163`, with the earlier custom ACP adapter. The
+video remains unchanged and does not validate the later official `AgentServerACP`
+integration described in the deck.
+
 ## Editing disclosure
 
 All moving footage comes from the single successful AgentRun `ui-2rhxw`. The actual run took **28 minutes 9 seconds**. Moving interactions play at normal speed. Idle waits and repeated edit/review cycles are omitted; result sections are arranged for explanation.

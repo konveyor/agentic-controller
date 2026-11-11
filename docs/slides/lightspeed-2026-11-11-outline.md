@@ -16,81 +16,99 @@ and direct Agent Sandbox default remain in force. OpenShell is not a
 predetermined destination, and its adoption would not automatically remove
 Gateway/provider configuration. Proposed ADR 0020 has not settled the outcome taxonomy.
 
-The deck has **21 slides**. Eight focused runtime slides use the same questions: what it does, what we
-changed, and why Konveyor needs it. Component links identify the implementation. Detailed file/line references are in speaker notes. The demo slide
-holds the clickable PR, runtime, UI, and result links. A dedicated Questions
-slide leads directly into the operator problem set. There is no pause/continue
-choice in the presentation.
+The deck has **22 slides**. Slide 5 summarizes the runtime changes and why
+Konveyor needs them. Slides 6–13 provide source-guided technical detail for
+discussion. Each topic has clickable implementation links and deeper speaker
+notes. The demo slide holds the clickable harness PR, runtime, UI and result
+links. A dedicated Questions slide leads into the operator problem set.
 
 ## Runtime walkthrough
 
-Slides 1–14 target about **9 minutes 50 seconds**, including the three-minute
-demo section. Discussion is additional. Lead with the architectural change on
-each technical slide; use the deeper notes to answer questions.
+Slides 1–15 target **8–10 minutes**, including the separate **2:44 video**.
+Keep the setup and summary short, then spend about 25–30 seconds on each
+technical topic. The detailed notes and source links support questions rather
+than adding a minute of narration to every topic. Discussion is additional.
 
 1. **Adopting Lightspeed’s DeepAgents runtime in Konveyor** — 15 seconds.
 2. **Runtime integration** — 15 seconds. Setup, runtime changes, demo, questions.
 3. **Konveyor with Goose** — 45 seconds. Existing controller, Sandbox, harness,
    runtime and Git responsibilities.
-4. **Konveyor with Lightspeed** — 45 seconds. Replace the runtime box; keep the
-   harness preparation/finalization and current execution backend.
-5. **Keeping the conversation for a second prompt** — 35 seconds. Retain the
-   conversation and execution state so the harness can request a handoff.
-6. **Asking the user before acting** — 35 seconds. Separate permission and question
-   callbacks preserve the interactions Konveyor users already have.
-7. **Connecting Lightspeed to Konveyor's UI** — 35 seconds. The optional ACP
-   adapter carries the conversation and controls through the existing harness connection.
-8. **Guiding or stopping active work** — 35 seconds. Users can correct or stop
-   the agent while the harness remains able to save/push committed work and clean up.
-9. **Reporting usage and reserving a handoff** — 35 seconds. Show usage while
-   work happens and reserve turns for the agent's handoff.
-10. **Checking what tools return** — 35 seconds. Explain attempts to hide
-    instructions in tool results, the checks we preserved, and why interactive
-    runs need them. Keep classifier parser details in the notes.
-11. **Applying the model settings we choose** — 35 seconds. Our effort choice
-    must reach the provider; output-size overrides remain optional.
-12. **Detecting a response that was cut short** — 35 seconds. A provider-reported
-    output limit must produce an error rather than apparent task completion.
-13. **Coolstore planning demo** — 180 seconds, including the 2:44 MP4. Show the
+4. **Konveyor with Lightspeed** — 45 seconds. Replace the runtime box while
+   retaining harness preparation/finalization and the current execution backend.
+5. **Runtime changes and why we need them** — 40 seconds. Summarize retained
+   conversation state, official ACP, inspected output, and truthful execution reporting.
+6. **A second prompt in the same conversation** — 25–30 seconds. Lightspeed's query
+   wrapper owns graph/client lifetime per call. Retain preparation across prompts.
+   DeepAgents and official ACP already support history and repeated prompts.
+7. **Lightspeed behind the official ACP server** — 25–30 seconds. Reuse
+   AgentServerACP's prompt core, preserving Lightspeed preparation and policies.
+8. **User control during execution** — 25–30 seconds. Approval and questions have
+   distinct callbacks. Steering reaches a safe model boundary. Active local
+   cancellation must stop/await work so the harness can finalize.
+9. **Turn limits, usage and the handoff prompt** — 25–30 seconds. Count main-model
+   calls explicitly and report timely observed usage. The harness sends a second
+   session/prompt request in the same session after the primary reaches its allowance.
+10. **Inspection before model and viewer access** — 25–30 seconds. Model inspection
+    and approved client release are separate gates. A classification cache entry
+    alone does not authorize display.
+11. **Viewer replay without reopening rejected output** — 25–30 seconds. Journal
+    authorized updates, override private _replay_session and explain pinned-version
+    coupling. This is same-process viewer replay, not durable recovery.
+12. **Applying the model settings we choose** — 25–30 seconds. Deliver the selected
+    reasoning effort to the provider. A main-model output override stays optional.
+13. **Detecting a response that was cut short** — 25–30 seconds. Fail an explicit
+    provider output cutoff before executing tools from the unfinished response.
+14. **Coolstore planning demo** — 180 seconds, including the 2:44 MP4. Show the
     question, approvals, guidance, revisions, final approval and committed plan.
     All implementation/result links are clickable on this slide.
-14. **Questions** — invite runtime discussion, then advance into operator adoption.
+15. **Questions** — runtime discussion, then operator adoption.
 
-The run produced a plan and passed five current planning checks; application
-migration/build/deployment were not performed. The runtime fork is pinned to
-4039163, based on upstream 5ea23f3. The November 11 upstream inspection at
-a23005e8 is a separate source review, not the deployed runtime or a new live test.
-The actual pre-write checkout was b5752b9; analysis uses its direct child 32c1722.
-Only .vscode/extensions.json differs. Preserve those evidence boundaries.
+The video records the **earlier custom ACP implementation at runtime fork
+4039163**, based on upstream 5ea23f3. It remains unchanged and does not validate
+the revised official AgentServerACP implementation. Its result was a plan that
+passed five current planning checks. Application migration/build/deployment were
+not performed. The actual pre-write checkout was b5752b9. Analysis uses its direct
+child 32c1722, whose only difference is .vscode/extensions.json.
+
+The [updated runtime at `2291ce9`](https://github.com/djzager/lightspeed-agentic-sandbox/commit/2291ce9e449976d080dd1a287a72a4e8c12f2359)
+uses official ACP with Lightspeed-owned preparation, output release and bounded
+same-process replay. The private replay method and four additional private hooks
+require compatibility checks at the pinned ACP version. Local checks use the
+real harness, graph, inspection, tools, ACP and Git with scripted HTTP model
+and Hub services. They include six harness cases and 23 native graph/ACP cases.
+There was no fresh UI or cluster run of the updated implementation.
+Current upstream a23005e8 is a separate source review and inspection-parity
+reconciliation target, not the deployed runtime in the video. Keep all three
+source/evidence boundaries explicit.
 
 ## Operator problems and possible integration paths
 
-Slides 15–21 add about **5 minutes 25 seconds** before discussion. These slides
+Slides 16–22 add about **5 minutes 25 seconds** before discussion. These slides
 state the adoption requirements and concrete integration work without selecting
 an upstream API or asserting a roadmap commitment. The
 [source research](../research/lightspeed-operator-integration-2026-11-11.md)
 backs the current behavior and discussion paths.
 
-15. **Lightspeed as the execution backend** — 35 seconds. Candidate delegation
+16. **Lightspeed as the execution backend** — 35 seconds. Candidate delegation
     from our reconciler to AgenticRun; Lightspeed owns SandboxClaim lifecycle,
     while the Go harness retains the application workload. Agent Sandbox stays underneath.
-16. **Roadblock: selecting the workload image** — 55 seconds. Java/JDK/Maven and
+17. **Roadblock: selecting the workload image** — 55 seconds. Java/JDK/Maven and
     Go workloads require different images concurrently. Per-invocation image and
     harness startup are firm requirements; image/profile selection is a possible contract.
-17. **Problem: workload placement and access** — 60 seconds. Current central
+18. **Problem: workload placement and access** — 60 seconds. Current central
     placement, cluster-scoped Agent/provider, namespaced Secrets, and complete
     Hub/model/Git/MCP/ACP access must be qualified together. Placement is open.
-18. **Problem: harness input and run completion** — 60 seconds. Existing batch
+19. **Problem: harness input and run completion** — 60 seconds. Existing batch
     files and Result RBAC may support a harness adapter. Input/outcome mapping,
     verification/push/cleanup and Result publication need qualification.
-19. **Problem: stopping the agent or its workload** — 55 seconds. Graceful ACP
+20. **Problem: stopping the agent or its workload** — 55 seconds. Graceful ACP
     cancellation inside a live Pod differs from operator hard stop and whole-process
     deadlines. Discuss a finalization allowance and publication failure behavior.
     PR588 is an open hard-stop proposal, not merged graceful-cancellation support.
-20. **OpenShell roadmap and integration contract** — 60 seconds. Ask whether it
+21. **OpenShell roadmap and integration contract** — 60 seconds. Ask whether it
     is planned and when; discuss image, policy, credentials, Result identity,
     ACP and lifecycle implications if it is. No public dated commitment was found.
-21. **Questions** — discussion of the operator problems and possible collaboration.
+22. **Questions** — discussion of the operator problems and possible collaboration.
 
 ## Diagrams and rendering
 
@@ -103,7 +121,7 @@ later operator discussion.
 
 The PR contains the editable Markdown deck, the matching rendered PDF, and the
 separate MP4 demo. Present the PDF and switch to the video on the demo slide.
-Slide 13 links to the exact changes in each repository; the video ending names
+Slide 14 links to the exact changes in each repository; the video ending names
 those repositories and explains their roles.
 
 The deck uses the existing Konveyor Marp theme. Render the committed PDF with:
