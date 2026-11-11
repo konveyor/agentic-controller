@@ -1,7 +1,8 @@
 # Konveyor and Lightspeed presentation guide
 
 November 11, 2026. The editable [slide deck](lightspeed-2026-11-11.md) contains
-on-slide text and speaker notes. The [discussion brief](../briefs/lightspeed-2026-11-11.md)
+on-slide text and speaker notes. The [rendered PDF](lightspeed-2026-11-11.pdf)
+and [separate demo video](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4) are committed alongside it. The [discussion brief](../briefs/lightspeed-2026-11-11.md)
 contains detailed evidence, and the [demo guide](lightspeed-2026-11-11-demo.md)
 covers setup, recording and the cluster tour.
 
@@ -19,7 +20,7 @@ belong in the brief and speaker notes.
 ## Runtime section
 
 Slides 1–7 target **9 minutes 30 seconds**, including a three-minute demo section
-with the 2 minute 36 second recording.
+with the 2 minute 44 second recording.
 Discussion time is additional. Timings are rehearsal guides.
 
 1. **Adopting Lightspeed’s DeepAgents runtime in Konveyor** — 20 seconds.
@@ -53,7 +54,7 @@ Application source stayed unchanged; this does not establish a completed migrati
 The actual pre-write checkout is `b5752b9`; analysis uses its direct child
 `32c1722`. Only `.vscode/extensions.json` differs. Keep those revisions distinct
 in the walkthrough and final diff. The full run lasted 28 minutes 9 seconds;
-the [recording](lightspeed-2026-11-11-demo.mp4) is 2 minutes 36 seconds, using
+the [recording](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4) is 2 minutes 44 seconds, using
 normal-speed excerpts and labelled reading pauses with idle waits omitted. Preserve
 the distinction from the November 6/9 scripted evidence.
 
@@ -86,36 +87,29 @@ They narrow the scope of [Ian's PR diagram](https://github.com/konveyor/agentic-
 to the runtime integration being demonstrated. Backend alternatives belong in the
 later operator discussion.
 
-The deck uses the existing Konveyor Marp theme. Render a PDF with:
+The PR contains the editable Markdown deck, the matching rendered PDF, and the
+separate MP4 demo. Present the PDF and switch to the video on the demo slide.
+Slide 7 links to the exact changes in each repository; the video ending names
+those repositories and explains their roles.
+
+The deck uses the existing Konveyor Marp theme. Render the committed PDF with:
 
 ```sh
-mkdir -p .scratch/lightspeed-slides
-npx --yes @marp-team/marp-cli --html \
-  --theme docs/slides/konveyor-theme.css --allow-local-files \
-  docs/slides/lightspeed-2026-11-11.md \
-  -o .scratch/lightspeed-slides/lightspeed-2026-11-11.pdf
+make slides DECK=docs/slides/lightspeed-2026-11-11.md
 ```
 
-The demo plays directly on slide 6 in the browser deck, with playback and seek
-controls. The PDF shows a linked poster because PDF does not play the video.
-For a scrollable browser preview, enable HTML and copy the three SVG assets,
-recording, and poster into the same local preview directory:
+For a scrollable browser preview:
 
 ```sh
 mkdir -p .scratch/lightspeed-slides
 cp docs/slides/konveyor-logo.svg docs/slides/konveyor-run-today.svg \
   docs/slides/lightspeed-runtime-swap.svg docs/slides/lightspeed-2026-11-11-demo.mp4 \
-  docs/slides/lightspeed-2026-11-11-demo-poster.jpg \
   .scratch/lightspeed-slides/
 npx --yes @marp-team/marp-cli \
   --theme docs/slides/konveyor-theme.css \
-  --html --template bare docs/slides/lightspeed-2026-11-11.md \
+  --template bare docs/slides/lightspeed-2026-11-11.md \
   -o .scratch/lightspeed-slides/index.html
 ```
 
-Open the generated `index.html` directly in a browser, keeping the media files
-beside it. If serving the deck over HTTP, use a server with byte-range support so
-the video can seek correctly.
-
-Keep generated preview files local. Commit the Markdown and SVG sources, poster,
-and shared MP4 recording.
+Keep generated HTML preview files local. Commit the Markdown and SVG sources,
+rendered PDF, and shared MP4 recording. Regenerate the PDF whenever the deck changes.

@@ -5,9 +5,10 @@
 Show the runtime prototype, get feedback on reusable contributions, and discuss requirements for
 optional Lightspeed operator adoption. [Accepted ADR 0021][adr] separates runtime reuse, execution
 backend adoption, and later resource migration. The live Coolstore run produced a verified,
-pushed [migration plan][live-plan]. The [edited recording](../slides/lightspeed-2026-11-11-demo.mp4)
-is 2 minutes 36 seconds. This brief
-announces no implementation PR or upstream agreement.
+pushed [migration plan][live-plan]. The [edited recording](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4)
+is 2 minutes 44 seconds. This draft Konveyor PR includes the harness integration
+and presentation package. Companion runtime and UI changes are linked for review;
+upstream acceptance remains open.
 
 Konveyor's prototype reuses Lightspeed's DeepAgents runtime while its Go harness owns Hub
 application resolution, repository/instruction preparation, push-credential isolation, verification,
@@ -16,7 +17,10 @@ selection, and direct Agent Sandbox execution. It does not deploy Lightspeed's o
 controller remains a stateless reconciler and does not interpret Hub data or participate in ACP
 sessions.
 
-The [slide deck](../slides/lightspeed-2026-11-11.md) and
+The PR includes the [Markdown slide deck](../slides/lightspeed-2026-11-11.md),
+[rendered PDF](../slides/lightspeed-2026-11-11.pdf), and
+[separate demo video](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4).
+The slide deck and
 [presentation guide](../slides/lightspeed-2026-11-11-outline.md) put runtime integration and
 feedback first, targeting eight to ten minutes. They explain the Goose setup, the Lightspeed
 prototype and changes in Lightspeed’s runtime before the demo and questions. A separate operator
@@ -50,7 +54,21 @@ Published review branches and immutable discussion revisions:
   [`5ea23f3`][runtime-base].
 - [Tackle UI compatibility][ui-branch] — [`10dc62e`][ui-pin].
 
-Code review precedes implementation PR submission. Contribution boundaries, upstream API choices,
+Links to the changes shown in the video:
+
+- **Konveyor harness integration, `djzager/agentic-controller`:**
+  [review the integration changes][controller-diff]. The harness selects and starts
+  Lightspeed while retaining repository preparation, verification, push, and cleanup.
+- **Lightspeed runtime, `djzager/lightspeed-agentic-sandbox`:**
+  [review the runtime changes][runtime-diff]. Reusable sessions, human controls,
+  an optional ACP adapter, token observations, and provider handling support the demo.
+- **Konveyor UI, `djzager/tackle2-ui`:** [review the UI changes][ui-diff].
+  Session interactions and tool arguments on permission cards connect the user to the runtime.
+- **Result, `djzager/coolstore`:** [read the committed migration plan][live-plan].
+  This is the reviewed output, rather than runtime implementation code.
+
+The Konveyor harness integration is included in this draft PR. The companion runtime and UI
+changes remain on their fork review branches. Contribution boundaries, upstream API choices,
 and timing remain open for discussion.
 
 ## Demonstrated evidence
@@ -271,3 +289,7 @@ resources][operator-template].
 
 [live-plan]: https://github.com/djzager/coolstore/blob/9e97db02b641dc2608fcc399503bbc1a0ed3b842/docs/plan.md
 [live-commit]: https://github.com/djzager/coolstore/commit/9e97db02b641dc2608fcc399503bbc1a0ed3b842
+
+[controller-diff]: https://github.com/djzager/agentic-controller/compare/8c3c7cdabcf81ddd020c0374724af6a72adff40d...73a44d59f9e4cf6644ab4fc48f42211a7eff2548
+[runtime-diff]: https://github.com/djzager/lightspeed-agentic-sandbox/compare/5ea23f34ad2ad5fc01fb6264fb9304116664dd3d...403916314aa4f869fc7733bef6e20fff32cf2680
+[ui-diff]: https://github.com/djzager/tackle2-ui/compare/65d76136142966f23a6bf01d7765b948da433214...10dc62e6b44036920d3e050ee04d75343fc859a7

@@ -3,8 +3,13 @@
 Companion to the [discussion brief](../briefs/lightspeed-2026-11-11.md) and
 [presentation outline](lightspeed-2026-11-11-outline.md). This records the completed
 live-model planning run and provides a guide for a rerun or cluster tour.
-The [presentation recording](lightspeed-2026-11-11-demo.mp4) is 2 minutes 36 seconds.
+The [presentation recording](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4) is 2 minutes 44 seconds.
 Use the [timed narration](lightspeed-2026-11-11-demo-script.md) for the presentation.
+The PR also includes the [editable slide deck](lightspeed-2026-11-11.md) and its
+[rendered PDF](lightspeed-2026-11-11.pdf). Present the PDF, then play the MP4 separately.
+The final video card names the Konveyor harness, Lightspeed runtime, and Konveyor UI
+repositories. Their [pinned source changes](../briefs/lightspeed-2026-11-11.md#runtime-contribution-for-review)
+and the [Coolstore plan result][live-plan] are linked for review.
 
 ## Purpose and scope
 
@@ -95,7 +100,7 @@ tokens. Inspection-classifier calls are excluded; no monetary cost is supplied.
 These checks verify a plan and unchanged application, with future migration
 build/tests and runtime validation listed separately.
 
-The [presentation recording](lightspeed-2026-11-11-demo.mp4) uses normal-speed
+The [presentation recording](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4) uses normal-speed
 excerpts from this take, with idle waits omitted and three labelled reading pauses
 on exact result screenshots. The full raw take is retained privately.
 Use a separate output branch for any new rehearsal.
@@ -182,7 +187,7 @@ separate section. The application remains unchanged during planning.
 ## Recording storyboard and narration
 
 The full live run lasted 28 minutes 9 seconds. The presentation recording is
-2 minutes 36 seconds, using selected normal-speed excerpts and three labelled
+2 minutes 44 seconds, using selected normal-speed excerpts and three labelled
 reading pauses.
 Keep selected interactions and result inspection readable at normal speed;
 disclose omitted idle waits. This footage comes from the live-model run and

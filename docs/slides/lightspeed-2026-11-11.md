@@ -11,16 +11,7 @@ style: |
   section.diagram p { margin: 0; }
   section.diagram img { display: block; margin: 0 auto; }
   section.diagram p:last-of-type { margin-top: 4px; font-size: 26px; }
-  section.demo { padding: 24px 60px 42px; justify-content: flex-start; }
-  section.demo h1 { margin: 0 0 8px; padding: 0; font-size: 42px; }
-  section.demo p.demo-caption { margin: 0 0 12px; font-size: 24px; }
-  section.demo video, section.demo .demo-poster img { display: block; width: 824px; height: 515px; margin: 0 auto; object-fit: contain; background: #000; }
-  section.demo .demo-poster { display: none; }
-  section.demo p.demo-download { margin: 8px 0 0; font-size: 18px; }
-  @media print {
-    section.demo video { display: none; }
-    section.demo .demo-poster { display: block; }
-  }
+
 ---
 
 <!-- _class: lead -->
@@ -183,20 +174,16 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 ---
 
-<!-- _class: lead demo -->
+<!-- _class: lead -->
 
 # Coolstore planning demo
 
-<p class="demo-caption">A Java EE application we want to move to Quarkus</p>
+A Java EE application we want to move to Quarkus
 
-<video controls playsinline preload="metadata" aria-label="Coolstore planning demo, 2 minutes 36 seconds" poster="lightspeed-2026-11-11-demo-poster.jpg" src="lightspeed-2026-11-11-demo.mp4">
-  <a href="lightspeed-2026-11-11-demo.mp4">Open the recording (2:36)</a>
-</video>
-<a class="demo-poster" href="lightspeed-2026-11-11-demo.mp4"><img src="lightspeed-2026-11-11-demo-poster.jpg" alt="Coolstore planning demo recording"></a>
-<p class="demo-download"><a href="lightspeed-2026-11-11-demo.mp4">Open recording separately (2:36)</a></p>
+[Play the separate demo video (2:44)](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4)
 
 <!--
-3 minutes, including the 2 minute 36 second recording.
+3 minutes, including the 2 minute 44 second recording.
 
 Coolstore is our example application. The live authenticated OpenShift run used
 GLM 5.3 through an Anthropic-compatible Gateway and the modified Lightspeed
@@ -209,7 +196,7 @@ planning checks and pushed commit 9e97db0. The run finished Succeeded, with
 Verified=True for that commit. Only docs/plan.md was added against the actual
 prepared checkout. Inspect the decision in that plan and the Git diff.
 
-The full run took 28 minutes 9 seconds. The recording contains 2 minutes 36 seconds
+The full run took 28 minutes 9 seconds. The recording contains 2 minutes 44 seconds
 of selected normal-speed interactions and labelled pauses to read the actual result.
 Idle waits are omitted. This is live-model evidence, separate
 from the November 9 scripted recording. Planning and passing planning checks
@@ -232,7 +219,7 @@ The existing harness cloned default main rather than the configured source ref;
 source-reference selection is follow-up work. The plan and passing checks record
 both revisions and compare the result to the actual frozen checkout.
 Demo preparation:
-https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-2026-11-11/docs/slides/lightspeed-2026-11-11-demo.md
+https://github.com/djzager/agentic-controller/blob/4b982fc6255a5cc0e518afdaad491e146ca987cc/docs/slides/lightspeed-2026-11-11-demo.md
 -->
 
 ---
@@ -243,18 +230,22 @@ https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-20
 - Does an optional ACP adapter make sense?
 - How would you like to review these changes?
 
-[Runtime changes](https://github.com/djzager/lightspeed-agentic-sandbox/tree/feat/reusable-sessions-acp) and [Konveyor integration](https://github.com/djzager/agentic-controller/tree/feat/lightspeed-runtime-integration)
+Code shown in the demo:
+
+- [Konveyor harness: djzager/agentic-controller](https://github.com/djzager/agentic-controller/compare/8c3c7cdabcf81ddd020c0374724af6a72adff40d...73a44d59f9e4cf6644ab4fc48f42211a7eff2548)
+- [Lightspeed runtime: djzager/lightspeed-agentic-sandbox](https://github.com/djzager/lightspeed-agentic-sandbox/compare/5ea23f34ad2ad5fc01fb6264fb9304116664dd3d...403916314aa4f869fc7733bef6e20fff32cf2680)
+- [Konveyor UI: djzager/tackle2-ui](https://github.com/djzager/tackle2-ui/compare/65d76136142966f23a6bf01d7765b948da433214...10dc62e6b44036920d3e050ee04d75343fc859a7)
 
 We can pause here, or talk about your operator.
 
 <!--
 30 seconds, then discussion.
 
-We have review branches for both sides. I want to review the code before
-opening implementation PRs, and hear whether this direction is useful to
-you. We can agree how to split the contributions and what example would help
-your review. A smaller discussion or next Wednesday could be useful if the
-group wants to follow up.
+The Konveyor draft PR includes the harness integration and this presentation
+package. The companion runtime and UI changes are linked on fork review branches.
+We'd like to hear whether this direction is useful to you and agree how to split
+the contributions and what example would help your review. A smaller discussion
+or next Wednesday could be useful if the group wants to follow up.
 
 Konveyor's accepted direction is in ADR 0021. It records our decision, not
 an agreement on your project's behalf.
@@ -304,7 +295,7 @@ a new command field if respecting the image's entrypoint meets the need.
 We want to qualify your Agent Sandbox path for this integration.
 
 Source: operator review at 9973d000 and accepted requirements
-https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-2026-11-11/docs/briefs/lightspeed-2026-11-11.md#optional-operator-adoption
+https://github.com/djzager/agentic-controller/blob/4b982fc6255a5cc0e518afdaad491e146ca987cc/docs/briefs/lightspeed-2026-11-11.md#optional-operator-adoption
 -->
 
 ---
@@ -336,7 +327,7 @@ Reaching Hub over HTTP and having permission to read Kubernetes Secrets
 are different parts of the problem. Neither namespace choice is settled.
 
 Source: pinned placement, credential and access review
-https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-2026-11-11/docs/briefs/lightspeed-2026-11-11.md#optional-operator-adoption
+https://github.com/djzager/agentic-controller/blob/4b982fc6255a5cc0e518afdaad491e146ca987cc/docs/briefs/lightspeed-2026-11-11.md#optional-operator-adoption
 -->
 
 ---
@@ -367,7 +358,7 @@ The numbered list groups responsibilities; implementation may order token
 cleanup and status reporting differently on individual exit paths.
 
 Source: completion, cancellation and Result requirements
-https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-2026-11-11/docs/briefs/lightspeed-2026-11-11.md#optional-operator-adoption
+https://github.com/djzager/agentic-controller/blob/4b982fc6255a5cc0e518afdaad491e146ca987cc/docs/briefs/lightspeed-2026-11-11.md#optional-operator-adoption
 -->
 
 ---
