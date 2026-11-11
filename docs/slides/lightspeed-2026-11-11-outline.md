@@ -89,22 +89,33 @@ later operator discussion.
 The deck uses the existing Konveyor Marp theme. Render a PDF with:
 
 ```sh
-make slides DECK=docs/slides/lightspeed-2026-11-11.md
+mkdir -p .scratch/lightspeed-slides
+npx --yes @marp-team/marp-cli --html \
+  --theme docs/slides/konveyor-theme.css --allow-local-files \
+  docs/slides/lightspeed-2026-11-11.md \
+  -o .scratch/lightspeed-slides/lightspeed-2026-11-11.pdf
 ```
 
-For a scrollable browser preview, render bare HTML and copy the three SVG assets
-and the recording into the same local preview directory:
+The demo plays directly on slide 6 in the browser deck, with playback and seek
+controls. The PDF shows a linked poster because PDF does not play the video.
+For a scrollable browser preview, enable HTML and copy the three SVG assets,
+recording, and poster into the same local preview directory:
 
 ```sh
 mkdir -p .scratch/lightspeed-slides
 cp docs/slides/konveyor-logo.svg docs/slides/konveyor-run-today.svg \
   docs/slides/lightspeed-runtime-swap.svg docs/slides/lightspeed-2026-11-11-demo.mp4 \
+  docs/slides/lightspeed-2026-11-11-demo-poster.jpg \
   .scratch/lightspeed-slides/
 npx --yes @marp-team/marp-cli \
   --theme docs/slides/konveyor-theme.css \
-  --template bare docs/slides/lightspeed-2026-11-11.md \
+  --html --template bare docs/slides/lightspeed-2026-11-11.md \
   -o .scratch/lightspeed-slides/index.html
 ```
 
-Keep generated preview files local. Commit the Markdown and SVG sources and the
-shared MP4 recording.
+Open the generated `index.html` directly in a browser, keeping the media files
+beside it. If serving the deck over HTTP, use a server with byte-range support so
+the video can seek correctly.
+
+Keep generated preview files local. Commit the Markdown and SVG sources, poster,
+and shared MP4 recording.

@@ -11,6 +11,16 @@ style: |
   section.diagram p { margin: 0; }
   section.diagram img { display: block; margin: 0 auto; }
   section.diagram p:last-of-type { margin-top: 4px; font-size: 26px; }
+  section.demo { padding: 24px 60px 42px; justify-content: flex-start; }
+  section.demo h1 { margin: 0 0 8px; padding: 0; font-size: 42px; }
+  section.demo p.demo-caption { margin: 0 0 12px; font-size: 24px; }
+  section.demo video, section.demo .demo-poster img { display: block; width: 824px; height: 515px; margin: 0 auto; object-fit: contain; background: #000; }
+  section.demo .demo-poster { display: none; }
+  section.demo p.demo-download { margin: 8px 0 0; font-size: 18px; }
+  @media print {
+    section.demo video { display: none; }
+    section.demo .demo-poster { display: block; }
+  }
 ---
 
 <!-- _class: lead -->
@@ -173,13 +183,17 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 ---
 
-<!-- _class: lead -->
+<!-- _class: lead demo -->
 
 # Coolstore planning demo
 
-A Java EE application we want to move to Quarkus
+<p class="demo-caption">A Java EE application we want to move to Quarkus</p>
 
-[Watch the recording (2:36)](lightspeed-2026-11-11-demo.mp4)
+<video controls playsinline preload="metadata" aria-label="Coolstore planning demo, 2 minutes 36 seconds" poster="lightspeed-2026-11-11-demo-poster.jpg" src="lightspeed-2026-11-11-demo.mp4">
+  <a href="lightspeed-2026-11-11-demo.mp4">Open the recording (2:36)</a>
+</video>
+<a class="demo-poster" href="lightspeed-2026-11-11-demo.mp4"><img src="lightspeed-2026-11-11-demo-poster.jpg" alt="Coolstore planning demo recording"></a>
+<p class="demo-download"><a href="lightspeed-2026-11-11-demo.mp4">Open recording separately (2:36)</a></p>
 
 <!--
 3 minutes, including the 2 minute 36 second recording.
