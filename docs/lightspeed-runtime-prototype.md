@@ -69,9 +69,10 @@ and the existing accounting research remain separate work.
 The companion runtime accepts an optional `LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS`
 environment variable for the main model's per-generation output limit. Set it
 explicitly for models whose SDK default is too small for reasoning and an answer.
-For example, the GLM 5.3 rehearsal uses this Agent setting:
+Set it on an AgentRun or in a model-specific workload image. For example:
 
 ```yaml
+kind: AgentRun
 spec:
   env:
     - name: LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS
