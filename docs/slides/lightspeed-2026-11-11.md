@@ -103,7 +103,7 @@ the default until we complete adoption.
 Adapted in scope from Ian's PR diagram:
 https://github.com/konveyor/agentic-controller/pull/280#issuecomment-6372032054
 Current implementation:
-https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/docs/lightspeed-runtime-prototype.md
+https://github.com/djzager/agentic-controller/blob/447afecfb249b13e95b2c6ef1a156a0f03ce388c/docs/lightspeed-runtime-prototype.md
 -->
 
 ---
@@ -114,11 +114,12 @@ https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f422
 - **Controls:** approve a tool, answer a question, give guidance and stop work
 - **Optional ACP adapter:** connect sessions to our existing UI
 - **Token counts:** send usage back to Konveyor
+- **Model settings and errors:** pass reasoning effort through and report output cutoffs
 
 We kept Lightspeed’s checks on tool output.
 
 <!--
-2 minutes 40 seconds.
+3 minutes.
 
 We reused your DeepAgents runtime and made a few changes so our users can
 keep working with it the way they do today. The agent can receive another
@@ -140,12 +141,18 @@ needed changes on the Konveyor side. The runtime keeps the conversation and
 model clients alive, and offers approval/question callbacks independently of
 ACP. The adapter uses those controls through our existing harness tee.
 
+We also forward explicitly configured reasoning effort to the provider. This
+demo selects low effort and an optional per-generation output allowance in its
+image, while preserving the runtime defaults. If the provider reports an output
+cutoff, the runtime fails before tools or another model call, keeps observed
+usage, and allows an explicit same-session follow-up. It does not retry automatically.
+
 We preserved inspection before untrusted tool results reach either the model
 or viewers. These are checks on tool output for prompt injection, not a general
 command-safety guarantee. Existing integration tests used scripted model and
 classifier responses. They verify the interaction and inspection paths, not
-model reasoning or classifier quality. The UI recording covers questions,
-approvals and guidance. Separate cases cover cancellation and same-session
+model reasoning or classifier quality. The November 9 scripted UI recording covers
+questions, approvals and guidance. Separate cases cover cancellation and same-session
 turn-limit handoff. Planning alone will not establish all runtime requirements.
 
 Token reporting is partial: agent, subagent, summarization and shaping calls
@@ -158,9 +165,9 @@ not functionality demonstrated today. These changes are on review branches,
 not already merged into Lightspeed upstream.
 
 Sources: runtime session core, optional ACP adapter, evidence and usage limits
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/ecbd76a613ed43e580c2481fac4cb1f2781edb67/src/lightspeed_agentic/session.py
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/ecbd76a613ed43e580c2481fac4cb1f2781edb67/src/lightspeed_agentic/acp/README.md
-https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/docs/lightspeed-runtime-prototype.md
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/403916314aa4f869fc7733bef6e20fff32cf2680/src/lightspeed_agentic/session.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/403916314aa4f869fc7733bef6e20fff32cf2680/src/lightspeed_agentic/acp/README.md
+https://github.com/djzager/agentic-controller/blob/447afecfb249b13e95b2c6ef1a156a0f03ce388c/docs/lightspeed-runtime-prototype.md
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
@@ -172,24 +179,44 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 A Java EE application we want to move to Quarkus
 
-**Live recording still to come**
+[Watch the recording (2:36)](lightspeed-2026-11-11-demo.mp4)
 
 <!--
-2 minutes 30 seconds, including the recording.
+3 minutes, including the 2 minute 36 second recording.
 
-Coolstore is our example application. We want the agent to read its source
-and available analysis, then write a migration plan. Show which Agent and
-model we selected before starting. Explain the human decision, then find its
-effect in the plan and resulting Git changes. Also show which runtime ran.
+Coolstore is our example application. The live authenticated OpenShift run used
+GLM 5.3 through an Anthropic-compatible Gateway and the modified Lightspeed
+runtime inside our existing Go harness and Agent Sandbox.
 
-The live recording is pending setup and rehearsal. Supplied cluster access
-is being checked separately. No live-demo evidence is claimed yet. The earlier
-recording used scripted model responses. Keep that distinction visible.
-Planning does not demonstrate a completed application migration. The selected
-verification checks must match what this run actually produces.
+Show the database-reuse question and answer, reviewed tool permissions, and
+guidance taken up by the agent. The reviewer requested changes to the first
+plan, then approved the corrections and final commit. The harness ran all five
+planning checks and pushed commit 9e97db0. The run finished Succeeded, with
+Verified=True for that commit. Only docs/plan.md was added against the actual
+prepared checkout. Inspect the decision in that plan and the Git diff.
 
-Source baseline:
+The full run took 28 minutes 9 seconds. The recording contains 2 minutes 36 seconds
+of selected normal-speed interactions and labelled pauses to read the actual result.
+Idle waits are omitted. This is live-model evidence, separate
+from the November 9 scripted recording. Planning and passing planning checks
+do not establish a working application migration. Application build/tests and
+runtime/cutover checks remain future work.
+
+The runtime reported 33 native model calls, 563,794 input tokens, and 10,391 output
+tokens. Inspection-classifier calls are excluded and no monetary cost is supplied.
+The deployed image and imported runtime source were independently checked.
+Result:
+https://github.com/djzager/coolstore/blob/9e97db02b641dc2608fcc399503bbc1a0ed3b842/docs/plan.md
+
+Analysis/input revision:
 https://github.com/konveyor-ecosystem/coolstore/tree/32c1722efdf883f5f400170adb770a46a9b58116
+Actual pre-write checkout:
+https://github.com/konveyor-ecosystem/coolstore/tree/b5752b936f01acd858ca21fd2d3c4f03d3a6321e
+32c1722 is the direct child of b5752b9. Their complete tree difference is only
+.vscode/extensions.json. The application source/build/configuration is identical.
+The existing harness cloned default main rather than the configured source ref;
+source-reference selection is follow-up work. The plan and passing checks record
+both revisions and compare the result to the actual frozen checkout.
 Demo preparation:
 https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-2026-11-11/docs/slides/lightspeed-2026-11-11-demo.md
 -->

@@ -2,7 +2,7 @@
 
 November 11, 2026. The editable [slide deck](lightspeed-2026-11-11.md) contains
 on-slide text and speaker notes. The [discussion brief](../briefs/lightspeed-2026-11-11.md)
-contains detailed evidence, and the [demo plan](lightspeed-2026-11-11-demo.md)
+contains detailed evidence, and the [demo guide](lightspeed-2026-11-11-demo.md)
 covers setup, recording and the cluster tour.
 
 ## The story
@@ -18,7 +18,8 @@ belong in the brief and speaker notes.
 
 ## Runtime section
 
-Slides 1–7 target **8 minutes 40 seconds**, including a 2 minute 30 second demo.
+Slides 1–7 target **9 minutes 30 seconds**, including a three-minute demo section
+with the 2 minute 36 second recording.
 Discussion time is additional. Timings are rehearsal guides.
 
 1. **Adopting Lightspeed’s DeepAgents runtime in Konveyor** — 20 seconds.
@@ -30,23 +31,31 @@ Discussion time is additional. Timings are rehearsal guides.
 4. **Konveyor with Lightspeed** — 70 seconds. Show the same controller, Agent
    Sandbox and Go harness with the runtime changed. Explain both sides of the
    integration before discussing the runtime contribution.
-5. **Lightspeed runtime changes** — 160 seconds. Explain what changed in their
+5. **Lightspeed runtime changes** — 180 seconds. Explain what changed in their
    runtime: reusable sessions, human controls, the optional ACP adapter and token
-   observations. Use limit-triggered handoff as the same-session example. Cover
+   observations. Include forwarding explicit reasoning settings and reporting
+   output cutoffs. Use limit-triggered handoff as the same-session example. Cover
    preserved inspection, evidence boundaries and the remaining cost/accounting
    work in the notes before the demo, without separate detour slides.
-6. **Coolstore planning demo** — 150 seconds. Establish the application and task,
+6. **Coolstore planning demo** — 180 seconds. Establish the application and task,
    show the human interaction, then inspect its effect in the plan and Git result.
 7. **Runtime questions** — 30 seconds to invite feedback, then stop. Ask whether
    session support and the optional ACP contribution are useful, and how the
    community would like to review them. No slide walkthrough follows this demo
    before questions.
 
-The live Coolstore recording remains pending setup and rehearsal. Cluster access
-has been supplied and is being checked separately. Keep the recording placeholder
-until actual evidence is reported. Before presenting, update the demo notes with
-its observed result and scope. Keep the existing scripted evidence distinct from
-the live demo. Planning does not establish a completed application migration.
+The live Coolstore run completed with a verified, pushed
+[migration plan](https://github.com/djzager/coolstore/blob/9e97db02b641dc2608fcc399503bbc1a0ed3b842/docs/plan.md).
+The user chose database reuse, reviewed tool permissions, sent guidance, requested
+plan changes, and approved the corrected result. All five planning checks passed.
+Application source stayed unchanged; this does not establish a completed migration.
+
+The actual pre-write checkout is `b5752b9`; analysis uses its direct child
+`32c1722`. Only `.vscode/extensions.json` differs. Keep those revisions distinct
+in the walkthrough and final diff. The full run lasted 28 minutes 9 seconds;
+the [recording](lightspeed-2026-11-11-demo.mp4) is 2 minutes 36 seconds, using
+normal-speed excerpts and labelled reading pauses with idle waits omitted. Preserve
+the distinction from the November 6/9 scripted evidence.
 
 ## Optional operator discussion
 
@@ -84,16 +93,18 @@ make slides DECK=docs/slides/lightspeed-2026-11-11.md
 ```
 
 For a scrollable browser preview, render bare HTML and copy the three SVG assets
-into the same local preview directory:
+and the recording into the same local preview directory:
 
 ```sh
 mkdir -p .scratch/lightspeed-slides
 cp docs/slides/konveyor-logo.svg docs/slides/konveyor-run-today.svg \
-  docs/slides/lightspeed-runtime-swap.svg .scratch/lightspeed-slides/
+  docs/slides/lightspeed-runtime-swap.svg docs/slides/lightspeed-2026-11-11-demo.mp4 \
+  .scratch/lightspeed-slides/
 npx --yes @marp-team/marp-cli \
   --theme docs/slides/konveyor-theme.css \
   --template bare docs/slides/lightspeed-2026-11-11.md \
   -o .scratch/lightspeed-slides/index.html
 ```
 
-Keep generated preview files local. Commit edits to the Markdown and SVG sources.
+Keep generated preview files local. Commit the Markdown and SVG sources and the
+shared MP4 recording.

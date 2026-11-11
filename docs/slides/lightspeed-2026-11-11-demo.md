@@ -1,8 +1,10 @@
-# Lightspeed runtime demo — preparation and tour
+# Lightspeed runtime demo — result and tour
 
 Companion to the [discussion brief](../briefs/lightspeed-2026-11-11.md) and
-[presentation outline](lightspeed-2026-11-11-outline.md). This is a preparation
-runbook, not a record of a completed live-model demonstration.
+[presentation outline](lightspeed-2026-11-11-outline.md). This records the completed
+live-model planning run and provides a guide for a rerun or cluster tour.
+The [presentation recording](lightspeed-2026-11-11-demo.mp4) is 2 minutes 36 seconds.
+Use the [timed narration](lightspeed-2026-11-11-demo-script.md) for the presentation.
 
 ## Purpose and scope
 
@@ -11,74 +13,186 @@ existing Go harness, controller, and Agent Sandbox execution path. The optional
 ACP adapter carries the existing UI interactions; core sessions remain independent
 of that adapter. This does not deploy the Lightspeed operator. [Accepted direction][adr]
 
-Recommend a scoped planning task inspired by the [September 30 interaction][precedent]:
-read Coolstore source and available analysis, ask about one consequential choice,
-incorporate human guidance, and commit a reviewable `docs/plan.md`.
-Use [Coolstore `mta-test` at `32c1722`][coolstore] as the baseline and a separate
-demo output branch. Preserve that baseline; do not commit results back to it.
+The task, inspired by the [September 30 interaction][precedent], was to read
+Coolstore source and analysis, ask about the database, incorporate human guidance,
+and commit a reviewable `docs/plan.md`. The user chose to reuse the existing
+PostgreSQL service. The result is a plan; application source is unchanged.
+This was a single AgentRun. Cancellation and turn-limit handoff have separate
+evidence.
 
-The exact planning task, target, datasource alternatives, and instructions are
-rehearsal-dependent. A datasource decision is a candidate, not a prescribed model
-answer. This demonstrates planning and interaction, not a completed migration or
-an AgentWorkflowRun. Cancellation and turn-limit handoff have separate evidence.
+The [Coolstore `mta-test` analysis uses `32c1722`][coolstore]. The actual run started
+from [`b5752b9`][coolstore-checkout], and pushed to a separate output branch.
+Preserve that pre-write baseline; do not commit results back to either upstream
+input branch.
 
-## Preparation after cluster access arrives
+## Confirmed setup
 
-1. Inspect the supplied installation before making changes: namespace, permissions,
-   controller and Agent Sandbox versions, Hub/UI connectivity and feature flags,
-   application inventory/analysis, registry access, Git access, and cleanup policies.
-   Cluster access, provider/model, and the final scenario remain pending. Resolve
-   details obtainable from that inspection before asking for additional choices.
-2. Record source revisions and image digests for controller/harness, runtime, and
-   UI. Start with the [published prototype revisions][prototype] and [UI revision][ui].
-   Confirm the deployed image actually contains the modified runtime; a label alone
-   does not establish which package a running process imported.
-3. Configure a Konveyor **Gateway** and credential **Secret** for the supplied live
-   provider/model. A Gateway declares endpoint, provider, credentials, model name,
-   and context window. The Agent offers that Gateway; the AgentRun selects it.
-   Upstream Lightspeed `LLMProvider` resources are unnecessary here. [Gateway contract][gateway]
-4. Select an Agent image carrying the patched runtime and harness with
-   `HARNESS_RUNTIME=lightspeed`. Check required language/build tools: the prototype
-   image is a development image containing Python, Git, and the harness, not a
-   qualified application toolchain. Keep the ACP tee enabled. [Image and setup][prototype]
-5. Register/confirm Coolstore against the pinned baseline. Check that analysis, if
-   used, describes that source and the intended task. If only source is available,
-   present it as source-based planning; do not imply an analyzer ran.
-6. Configure a watched run with `mode: approve`, `askUser: true`, and steering
-   enabled. Choose a bounded turn allowance and suitable interaction timeout.
-   Omit `maxCost`: this prototype rejects it before execution. Available cumulative
-   token observations omit isolated inspection-classifier calls and supply no
-   monetary cost. Complete runtime usage/cost reporting and monetary-budget
-   enforcement remain follow-on work. [Usage and limits][prototype]
-7. Rehearse against the live provider before recording. Confirm the chosen question
-   changes the plan, permission cards describe actual actions, steering reaches a
-   subsequent model step, and the output is readable. Live-model wording, ordering,
-   latency, and success are not guaranteed. Keep failed attempts as diagnostic
-   evidence rather than editing them into a success claim.
+The OpenShift installation uses Konveyor's installation script, authentication is
+on, and the demo uses its own account. Coolstore is registered from a fork at
+upstream `mta-test` commit `32c1722efdf883f5f400170adb770a46a9b58116`.
+A real Quarkus source analysis completed at that commit with 49 insights.
+The actual pre-write checkout is `b5752b936f01acd858ca21fd2d3c4f03d3a6321e`.
+`32c1722` is its direct child, and the complete tree difference is only
+`.vscode/extensions.json`, an editor-extension recommendation. All application
+source, build files, and application configuration are identical. Analysis uses
+`32c1722`; this run starts from `b5752b9`.
 
-## Verification gate before choosing the final task
+The existing harness replaces the source branch with the target branch before
+cloning and does not select the requested clone reference. It therefore used
+default `main` at `b5752b9`. Preserve the configured source reference during clone
+as follow-up work. Keep the plan's provenance and final diff tied to the actual
+pre-write checkout, with the separate application-tree comparison to `32c1722`.
 
-The harness can rerun commands from the plan's `## Verification` section after a
-turn claims success. In a standalone planning run, future migration build commands
-may fail against the unchanged application; missing tools may also prevent checks.
-Measurement and enforcement are separate, so `Succeeded` alone is not proof of a
-verified migration. Inspect actual verification/enforcement settings and rehearse
-this path before committing to the scenario. [Harness behavior][verification]
+The Gateway selects GLM 5.3 through an Anthropic-compatible service. Hub holds
+the application's Git credential for the harness. Keep endpoints, credentials,
+and account details out of the deck and recording.
 
-Preserve the existing verification settings and use checks appropriate to the
-actual deliverable. Distinguish plan acceptance from future application verification
-and show the real outcome alongside recorded verification. Resolve a mismatch
-during rehearsal or explain the remaining limitation in the recording.
+Current review revisions:
+
+- Go harness in the workload image: [`73a44d5`][controller-revision].
+  Later integration documentation at [`447afec`][controller-docs] changes no binaries.
+- Lightspeed runtime: [`4039163`][runtime-revision], including provider inspection
+  parsing, explicit output-limit handling, and reasoning-effort forwarding.
+- Tackle UI: [`10dc62e`][ui], including tool arguments on permission cards.
+
+The selected model-specific image is
+`sha256:1c74a3ea20283cc92a3b3d0ccc24dbd797eb422541c5bec0ba7f37c1e1b934e5`,
+using runtime `4039163` with the unchanged Go harness at `73a44d5`. It sets
+`LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS=16384` and
+`LIGHTSPEED_REASONING_CONFIG={"thinking":{"type":"enabled"},"effort":"low"}`.
+The Agent selects it through `Agent.spec.image` and is Ready. Both a native image
+smoke check and the running pod's typed parsers confirmed enabled thinking,
+low effort, and `max_tokens=16384`. All 39 runtime Python files match `4039163`.
+The UI image is
+`sha256:2314cfb22672c414cc305cdb35646be87bb182394ad6b715730096324a391f2c`.
+
+## Verified live result
+
+AgentRun `ui-2rhxw` completed `Succeeded` at `2026-11-11T02:52:34Z`, exit code 0,
+with no pod restarts. The full run took 28 minutes 9 seconds. It pushed
+[commit `9e97db0`][live-commit] to `demo/lightspeed-live-plan-take-07`; only
+`docs/plan.md` was added against the actual prepared checkout `b5752b9`.
+
+The UI interaction included the database-reuse answer, reviewed tool permissions,
+and guidance consumed by later model steps. The reviewer requested changes to
+the first plan, reviewed the corrections, and approved the final commit. The
+harness then verified and pushed the result.
+
+All five actual planning checks ran and passed with exit code 0:
+
+1. The plan file exists.
+2. The prepared tree is unchanged outside the plan and Konveyor context.
+3. Application source, dependencies, and build content match the analysis input.
+4. The plan is tracked after the local commit.
+5. Konveyor analysis context remains present.
+
+Status reports `Verified=True`, reason `VerificationPassed`, for commit
+`9e97db02b641dc2608fcc399503bbc1a0ed3b842`. The approved, locally committed, and
+remote [plan][live-plan] are identical: 141 lines, 13,457 bytes, SHA-256
+`fc700a9a04d77288b821325f323db5fcfb579bda8d956436963e9715a26aa621`.
+The runtime reported 33 native model calls, 563,794 input tokens, and 10,391 output
+tokens. Inspection-classifier calls are excluded; no monetary cost is supplied.
+These checks verify a plan and unchanged application, with future migration
+build/tests and runtime validation listed separately.
+
+The [presentation recording](lightspeed-2026-11-11-demo.mp4) uses normal-speed
+excerpts from this take, with idle waits omitted and three labelled reading pauses
+on exact result screenshots. The full raw take is retained privately.
+Use a separate output branch for any new rehearsal.
+
+## Runtime qualification
+
+Two prompts in one core session passed against the live model. The provider
+compatibility fix passed a separate live read-file check with inspection enabled,
+plus the full runtime suite. The new output-limit tests use native streamed
+responses and the actual graph/ACP path: an explicit provider cutoff raises
+`ModelOutputLimitError` before a tool side effect or another model call, preserves
+observed usage, and permits an explicit same-session follow-up. There is no
+automatic retry. The latest suite passed with 2,096 tests, 13 skips, and 7 subtests,
+plus Ruff, format, and mypy checks.
+
+Explicit reasoning effort now reaches `output_config.effort` on Anthropic routes,
+with tests covering direct, Bedrock, and Vertex clients. Thinking changes only
+when configured. [GLM 5.3 always reasons and defaults to max effort][glm-reasoning].
+The [official Anthropic mapping][glm-anthropic-mapping] combines enabled thinking
+with `output_config.effort`. A small live low-effort probe returned a valid tool
+call. The completed planning run supplies separate task evidence above.
+
+The model-specific image selects low effort for the interactive demo and applies
+the main-model output allowance without API or UI changes. API clients can
+alternatively use `AgentRun.spec.env`. The Agent has no `spec.env`, and the current
+UI creation form does not expose AgentRun environment settings. The output-token
+override is optional. Omitting it preserves the finite SDK/provider allowance.
+Global defaults, inspection-classifier and shaping allowances are unchanged.
+Keep failed rehearsal takes and diagnostic evidence private.
+
+## Checks for a rerun
+
+1. Record the deployed controller/harness, runtime, and UI image digests. Confirm
+   the running process imports the modified runtime files. Source revisions and
+   image labels alone do not prove which package the process used.
+2. Use the Agent image with `HARNESS_RUNTIME=lightspeed` and keep the ACP tee
+   enabled. The prototype image carries Python, Git, and the harness. This
+   planning task does not qualify a complete application build toolchain.
+3. Confirm the selected Gateway/model, configured source reference, actual
+   checkout, analysis revision, and separate output branch. Freeze the actual
+   checkout before the agent writes; investigate any difference from the
+   configured reference before describing the run. The Agent offers the
+   Gateway and the AgentRun selects it. Upstream Lightspeed `LLMProvider`
+   resources are unnecessary here. [Gateway contract][gateway]
+4. To reproduce this demo profile, confirm the image applies the 16,384-token
+   allowance and explicit enabled thinking with low effort to the main model.
+   Output-limit tests cover visible
+   failure for an explicit cutoff. Short provider checks establish configuration
+   acceptance; every complete planning run still needs its own result checks.
+5. Use `mode: approve`, `askUser: true`, and steering, with a bounded turn allowance
+   and enough time to answer. Omit `maxCost`: the runtime rejects it before
+   execution. Token observations exclude inspection-classifier calls and supply
+   no monetary cost. The live UI turn label approximates tool calls. Use the final
+   runtime-provided count for native model calls. [Usage and limits][prototype]
+6. Keep the recording machine awake and watch every question and tool permission.
+   This demo allows 180 seconds for a response. A permission timeout marks the
+   viewer unresponsive and later questions fail closed. Start a fresh AgentRun
+   after a timeout.
+7. Check that questions matter to the plan, permission cards show the action and
+   arguments, and guidance reaches a later model step. Record the actual order
+   and outcome. Live-model wording, latency, and success can vary.
+8. Inspect `docs/plan.md`, the pushed commit and branch, the diff against that
+   run's frozen pre-write checkout (`b5752b9` for this recording), run status,
+   verification, observed tokens, and
+   runtime identity before calling the demonstration complete. A terminal
+   `Succeeded` phase alone does not establish that the requested plan exists.
+
+## Verification for a planning task
+
+The harness reran all five commands from this plan's `## Verification` section;
+all passed. They check the plan and unchanged application. Proposed Maven/build,
+application-test, runtime, and cutover checks live under
+`## Future migration validation` and were not run during this planning task.
+
+The source defaults enable verification but do not enforce it. A terminal
+`Succeeded` phase alone is insufficient evidence: inspect the actual commands,
+exit codes, `Verified` condition, pinned commit, and remote file. This run has
+all five passing checks and `Verified=True`. [Harness behavior][verification]
+
+For a rerun, preserve the existing verification settings. Put commands that check
+the plan itself in `## Verification` and keep future migration commands in a
+separate section. The application remains unchanged during planning.
 
 ## Recording storyboard and narration
 
-Allow time to read each decision and the final diff. Replace the earlier
-36-second scripted clip with a contextual walkthrough; set final timing after
-rehearsal. Keep interaction and result inspection readable at normal speed.
+The full live run lasted 28 minutes 9 seconds. The presentation recording is
+2 minutes 36 seconds, using selected normal-speed excerpts and three labelled
+reading pauses.
+Keep selected interactions and result inspection readable at normal speed;
+disclose omitted idle waits. This footage comes from the live-model run and
+must remain distinct from the earlier 36-second scripted clip.
 
-1. **Application and problem.** Show Coolstore, the baseline revision, relevant
-   source/analysis, and the limited task. Say: “We want a reviewable plan for this
-   application. The decision we will make together affects what the plan recommends.”
+1. **Application and problem.** Show Coolstore, actual checkout `b5752b9`, analysis
+   revision `32c1722`, and the limited task. Explain that the application trees
+   match, with only editor-extension recommendations differing. Say: “We want a
+   reviewable plan for this application. The decision we will make together affects
+   what the plan recommends.”
 2. **What will run.** Show the selected Agent, live model/Gateway, runtime image
    digest, output branch, and interaction settings before creating the AgentRun.
    Say: “Konveyor still owns this invocation and creates an Agent Sandbox. The
@@ -103,11 +217,11 @@ rehearsal. Keep interaction and result inspection readable at normal speed.
    process observed during execution. Capture this while the process exists.
    Explain which observations establish runtime identity and which are merely labels.
 
-Capture a recording, screenshots, sanitized interaction summaries, status and
-verification evidence, runtime provenance, and resulting Git diff during the run.
-Exclude credential values, authentication query strings, and raw logs from shared
-artifacts. If idle waits are shortened, disclose the edit; preserve complete takes
-for review. Do not reuse scripted-model footage as evidence of this live run.
+Keep the full take, screenshots, sanitized interaction summaries, status and
+verification evidence, runtime provenance, and Git diff for review. Exclude
+credential values, authentication query strings, and raw logs from shared artifacts.
+The published edit must disclose shortened idle waits and preserve the meaning
+of the actual interactions.
 
 ## Preserve the setup for a post-demo tour
 
@@ -136,8 +250,8 @@ for review. Do not reuse scripted-model footage as evidence of this live run.
 [adr]: https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 [precedent]: https://github.com/konveyor/agentic-controller/blob/369070c659a71cecf50d57c376cb13d09d332701/docs/slides/demo-2026-09-30-script.md#part-2-a-human-in-the-loop
 [coolstore]: https://github.com/konveyor-ecosystem/coolstore/tree/32c1722efdf883f5f400170adb770a46a9b58116
-[prototype]: https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/docs/lightspeed-runtime-prototype.md
-[ui]: https://github.com/djzager/tackle2-ui/commit/aa4f9b93b98d029ba2652e8b645b53018dd1de1c
+[prototype]: https://github.com/djzager/agentic-controller/blob/447afecfb249b13e95b2c6ef1a156a0f03ce388c/docs/lightspeed-runtime-prototype.md
+[ui]: https://github.com/djzager/tackle2-ui/commit/10dc62e6b44036920d3e050ee04d75343fc859a7
 [gateway]: https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/api/v1alpha1/gateway_types.go#L58-L77
 [verification]: https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/harness/cmd/migration-harness/main.go#L711-L765
 [ttl]: https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/api/v1alpha1/agentrun_types.go#L310-L320
@@ -145,3 +259,16 @@ for review. Do not reuse scripted-model footage as evidence of this live run.
 [finished-ui]: https://github.com/djzager/tackle2-ui/blob/aa4f9b93b98d029ba2652e8b645b53018dd1de1c/client/src/app/pages/agent-runs/components/ChatPanel.tsx#L1397-L1467
 [transcript]: https://github.com/djzager/tackle2-ui/blob/aa4f9b93b98d029ba2652e8b645b53018dd1de1c/client/src/app/pages/agent-runs/components/ChatPanel.tsx#L569-L594
 [lifecycle]: https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/internal/controller/agentrun_controller.go#L1576-L1605
+
+[controller-revision]: https://github.com/djzager/agentic-controller/commit/73a44d59f9e4cf6644ab4fc48f42211a7eff2548
+[runtime-revision]: https://github.com/djzager/lightspeed-agentic-sandbox/commit/403916314aa4f869fc7733bef6e20fff32cf2680
+
+[controller-docs]: https://github.com/djzager/agentic-controller/commit/447afecfb249b13e95b2c6ef1a156a0f03ce388c
+
+[glm-reasoning]: https://docs.z.ai/guides/llm/glm-5.3
+[glm-anthropic-mapping]: https://github.com/zai-org/ZCode/blob/main/config/provider/zcode-builtin.json
+
+[coolstore-checkout]: https://github.com/konveyor-ecosystem/coolstore/tree/b5752b936f01acd858ca21fd2d3c4f03d3a6321e
+
+[live-plan]: https://github.com/djzager/coolstore/blob/9e97db02b641dc2608fcc399503bbc1a0ed3b842/docs/plan.md
+[live-commit]: https://github.com/djzager/coolstore/commit/9e97db02b641dc2608fcc399503bbc1a0ed3b842

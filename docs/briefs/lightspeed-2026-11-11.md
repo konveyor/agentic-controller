@@ -4,8 +4,10 @@
 
 Show the runtime prototype, get feedback on reusable contributions, and discuss requirements for
 optional Lightspeed operator adoption. [Accepted ADR 0021][adr] separates runtime reuse, execution
-backend adoption, and later resource migration. This brief records preparation; it announces no
-implementation PR or upstream agreement.
+backend adoption, and later resource migration. The live Coolstore run produced a verified,
+pushed [migration plan][live-plan]. The [edited recording](../slides/lightspeed-2026-11-11-demo.mp4)
+is 2 minutes 36 seconds. This brief
+announces no implementation PR or upstream agreement.
 
 Konveyor's prototype reuses Lightspeed's DeepAgents runtime while its Go harness owns Hub
 application resolution, repository/instruction preparation, push-credential isolation, verification,
@@ -19,7 +21,7 @@ The [slide deck](../slides/lightspeed-2026-11-11.md) and
 feedback first, targeting eight to ten minutes. They explain the Goose setup, the Lightspeed
 prototype and changes in Lightspeed’s runtime before the demo and questions. A separate operator
 agenda follows the runtime questions for continued discussion or later review. The
-[demo guide](../slides/lightspeed-2026-11-11-demo.md) covers the planned live run.
+[demo guide](../slides/lightspeed-2026-11-11-demo.md) records the live result and cluster tour.
 
 ## Runtime contribution for review
 
@@ -42,23 +44,24 @@ retain Lightspeed's admission path. See [session core][session], [adapter contra
 
 Published review branches and immutable discussion revisions:
 
-- [Konveyor harness/integration][controller-branch] — [`73a44d5`][controller-pin].
-- [Lightspeed reusable sessions/ACP][runtime-branch] — [`ecbd76a`][runtime-pin], based on upstream
+- [Konveyor harness/integration][controller-branch] — documentation at [`447afec`][controller-docs-pin];
+  executable Go harness source remains [`73a44d5`][controller-pin].
+- [Lightspeed reusable sessions/ACP][runtime-branch] — [`4039163`][runtime-pin], based on upstream
   [`5ea23f3`][runtime-base].
-- [Tackle UI compatibility][ui-branch] — [`aa4f9b9`][ui-pin].
+- [Tackle UI compatibility][ui-branch] — [`10dc62e`][ui-pin].
 
 Code review precedes implementation PR submission. Contribution boundaries, upstream API choices,
 and timing remain open for discussion.
 
-## Demonstrated evidence and planned live work
+## Demonstrated evidence
 
 The [prototype report][prototype] and [pinned verification record][evidence] distinguish:
 
-- Six local cases using the actual harness/runtime/graph/tools/inspection/ACP: automatic
+- November 6 local cases using the actual harness/runtime/graph/tools/inspection/ACP: automatic
   execution, approval, questions, cancellation, steering/reconnect, and turn-limit handoff, driven
   by a scripted HTTP model.
-- Kind AgentRun/Agent Sandbox checks: automatic and approval runs succeeded with verification; a
-  turn-limited run pushed a handoff through a second prompt in the same session and reported
+- November 6 Kind AgentRun/Agent Sandbox checks: automatic and approval runs succeeded with
+  verification; a turn-limited run pushed a handoff through a second prompt in the same session and reported
   `LimitReached`.
 - The November 9 browser recording: actual Tackle UI/Hub created the run, answered a question,
   approved tools, sent steering during tool execution, displayed cumulative tokens,
@@ -68,24 +71,94 @@ The [prototype report][prototype] and [pinned verification record][evidence] dis
 Model/classifier responses and Git repositories were local fixtures; UI/Hub login was disabled.
 These checks establish integration behavior, not live-model reasoning, classifier quality,
 production authentication, monetary accounting, restart recovery, or operator adoption. Browser
-cancellation/handoff were not demonstrated; separate integration cases cover them. The recorded
-harness image predates the commit that publishes its documentation/helpers; the evidence records
-both revisions.
+cancellation/handoff were not demonstrated; separate integration cases cover them. The November 9
+browser recording used runtime [`ecbd76a`][scripted-runtime] and harness
+[`3c8088c`][scripted-harness]. These are historical checks. The publishing snapshot adds
+documentation/helpers; it does not rerun those checks against the current live-demo revisions.
 
-A **new live-model Coolstore planning demo is planned, not completed**. Use [Coolstore
-`mta-test`][coolstore-branch], pinned during preparation to [`32c1722`][coolstore-pin], with results
-on a separate branch. Cluster access has been supplied; environment checks, model configuration
-and rehearsal remain pending. No live-demo evidence is claimed yet. Explain the
-application and selected Agent/model/runtime; show questions, approval and steering; inspect the
-committed plan and runtime evidence. Planning does not demonstrate a working migration or all
-runtime controls. The demo guide supplies the rehearsal/verification sequence.
+## Live Coolstore planning result
+
+AgentRun `ui-2rhxw` completed `Succeeded` at `2026-11-11T02:52:34Z`, with exit code 0 and no pod
+restarts. The full run took 28 minutes 9 seconds. It used an authenticated OpenShift installation,
+the real Hub/UI, and GLM 5.3 through an Anthropic-compatible Gateway. Hub supplied the application's
+repository credential to the harness. Cluster addresses, credentials, account details, and raw
+logs stay out of shared artifacts.
+
+The user chose to reuse the existing PostgreSQL service, reviewed tool permissions, and sent
+guidance that reached later model steps. The reviewer requested changes to the initial plan,
+then approved the corrected plan and final commit. The harness ran all five planning checks,
+verified the result, and pushed [commit `9e97db0`][live-commit] to
+`demo/lightspeed-live-plan-take-07`. Status reports `Verified=True`, reason `VerificationPassed`,
+for that commit. Only `docs/plan.md` was added against the actual prepared checkout.
+
+The approved file, local commit, and remote [plan][live-plan] match exactly: 141 lines,
+13,457 bytes, SHA-256
+`fc700a9a04d77288b821325f323db5fcfb579bda8d956436963e9715a26aa621`.
+The five checks confirmed the plan exists, the prepared tree is unchanged outside the plan and
+Konveyor context, application/source/build content matches the analysis input, the plan is
+tracked after commit, and analysis context remains present. These verify the planning deliverable.
+Application migration, Maven build/package/tests, and runtime/cutover validation remain future work.
+
+The run's actual pre-write checkout was [`b5752b9`][coolstore-checkout]. Coolstore's configured
+input and completed Quarkus analysis use [`32c1722`][coolstore-pin], which produced 49 insights.
+`32c1722` is the direct child of `b5752b9`; the complete tree difference is only
+`.vscode/extensions.json`, which changes editor-extension recommendations. Application source,
+build files, and application configuration are identical. The committed plan records both
+revisions and checks against the actual prepared checkout.
+
+The existing harness replaces the source branch with the target branch before cloning, then
+clones the repository's default branch without selecting the requested reference. That explains
+the default-main checkout here. Preserving the configured source reference during clone needs
+follow-up; this demonstration does not establish that behavior.
+
+The runtime reported 33 native model calls, 563,794 input tokens, and 10,391 output tokens.
+These token observations exclude inspection-classifier calls and contain no monetary cost.
+Normal Hub-token cleanup remained enabled. A token metadata record associated by timing returned
+200 before the run and 404 afterward, consistent with revocation; its exact association with
+this run is inferred.
+
+The Agent used the model-specific image recorded in the [demo guide](../slides/lightspeed-2026-11-11-demo.md).
+Native image checks and the running pod's typed parsers confirmed enabled thinking, low effort,
+and `max_tokens=16384`; all 39 runtime Python files matched `4039163`. The recording uses selected normal-speed excerpts and labelled reading pauses.
+Keep this live-model result separate from the November 6/9 scripted checks.
+Planning does not demonstrate cancellation, handoff, restart recovery, or operator adoption.
+
+## Provider qualification
+
+[Inspection parsing][inspection-fix] accepts the provider's native thinking block while retaining
+strict inspection-decision parsing and failure behavior. Inspection stayed enabled.
+[The UI fix][permission-fix] includes tool arguments in permission cards, with 16 targeted tests,
+TypeScript, and ESLint checks passing.
+
+[Output-limit handling][output-limit-fix] raises `ModelOutputLimitError` when a provider explicitly
+reports a cutoff, before any tool side effect or next model call. Tests using native streamed
+responses and the actual graph/ACP path preserve observed usage and allow an explicit follow-up
+in the same session. There is no automatic retry. The latest full runtime suite passed with
+2,096 tests, 13 skips, and 7 subtests, plus Ruff, format, and mypy checks.
+
+[Reasoning configuration][reasoning-fix] forwards explicit normalized effort as
+`output_config.effort` on Anthropic routes, with tests for direct, Bedrock, and Vertex clients.
+Thinking behavior changes only when configured; inspection and shaping defaults stay unchanged.
+[GLM 5.3's documentation][glm-reasoning] says reasoning is always enabled, defaults to `max`, and
+supports `low`, `high`, and `max`. The official [ZCode provider mapping][glm-anthropic-mapping]
+uses enabled thinking with `output_config.effort` for Anthropic-compatible GLM 5.3 requests.
+Low effort was selected explicitly for this interactive demo.
+
+The deployed image sets `LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS=16384` and
+`LIGHTSPEED_REASONING_CONFIG={"thinking":{"type":"enabled"},"effort":"low"}` for the main model,
+and the Agent selects it through `Agent.spec.image`. API clients can instead set these through
+`AgentRun.spec.env`; the current UI creation form does not expose that field. The output-token
+override is optional; omitting it preserves the finite SDK/provider allowance. This explicit
+demo profile changes no global default or inspection/shaping allowance and requires no API or UI
+change.
 
 ## Accounting and monetary limits
 
 The runtime emits cumulative observed tokens for agent, subagent, summarization, and shaping calls.
 Consumers replace snapshots; absent values remain absent and measured zero remains zero. Isolated
 inspection classifier calls are excluded. The fork supplies no monetary cost and rejects `maxCost`
-before execution. These observations are not a billing total. [Contract][acp],
+before execution. These observations are not a billing total. The UI's live turn label currently
+approximates tool calls. Use the final runtime-provided count for native model calls. [Contract][acp],
 [limitations][prototype].
 
 Complete runtime-provided usage/cost reporting and monetary limits are follow-on work. Konveyor
@@ -153,13 +226,13 @@ resources][operator-template].
 [controller-branch]: https://github.com/djzager/agentic-controller/tree/feat/lightspeed-runtime-integration
 [controller-pin]: https://github.com/djzager/agentic-controller/tree/73a44d59f9e4cf6644ab4fc48f42211a7eff2548
 [runtime-branch]: https://github.com/djzager/lightspeed-agentic-sandbox/tree/feat/reusable-sessions-acp
-[runtime-pin]: https://github.com/djzager/lightspeed-agentic-sandbox/tree/ecbd76a613ed43e580c2481fac4cb1f2781edb67
+[runtime-pin]: https://github.com/djzager/lightspeed-agentic-sandbox/tree/403916314aa4f869fc7733bef6e20fff32cf2680
 [runtime-base]: https://github.com/openshift/lightspeed-agentic-sandbox/commit/5ea23f34ad2ad5fc01fb6264fb9304116664dd3d
 [ui-branch]: https://github.com/djzager/tackle2-ui/tree/fix/lightspeed-acp-ui
-[ui-pin]: https://github.com/djzager/tackle2-ui/tree/aa4f9b93b98d029ba2652e8b645b53018dd1de1c
-[session]: https://github.com/djzager/lightspeed-agentic-sandbox/blob/ecbd76a613ed43e580c2481fac4cb1f2781edb67/src/lightspeed_agentic/session.py
-[acp]: https://github.com/djzager/lightspeed-agentic-sandbox/blob/ecbd76a613ed43e580c2481fac4cb1f2781edb67/src/lightspeed_agentic/acp/README.md
-[prototype]: https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/docs/lightspeed-runtime-prototype.md
+[ui-pin]: https://github.com/djzager/tackle2-ui/tree/10dc62e6b44036920d3e050ee04d75343fc859a7
+[session]: https://github.com/djzager/lightspeed-agentic-sandbox/blob/403916314aa4f869fc7733bef6e20fff32cf2680/src/lightspeed_agentic/session.py
+[acp]: https://github.com/djzager/lightspeed-agentic-sandbox/blob/403916314aa4f869fc7733bef6e20fff32cf2680/src/lightspeed_agentic/acp/README.md
+[prototype]: https://github.com/djzager/agentic-controller/blob/447afecfb249b13e95b2c6ef1a156a0f03ce388c/docs/lightspeed-runtime-prototype.md
 [evidence]: https://github.com/djzager/agentic-controller/blob/73a44d59f9e4cf6644ab4fc48f42211a7eff2548/hack/lightspeed-runtime/reference.json
 [coolstore-branch]: https://github.com/konveyor-ecosystem/coolstore/tree/mta-test
 [coolstore-pin]: https://github.com/konveyor-ecosystem/coolstore/tree/32c1722efdf883f5f400170adb770a46a9b58116
@@ -180,3 +253,21 @@ resources][operator-template].
 [operator-completion]: https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/controller/agenticrun/pod_handler.go#L253-L324
 [operator-stop]: https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/.ai/spec/what/run-lifecycle.md#L117-L119
 [operator-sandbox]: https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/controller/agenticrun/sandbox_manager.go#L249-L276
+
+[inspection-fix]: https://github.com/djzager/lightspeed-agentic-sandbox/commit/9def73417c250364df54e3d27980b6acedc6874e
+[permission-fix]: https://github.com/djzager/tackle2-ui/commit/10dc62e6b44036920d3e050ee04d75343fc859a7
+[scripted-runtime]: https://github.com/djzager/lightspeed-agentic-sandbox/commit/ecbd76a613ed43e580c2481fac4cb1f2781edb67
+[scripted-harness]: https://github.com/djzager/agentic-controller/commit/3c8088c312cd371d8bd541f8a2fe5a1407397af8
+
+[output-limit-fix]: https://github.com/djzager/lightspeed-agentic-sandbox/commit/6c9a070f3f439cf50af14e6bca8a90b1a660fe01
+
+[controller-docs-pin]: https://github.com/djzager/agentic-controller/commit/447afecfb249b13e95b2c6ef1a156a0f03ce388c
+
+[reasoning-fix]: https://github.com/djzager/lightspeed-agentic-sandbox/commit/403916314aa4f869fc7733bef6e20fff32cf2680
+[glm-reasoning]: https://docs.z.ai/guides/llm/glm-5.3
+[glm-anthropic-mapping]: https://github.com/zai-org/ZCode/blob/main/config/provider/zcode-builtin.json
+
+[coolstore-checkout]: https://github.com/konveyor-ecosystem/coolstore/tree/b5752b936f01acd858ca21fd2d3c4f03d3a6321e
+
+[live-plan]: https://github.com/djzager/coolstore/blob/9e97db02b641dc2608fcc399503bbc1a0ed3b842/docs/plan.md
+[live-commit]: https://github.com/djzager/coolstore/commit/9e97db02b641dc2608fcc399503bbc1a0ed3b842
