@@ -103,6 +103,19 @@ continuity comes from committed handoff files (e.g.
 `.konveyor/handoff.md`). Tracks per-stage status (Pending, Running,
 Succeeded, Failed).
 
+## Proposed Shared Knowledge
+
+[ADR 0024](docs/adr/0024-agent-learnings.md) is proposed and unimplemented.
+It can be adopted for existing runs and workflows independently of sessions.
+
+**AgentLearning** — A reviewable, reusable lesson whose content and applicability
+are immutable; accepted revisions can inform independent invocations.
+_Avoid_: treating working notes or a conversation summary as automatically
+accepted shared knowledge.
+
+**Learning Snapshot** — The fixed set of learning revisions selected for a
+consumer, such as one run or an entire workflow invocation.
+
 ## Personas
 
 **Platform Admin** — Creates and manages SkillCards, SkillCollections,

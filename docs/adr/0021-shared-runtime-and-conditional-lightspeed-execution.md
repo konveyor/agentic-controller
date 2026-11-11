@@ -5,12 +5,12 @@ description: "Reuse Lightspeed's DeepAgents runtime and its inspection behavior 
 status: accepted
 status_note: "Approves Konveyor direction only; implementation, backend qualification, and Lightspeed agreement are separate."
 date: "2026-10-20"
-last_updated: null
+last_updated: "2026-11-11"
 authors:
   - "David Zager"
-last_reviewed: "2026-11-04"
+last_reviewed: "2026-11-11"
 implementation_status: deferred
-review_note: "Runtime reuse and custom-image execution were demonstrated separately. Full runtime adoption requires compatibility work for existing interaction, execution controls, session continuation, and inspection behavior. Operator placement, credential delivery, and lifecycle design remain open. Production integration is unimplemented."
+review_note: "Runtime reuse and custom-image execution were demonstrated separately. Full runtime adoption requires compatibility work for existing interaction, execution controls, session continuation, and inspection behavior. Operator placement, credential delivery, and lifecycle design remain open. Production integration is unimplemented. Scoped review: ADR 0024 proposes learning delivery at the shared-runtime seam; no runtime capability is newly qualified."
 relates_to:
   - "0001"
   - "0004"
@@ -20,6 +20,13 @@ relates_to:
 ---
 
 # ADR 0021: Shared Runtime and Conditional Lightspeed Execution
+
+**Update (2026-11-11):** Proposed [ADR 0024](./0024-agent-learnings.md)
+evaluates file-based approved learnings for finite invocations at this shared
+runtime seam. Its independent spike must preserve inspection and qualify
+context delivery, compaction, and runtime subagent propagation. It does not
+change current preview trade-offs, demonstrate general execution recovery, or
+qualify another backend.
 
 ## Context
 
