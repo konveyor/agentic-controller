@@ -387,3 +387,64 @@ func TestBedrockCommandCarriesNoSigningMaterial(t *testing.T) {
 		}
 	}
 }
+
+// TestRedactEndpoint guards that an endpoint reaching a Gateway's status
+// carries no credential. Status is readable by anyone who can read the
+// Gateway, and the override shapes the probe declines - userinfo and query -
+// are exactly the ones a token would be hidden in, with the skip message
+// quoting the endpoint back.
+func TestRedactEndpoint(t *testing.T) {
+	cases := map[string]string{
+		// Nothing to hide: returned untouched, so ordinary messages are
+		// unchanged.
+		bedrockEndpoint:      bedrockEndpoint,
+		bedrockProxyEndpoint: bedrockProxyEndpoint,
+		"":                   "",
+		// Userinfo, the obvious one.
+		"https://user:hunter2@proxy.example/bedrock": "https://" + redactedPlaceholder + "@proxy.example/bedrock",
+		"https://token@proxy.example":                "https://" + redactedPlaceholder + "@proxy.example",
+		// Query values go; keys stay, because the key is diagnostic and the
+		// value is the secret.
+		"https://proxy.example/bedrock?token=hunter2": "https://proxy.example/bedrock?token=" + redactedPlaceholder,
+		"https://proxy.example?a=1&b=2":               "https://proxy.example?a=" + redactedPlaceholder + "&b=" + redactedPlaceholder,
+		// Fragments can carry one too.
+		"https://proxy.example/bedrock#hunter2": "https://proxy.example/bedrock#" + redactedPlaceholder,
+	}
+	for in, want := range cases {
+		if got := redactEndpoint(in); got != want {
+			t.Errorf("redactEndpoint(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	// Whatever the shape, no secret survives.
+	for _, in := range []string{
+		"https://user:hunter2@proxy.example/bedrock?token=hunter2#hunter2",
+		"https://proxy.example/bedrock?access_key=hunter2",
+	} {
+		if got := redactEndpoint(in); strings.Contains(got, "hunter2") {
+			t.Errorf("redactEndpoint(%q) = %q, still carries the secret", in, got)
+		}
+	}
+}
+
+// TestProbeMessagesRedactTheEndpoint guards the path that actually reaches a
+// user: a status message naming the endpoint must not reproduce a credential
+// embedded in it.
+func TestProbeMessagesRedactTheEndpoint(t *testing.T) {
+	const leaky = "https://user:hunter2@proxy.example/bedrock?token=hunter2"
+
+	for _, probe := range []gatewayProbeKind{probeModels, probeBedrockConverse} {
+		for _, msg := range []string{
+			probeSurface(probe, leaky),
+			probeSuccessPhrase(probe, leaky),
+		} {
+			if strings.Contains(msg, "hunter2") {
+				t.Errorf("status message leaks a credential: %q", msg)
+			}
+		}
+		_, msg := gatewayVerifyReason("unreachable rc=6", leaky, "gw-verify-x", false, probe)
+		if strings.Contains(msg, "hunter2") {
+			t.Errorf("unreachable message leaks a credential: %q", msg)
+		}
+	}
+}

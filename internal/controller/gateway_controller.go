@@ -173,6 +173,10 @@ const (
 	awsUseFIPSEndpointEnv      = "AWS_USE_FIPS_ENDPOINT"
 	awsUseDualStackEndpointEnv = "AWS_USE_DUALSTACK_ENDPOINT"
 
+	// redactedPlaceholder stands in for endpoint userinfo and query values on
+	// a Gateway's status (see redactEndpoint).
+	redactedPlaceholder = "REDACTED"
+
 	// verificationDetailLimit bounds the provider error text a probe copies
 	// into its termination message, which the kubelet caps at 4KiB.
 	//
@@ -591,7 +595,7 @@ func gatewayProbeSkip(
 				"Secret %q sets an endpoint override that is not an https URL (%q), "+
 					"and the probe will not send a signed AWS credential in the clear; "+
 					"endpoint and credentials are unverified",
-				gateway.Spec.CredentialRef.SecretName, override), true
+				gateway.Spec.CredentialRef.SecretName, redactEndpoint(override)), true
 		}
 		if region := bedrockProbeRegion(secret); !isAWSRegionName(region) {
 			return fmt.Sprintf(
@@ -618,7 +622,7 @@ func gatewayProbeSkip(
 			return fmt.Sprintf(
 				"Secret %q sets an endpoint override the probe cannot sign exactly "+
 					"(%q); endpoint and credentials are unverified",
-				gateway.Spec.CredentialRef.SecretName, override), true
+				gateway.Spec.CredentialRef.SecretName, redactEndpoint(override)), true
 		}
 	}
 
@@ -716,6 +720,40 @@ func setBedrockEndpointVariants(secret *corev1.Secret) []string {
 		}
 	}
 	return set
+}
+
+// redactEndpoint returns an endpoint safe to put on a Gateway's status, which
+// is readable by anyone who can read the Gateway. An endpoint can carry
+// credentials in two places - userinfo and query values - and the shapes most
+// likely to do so are exactly the ones the probe declines, whose skip message
+// quotes the endpoint back. Keys are kept because they are useful for
+// diagnosis and are not the secret; values are not.
+//
+// A value that will not parse as a URL is returned unchanged: it reached here
+// from a Secret or a spec field, it is not a URL, and losing it entirely would
+// make the message useless.
+func redactEndpoint(endpoint string) string {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return endpoint
+	}
+	if parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" {
+		return endpoint
+	}
+	if parsed.User != nil {
+		parsed.User = url.User(redactedPlaceholder)
+	}
+	if parsed.RawQuery != "" {
+		query := parsed.Query()
+		for key := range query {
+			query[key] = []string{redactedPlaceholder}
+		}
+		parsed.RawQuery = query.Encode()
+	}
+	if parsed.Fragment != "" {
+		parsed.Fragment = redactedPlaceholder
+	}
+	return parsed.String()
 }
 
 // isSignableEndpointOverride reports whether an endpoint override is a shape
@@ -1478,7 +1516,8 @@ func gatewayVerifyReason(
 			}
 		case "unreachable":
 			return reasonEndpointUnreachable, fmt.Sprintf(
-				"Endpoint %s is unreachable (%s)", endpoint, curlErrorPhrase(diagValue(fields, "rc")))
+				"Endpoint %s is unreachable (%s)",
+				redactEndpoint(endpoint), curlErrorPhrase(diagValue(fields, "rc")))
 		}
 	}
 
@@ -1488,6 +1527,7 @@ func gatewayVerifyReason(
 // probeSurface names what the probe actually called, so a failure message
 // points at the request that produced it rather than at the bare endpoint.
 func probeSurface(probe gatewayProbeKind, endpoint string) string {
+	endpoint = redactEndpoint(endpoint)
 	if probe == probeBedrockConverse {
 		return "Bedrock ConverseStream at " + endpoint
 	}
@@ -1499,6 +1539,7 @@ func probeSurface(probe gatewayProbeKind, endpoint string) string {
 // Bedrock probe proves the stronger thing, that the credential invoked the
 // configured model.
 func probeSuccessPhrase(probe gatewayProbeKind, endpoint string) string {
+	endpoint = redactEndpoint(endpoint)
 	if probe == probeBedrockConverse {
 		return fmt.Sprintf("Endpoint %s accepted a signed ConverseStream call for the configured model", endpoint)
 	}
