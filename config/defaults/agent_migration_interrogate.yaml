@@ -1,0 +1,43 @@
+# Interrogate-stage Agent for the attended Java EE to Quarkus workflow.
+#
+# An Agent is a template — it declares what is available (image, skills) but
+# does not execute anything. This one is a workflow stage agent: the
+# java-ee-to-quarkus-attended AgentWorkflow references it from its
+# "interrogate" stage, which runs before plan (ADR 0023).
+#
+# It references two SkillCards directly, not the java-migration-skills
+# collection. That collection also carries plan, which is a rule, and a rule is
+# always in context: this stage would be told it MUST write docs/plan.md.
+#   - interrogate is the stage's driver, so it is a rule.
+#   - javaee-to-quarkus is on-demand. It holds the decision catalog
+#     (references/decisions.md). The stage instructions give that file's path
+#     under ~/.agents/skills, where the entry point links every skill: an
+#     on-demand skill may never be read (ADR 0014), and named by skill alone,
+#     one test run in five never found the catalog.
+#
+# askUser is not set here. An Agent declares budget limits only; whether a run
+# may put questions to a human is set where the run is defined, which for this
+# Agent is the workflow stage (ADR 0018).
+#
+# maxTurns is lower than the other stage Agents: this stage reads the
+# repository, then spends a handful of turns per decision (ask, record,
+# commit). It writes no plan and changes no source.
+#
+# gateways is intentionally omitted, as on the other stage Agents: the gateway
+# is named at run time.
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  annotations:
+    konveyor.io/related-image: RELATED_IMAGE_AGENT_JAVA
+  name: migration-interrogate-agent
+  labels:
+    app.kubernetes.io/managed-by: agentic-controller-defaults
+    konveyor.io/managed: "true"
+spec:
+  image: quay.io/konveyor/agent-java:latest
+  skillCards:
+    - ref: interrogate
+    - ref: javaee-to-quarkus
+  execution:
+    maxTurns: 150

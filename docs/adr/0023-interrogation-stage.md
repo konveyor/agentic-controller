@@ -3,14 +3,14 @@ adr: "0023"
 title: "Interrogation Stage: ask the human about the application before planning"
 description: "Puts human interrogation of the target application in a workflow stage of its own, driven by skills and carried by ask_user, with the answers committed as the plan's input; the controller gains nothing and the harness only delivers grounding."
 status: proposed
-status_note: "Spike outcome for konveyor/agentic-controller#253. Recommends the seam and the mechanism; the stage, skill, and harness grounding it describes are follow-up work."
+status_note: "Spike outcome for konveyor/agentic-controller#253; implementation is tracked in #347. The stage skill, decision catalog, and defaults are shipped; the harness grounding and the ask_user follow-ups are follow-up work."
 date: "2026-10-23"
-last_updated: null
+last_updated: "2026-11-12"
 authors:
   - "Ian Bolton"
-last_reviewed: "2026-10-23"
-implementation_status: deferred
-review_note: "Nothing in this ADR is implemented. The askUser opt-in (ADR 0017), the Refused outcome on a handoff verdict (ADR 0018/0020), and per-stage execution overrides it builds on are shipped; the interrogate stage, skill, record, and assessment grounding are not."
+last_reviewed: "2026-11-12"
+implementation_status: amended
+review_note: "The interrogate stage skill and SkillCard, the javaee-to-quarkus decision catalog, the interrogate Agent, the attended workflow, and the plan skill's use of the record are shipped (#347 slice 1). Not implemented: assessment grounding (Decision 5), the ask_user recommendation argument and longer question timeout (ADR 0017 follow-ups), and a per-stage question timeout."
 relates_to:
   - "ADR 0007 (harness as thin runner; git as cross-stage memory)"
   - "ADR 0010 (skill content boundary)"
@@ -20,6 +20,7 @@ relates_to:
   - "ADR 0018 (execution fields per stage; Succeeded condition)"
   - "ADR 0020 (run outcome model; Refused)"
   - "konveyor/agentic-controller#253 (this spike), #254 (ADRs in the target repo), #255 (skills in the target repo), #128 (continuation runs)"
+  - "konveyor/agentic-controller#347 (implementation)"
 ---
 
 # ADR 0023: Interrogation Stage — ask the human about the application before planning
@@ -29,6 +30,59 @@ relates_to:
 > both currently propose 0021, so between them they will take 0021 and
 > 0022. This ADR takes 0023 to stay clear of that collision rather than
 > join it.
+
+**Update (2026-11-12):** The first slice of the implementation (#347)
+ships the parts that need no controller or harness change: the
+`interrogate` stage skill and its SkillCard, the decision catalog in
+`javaee-to-quarkus` (`references/decisions.md`), the
+`migration-interrogate-agent` Agent, and the plan skill's use of the
+record (*What changes* items 1–4). The questionnaire experiment is
+deleted (item 9, Decision 6). Five things were built differently from,
+or in addition to, the text below:
+
+- **The stage ships in a second default workflow.** *What changes* item
+  3 put the stage at the head of `agentworkflow_javaee_to_quarkus.yaml`
+  and left the headless variant to be decided with the defaults.
+  `java-ee-to-quarkus` is unchanged and is the headless variant;
+  `java-ee-to-quarkus-attended` is the same sequence with `interrogate`
+  in front. Defaults are installed wherever agentic is enabled, and an
+  attended stage in the only shipped workflow would fail every
+  unattended run of it at its first question.
+- **The Agent references SkillCards, not "the domain collection".** The
+  only collection, `java-migration-skills`, also carries `plan`, which
+  is a rule and would put the plan stage's driver in this stage's
+  context. The Agent references `interrogate` and `javaee-to-quarkus`
+  directly. Because the domain skill is on-demand, the stage
+  instructions give the catalog's path under `~/.agents/skills`: told
+  only which skill holds it, one test run in five never found the file
+  and asked decisions of its own invention. The skill now also ends the
+  stage `Status: failed` when a catalog it was told to read is missing.
+  `maxTurns` (150) is the Agent's default, as on the other stage
+  Agents; the stage sets only `askUser`.
+- **Creating the handoff file is no longer the execute stage's job.**
+  Decision 4 makes `interrogate` the first stage to write
+  `.konveyor/handoff.md`, but the execute skill claimed the file's
+  creation and the verify skill repeated it. Both skills and the execute
+  stage instructions now say to add a section, creating the file only
+  if it is absent.
+- **Two cases the text leaves open are settled in the skill.** A human
+  who declines the "continue or stop" question as well is taken to mean
+  continue, because Decision 4 says a decline never means stop on its
+  own. A stage with open decisions and no `ask_user` tool writes
+  `Status: failed` and leaves them `Open`; answering them itself would
+  be the self-answering mode this ADR rejects.
+- **The record and the handoff carry no tally.** Decision 4's examples
+  have a summary line (`decided 4, known 2, …`) and two counts in the
+  handoff section. The agent kept them by hand, and in four test runs
+  against a real application they disagreed with the record's own
+  blocks twice: once in the numbers, and once, after the line was
+  changed to name the decisions behind each number, in which decision
+  it named. The skill writes neither. The blocks are the record, and a
+  tally worth having is deterministic work for the harness, not the
+  agent (ADR 0010).
+
+Not implemented: the assessment grounding (Decision 5, item 5), the ADR
+0017 follow-ups (item 6), and a per-stage question timeout (item 7).
 
 ## Context
 

@@ -2,9 +2,10 @@
 name: plan
 description: >
   Analyzes a project by reading its build manifest, layout, and source, and uses
-  the Konveyor analysis results (.konveyor/analysis.json) to work out the migration
-  approach and dependency-ordered steps toward the target named in the prompt, and
-  produces a single migration plan for approval. Produces docs/plan.md.
+  the Konveyor analysis results (.konveyor/analysis.json) and any decisions an
+  interrogation already recorded (.konveyor/interrogation.md) to work out the
+  migration approach and dependency-ordered steps toward the target named in the
+  prompt, and produces a single migration plan for approval. Produces docs/plan.md.
 ---
 
 # Plan Stage
@@ -16,6 +17,8 @@ only.
 ## Inputs
 
 - `.konveyor/analysis.json` — Kantra rule violations and patterns, **if present**
+- `.konveyor/interrogation.md` — decisions already made about this application,
+  each with its source, **if present**
 
 
 ---
@@ -25,9 +28,13 @@ only.
 ### 1a. Read Prior Stage Outputs (if present)
 
 1. If `.konveyor/analysis.json` exists, read it for rule violations and patterns
+2. If `.konveyor/interrogation.md` exists, read it. It is the record an
+   interrogation stage left: the decisions this plan depends on, each with the
+   option chosen and who or what chose it. They were made before you started —
+   apply them, do not make them again
 
-If it doesn't exist, derive the source stack and target directly from the prompt
-and the code.
+If `.konveyor/analysis.json` doesn't exist, derive the source stack and target
+directly from the prompt and the code.
 
 ### 1b. Understand the Project Architecture
 
@@ -102,9 +109,12 @@ below exactly; do NOT invent your own headings.
 - Hardest areas: <list 1-3 most complex>
 
 ## Key Decisions Applied
-<only where the prompt, target, or source left something unclear or unspecified
-and you had to choose — list each such decision, the option chosen, and the
-reasoning. If everything was clear, state "none".>
+<if `.konveyor/interrogation.md` is present, list every decision in it first —
+its ID and title, the option chosen, and its source — and prefix each one whose
+source is `assumed`, or that is still `Open`, with ASSUMPTION. Then, only where
+the prompt, target, or source left something else unclear or unspecified and
+you had to choose — list each such decision, the option chosen, and the
+reasoning. If there is no record and everything was clear, state "none".>
 
 ## Approach
 <phase-by-phase summary of the migration approach>
@@ -130,6 +140,20 @@ reasoning. If everything was clear, state "none".>
 ## Notes
 <gotchas, special cases>
 ```
+
+### Rules for recorded decisions
+
+These apply when `.konveyor/interrogation.md` is present.
+
+1. **Every decision is applied** — the steps follow the option each decision chose
+2. **A human's decision stands** — never plan against a decision whose source is
+   `human`. If the code makes it impossible to apply as given, plan the closest
+   workable option and say so in Notes, naming the decision
+3. **Assumptions are visible** — a decision whose source is `assumed`, or that is
+   still `Open`, was confirmed by nobody: plan on its recommendation and mark it
+   ASSUMPTION under Key Decisions Applied
+4. **Settled decisions stay settled** — a decision in the record is not listed
+   again as one you chose
 
 ### Rules for writing steps
 
@@ -227,6 +251,7 @@ Otherwise, finish once `docs/plan.md` is written.
 ## Rules
 
 - Do NOT modify source files — planning only
+- Do NOT modify `.konveyor/interrogation.md`
 - Do NOT execute any migration steps
 - Analyze by reading files — do not build or execute the project
 - You MUST write `docs/plan.md` before finishing

@@ -1,0 +1,78 @@
+# The attended Java EE to Quarkus migration workflow: java-ee-to-quarkus with
+# an interrogate stage in front of plan (ADR 0023).
+#
+# Run this one when somebody will be watching. The interrogate stage reads the
+# application, settles what the code, the parameters and the grounding already
+# answer, and puts the remaining decisions — production database, messaging
+# broker, view layer, authentication — to the human one at a time. It commits
+# the answers as .konveyor/interrogation.md, which plan then reads.
+#
+# askUser is set on the interrogate stage alone, so a human is needed for the
+# minutes that stage takes and not for the rest of the run. The question gate
+# is fail-closed: with nobody attached the run fails at its first question,
+# with the open decisions already on the target branch. For a run nobody will
+# watch, use java-ee-to-quarkus, which has no interrogate stage and lets plan
+# decide for itself.
+#
+# The plan, execute and verify stages are the same Agents as in
+# java-ee-to-quarkus. Keep their instructions in step with
+# agentworkflow_javaee_to_quarkus.yaml: these files are copied to the operator
+# verbatim, so nothing can share them.
+#
+# Prerequisites (shipped here in config/defaults/ and installed alongside):
+#   - SkillCards interrogate, plan, execute, verify, javaee-to-quarkus
+#   - Agents migration-interrogate/plan/execute/verify-agent
+# The Agents declare no gateway, so a Gateway is named at run time on the
+# AgentWorkflowRun. Create one from a config/samples/gateway_*.yaml first.
+apiVersion: konveyor.io/v1alpha1
+kind: AgentWorkflow
+metadata:
+  name: java-ee-to-quarkus-attended
+  labels:
+    app.kubernetes.io/managed-by: agentic-controller-defaults
+    konveyor.io/managed: "true"
+spec:
+  guide: "Migrate a Java EE application to Quarkus 3"
+  stages:
+    - name: interrogate
+      agentRef: migration-interrogate-agent
+      execution:
+        askUser: true
+      instructions: >-
+        Load the interrogate skill and follow its SKILL.md exactly. Find the
+        decisions that migrating this application from Java EE to Quarkus
+        depends on. The decisions this migration forces are listed in the
+        javaee-to-quarkus skill's decision catalog,
+        ~/.agents/skills/javaee-to-quarkus/references/decisions.md: read that
+        file before deciding what to ask. Settle what the
+        code, the parameters and the files under .konveyor/ already answer,
+        and put the rest to the human with ask_user, one decision at a time.
+        Write the record to .konveyor/interrogation.md in the exact structure
+        defined in SKILL.md, and your ## Interrogate section to
+        .konveyor/handoff.md.
+    - name: plan
+      agentRef: migration-plan-agent
+      instructions: >-
+        Load the plan skill and follow its SKILL.md exactly. Build the
+        migration plan from the Kantra analysis results in
+        .konveyor/analysis.json, reading the build manifest, layout, and
+        source for context, and apply the decisions recorded in
+        .konveyor/interrogation.md as SKILL.md defines. Use the output
+        structure defined in SKILL.md as the exact structure for docs/plan.md
+        — reproduce every required section and field. Do not invent your own
+        document structure.
+    - name: execute
+      agentRef: migration-execute-agent
+      instructions: >-
+        Load the execute skill and follow its SKILL.md exactly. Execute each
+        step in docs/plan.md to migrate the code from Java EE to Quarkus.
+        Write your results as an ## Execute section in .konveyor/handoff.md,
+        as defined in SKILL.md.
+    - name: verify
+      agentRef: migration-verify-agent
+      instructions: >-
+        Load the verify skill and follow its SKILL.md exactly. Run the build
+        from docs/plan.md, fix build errors until it compiles, then run tests
+        and runtime verification — grounded in .konveyor/analysis.json and the
+        ## Execute section of .konveyor/handoff.md. Append your results as a
+        ## Verify section in .konveyor/handoff.md as defined in SKILL.md.
