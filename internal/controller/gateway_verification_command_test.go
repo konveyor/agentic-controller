@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
@@ -38,6 +39,13 @@ const (
 	// probe through an endpoint override in the Secret.
 	bedrockEndpoint    = "https://bedrock-runtime.us-east-1.amazonaws.com"
 	bedrockVPCEndpoint = "https://vpce-0a1b.bedrock-runtime.us-east-1.vpce.amazonaws.com"
+
+	// bedrockProxyEndpoint is an endpoint override with a base path, the
+	// shape whose signed path omitted the prefix until it was fixed.
+	bedrockProxyEndpoint = "https://proxy.example/bedrock"
+
+	// awsFlagTrue is how the AWS SDK spells an enabled boolean setting.
+	awsFlagTrue = "true"
 
 	// Stand-in static SigV4 credential values. The access key is also
 	// asserted absent from the Job's command string and env values.
@@ -478,6 +486,12 @@ func TestGatewayProbeSkip(t *testing.T) {
 		}
 		return out
 	}
+	withExtra := func(extra map[string]string) map[string]string {
+		out := map[string]string{}
+		maps.Copy(out, fullKeys)
+		maps.Copy(out, extra)
+		return out
+	}
 
 	gateway := func(provider, endpoint string) *konveyoriov1alpha1.Gateway {
 		return &konveyoriov1alpha1.Gateway{
@@ -557,6 +571,43 @@ func TestGatewayProbeSkip(t *testing.T) {
 			}),
 			wantSkip:  true,
 			wantInMsg: "not an AWS region name",
+		},
+		{
+			// goose honours the FIPS and dual-stack settings and each selects
+			// a different host from the plain regional one. Declining beats
+			// checking a host the run never calls - and on a network
+			// restricted to the configured endpoint, beats failing a working
+			// Gateway.
+			name:      "a FIPS endpoint request is declined, not mis-probed",
+			gateway:   gateway(testProviderBedrock, bedrockEndpoint),
+			secret:    bedrockSecret(withExtra(map[string]string{awsUseFIPSEndpointEnv: awsFlagTrue})),
+			wantSkip:  true,
+			wantInMsg: awsUseFIPSEndpointEnv,
+		},
+		{
+			name:      "a dual-stack endpoint request is declined",
+			gateway:   gateway(testProviderBedrock, bedrockEndpoint),
+			secret:    bedrockSecret(withExtra(map[string]string{awsUseDualStackEndpointEnv: awsFlagTrue})),
+			wantSkip:  true,
+			wantInMsg: awsUseDualStackEndpointEnv,
+		},
+		{
+			// A base path is signable now, so this one is probed.
+			name:    "a base-path endpoint override is probed",
+			gateway: gateway(testProviderBedrock, bedrockEndpoint),
+			secret: bedrockSecret(withExtra(map[string]string{
+				awsBedrockEndpointURLEnv: bedrockProxyEndpoint,
+			})),
+			wantSkip: false,
+		},
+		{
+			name:    "an override shape the signer cannot reproduce is declined",
+			gateway: gateway(testProviderBedrock, bedrockEndpoint),
+			secret: bedrockSecret(withExtra(map[string]string{
+				awsBedrockEndpointURLEnv: bedrockProxyEndpoint + "?x=1",
+			})),
+			wantSkip:  true,
+			wantInMsg: "cannot sign exactly",
 		},
 		{
 			// The probe signs what it sends; http would put a usable

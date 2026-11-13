@@ -162,6 +162,17 @@ const (
 	awsDNSSuffixChina        = ".amazonaws.com.cn"
 	awsChinaRegionPrefix     = "cn-"
 
+	// AWS endpoint-variant settings. goose's AWS config loader honours both,
+	// and each selects a different host from the one bedrockProbeEndpoint
+	// builds - dual-stack moves to .api.aws, FIPS to a -fips host. Rather
+	// than reproduce those rules unverified, a Secret that sets either is
+	// left unprobed (see gatewayProbeSkip): a probe calling a host the run
+	// does not use is the defect this probe exists to avoid, and on a
+	// network restricted to the configured endpoint it would fail a Gateway
+	// whose runs are fine.
+	awsUseFIPSEndpointEnv      = "AWS_USE_FIPS_ENDPOINT"
+	awsUseDualStackEndpointEnv = "AWS_USE_DUALSTACK_ENDPOINT"
+
 	// verificationDetailLimit bounds the provider error text a probe copies
 	// into its termination message, which the kubelet caps at 4KiB.
 	//
@@ -549,7 +560,13 @@ var bedrockProbeSecretKeys = []string{
 //     an AWS_REGION that is not a region name, or an endpoint override that
 //     is not an https URL. Both would otherwise put something unchecked from
 //     the Secret into the URL the probe signs for, and neither can be the
-//     Gateway's fault in a way a failure would help with.
+//     Gateway's fault in a way a failure would help with;
+//   - a Bedrock Secret that selects an endpoint variant the probe does not
+//     reproduce (AWS_USE_FIPS_ENDPOINT, AWS_USE_DUALSTACK_ENDPOINT), or an
+//     override shape the signer cannot sign exactly. Probing the plain
+//     regional host when the run uses a FIPS or dual-stack one would check a
+//     host the run never calls, and on a network restricted to the configured
+//     endpoint would fail a Gateway whose runs are fine.
 func gatewayProbeSkip(
 	gateway *konveyoriov1alpha1.Gateway,
 	probe gatewayProbeKind,
@@ -582,6 +599,26 @@ func gatewayProbeSkip(
 					"probe cannot address bedrock-runtime; endpoint and credentials "+
 					"are unverified",
 				gateway.Spec.CredentialRef.SecretName, awsRegionEnv, region), true
+		}
+		// An endpoint variant the probe does not resolve. Declining is the
+		// point: the probe would otherwise call the plain regional host while
+		// the run calls a FIPS or dual-stack one.
+		if variants := setBedrockEndpointVariants(secret); len(variants) > 0 {
+			return fmt.Sprintf(
+				"Secret %q sets %s, which moves the endpoint somewhere this probe "+
+					"does not resolve, so it would check a host the run does not use; "+
+					"endpoint and credentials are unverified",
+				gateway.Spec.CredentialRef.SecretName, strings.Join(variants, " and ")), true
+		}
+		// An override the signer cannot reproduce byte for byte. A base path
+		// is fine and is signed; a query, a fragment or embedded credentials
+		// are not, and a signature that cannot match is worse than no probe.
+		if override := bedrockEndpointOverride(secret); override != "" &&
+			!isSignableEndpointOverride(override) {
+			return fmt.Sprintf(
+				"Secret %q sets an endpoint override the probe cannot sign exactly "+
+					"(%q); endpoint and credentials are unverified",
+				gateway.Spec.CredentialRef.SecretName, override), true
 		}
 	}
 
@@ -655,6 +692,43 @@ func bedrockEndpointOverride(secret *corev1.Secret) string {
 // calls - the same single source of truth the run uses.
 func bedrockProbeRegion(secret *corev1.Secret) string {
 	return strings.TrimSpace(string(secret.Data[awsRegionEnv]))
+}
+
+// bedrockEndpointVariantKeys are the settings that move the endpoint away from
+// the plain regional host. The probe does not reproduce them; it declines to
+// probe instead (see gatewayProbeSkip).
+var bedrockEndpointVariantKeys = []string{
+	awsUseFIPSEndpointEnv,
+	awsUseDualStackEndpointEnv,
+}
+
+// setBedrockEndpointVariants returns the endpoint-variant settings the Secret
+// turns on. Anything other than unset, empty or an explicit false counts as
+// on: the consequence of reading this wrong is declining to probe, which is
+// the safe direction, where guessing the variant's host is not.
+func setBedrockEndpointVariants(secret *corev1.Secret) []string {
+	var set []string
+	for _, key := range bedrockEndpointVariantKeys {
+		switch strings.ToLower(strings.TrimSpace(string(secret.Data[key]))) {
+		case "", "false", "0":
+		default:
+			set = append(set, key)
+		}
+	}
+	return set
+}
+
+// isSignableEndpointOverride reports whether an endpoint override is a shape
+// the signer can reproduce exactly. A base path is fine - it becomes part of
+// the signed path - but a query, a fragment or embedded credentials are shapes
+// the canonical request would have to model and this signer does not, so they
+// are declined rather than probed with a signature that cannot match.
+func isSignableEndpointOverride(override string) bool {
+	parsed, err := url.Parse(override)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
+		return false
+	}
+	return parsed.RawQuery == "" && parsed.Fragment == "" && parsed.User == nil
 }
 
 // isAWSRegionName reports whether s has the shape of an AWS region name
@@ -810,8 +884,15 @@ func signBedrockProbeRequest(
 		return bedrockProbeRequest{}, fmt.Errorf("probe endpoint %q has no host", probeEndpoint)
 	}
 
-	// The path as sent, and the canonical path AWS will reconstruct from it.
-	wirePath := "/model/" + awsEscapePathSegment(modelID) + "/" + bedrockConverseStreamOperation
+	// Build the request URL first, then take the canonical path from it, so
+	// the signature always covers the path actually sent. An endpoint override
+	// may carry a base path (a proxy at https://proxy.example/bedrock sends
+	// /bedrock/model/...); signing /model/... alone produced a signature AWS
+	// could not match. parsed.EscapedPath keeps the override's own escaping,
+	// since the canonical form is that path encoded once more.
+	basePath := strings.TrimSuffix(parsed.EscapedPath(), "/")
+	wirePath := basePath + "/model/" + awsEscapePathSegment(modelID) +
+		"/" + bedrockConverseStreamOperation
 	canonicalPath := awsEscapeURIPath(wirePath)
 
 	amzDate := now.UTC().Format("20060102T150405Z")
@@ -861,7 +942,10 @@ func signBedrockProbeRequest(
 	signature := hex.EncodeToString(hmacSHA256(signingKey, stringToSign))
 
 	return bedrockProbeRequest{
-		URL: strings.TrimSuffix(probeEndpoint, "/") + wirePath,
+		// Rebuilt from the parsed parts rather than concatenated onto the
+		// override string, so the URL and the signed path cannot drift: the
+		// base path is already in wirePath.
+		URL: parsed.Scheme + "://" + host + wirePath,
 		Authorization: fmt.Sprintf("%s Credential=%s/%s, SignedHeaders=%s, Signature=%s",
 			awsSigV4Algorithm, keyID, scope, signedHeaders, signature),
 		AMZDate:       amzDate,

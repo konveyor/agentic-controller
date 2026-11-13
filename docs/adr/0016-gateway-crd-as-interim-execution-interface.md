@@ -5,7 +5,7 @@ description: "Defines the Gateway CRD and direct Agent Sandbox path as the accep
 status: accepted
 status_note: "Supersedes two clauses of ADR 0004. OpenShell remains under evaluation; ADR 0021 supersedes its predetermined destination without changing the current Gateway/Sandbox default."
 date: "2026-08-17"
-last_updated: "2026-11-07"
+last_updated: "2026-11-12"
 authors:
   - "David Zager"
 last_reviewed: "2026-10-20"
@@ -15,7 +15,7 @@ review_note: "Gateway CRD, direct Agent Sandbox creation, verification Jobs, and
 
 # ADR 0016: Gateway CRD as Interim Execution Interface
 
-**Update (2026-11-07):** `aws-bedrock` is verified rather than skipped. The
+**Update (2026-11-12):** `aws-bedrock` is verified rather than skipped. The
 verification Job now picks a probe per provider: the OpenAI-compatible
 `GET <endpoint>/v1/models` as before, or — for `aws-bedrock` — a
 SigV4-signed `ConverseStream` against `bedrock-runtime` capped at one
@@ -34,11 +34,19 @@ something for Bedrock: a credential an IAM policy or SCP denies
 AWS's own error text onto the Gateway status, instead of reaching the user
 mid-run as `-32000 Authentication required` (#304). `gcp-vertex-ai` keeps
 `reason=VerificationSkipped` — its probe needs an OAuth2 token minted from
-a service account, which the Job cannot do. So does a Bedrock Gateway
-whose Secret lacks the static SigV4 keys (IRSA and other SDK credential
-sources are working setups the probe cannot reproduce). The probe
-addresses `bedrock-runtime` the way the AWS SDK does — from the Secret's
-`AWS_REGION` and endpoint overrides — and not from `spec.endpoint`, which a
+a service account, which the Job cannot do. So does a Bedrock Gateway the
+probe cannot reproduce exactly: one whose Secret lacks the static SigV4
+keys (IRSA and other SDK credential sources are working setups), one that
+selects an endpoint variant the probe does not resolve
+(`AWS_USE_FIPS_ENDPOINT`, `AWS_USE_DUALSTACK_ENDPOINT` — goose honours
+both, and each moves the host), and one whose endpoint override carries a
+query or fragment the signer cannot model. The governing rule is that a
+probe which cannot reproduce the run declines rather than guesses: a
+verdict that does not describe the Gateway is worse than no verdict, and on
+a network restricted to the configured endpoint it would fail a Gateway
+whose runs are fine. The probe addresses `bedrock-runtime` the way the AWS
+SDK does — from the Secret's `AWS_REGION` and endpoint overrides, including
+an override's base path — and not from `spec.endpoint`, which a
 Bedrock run ignores: that keeps the probe on the host the run uses, and
 leaves no route from an attacker-chosen `spec.endpoint` to somewhere the
 probe would sign an AWS credential for (#102). This refines the
@@ -173,7 +181,7 @@ It is a Konveyor custom resource, not an OpenShell Gateway Service.
   SDK rather than an HTTP endpoint (`aws-bedrock`, `gcp-vertex-ai`) have no
   such surface to probe, so they are marked `Ready` without one, with
   `reason=VerificationSkipped` and `connectionVerified` left false.
-  *(Refined by the 2026-11-07 update above: `aws-bedrock` is probed with a
+  *(Refined by the 2026-11-12 update above: `aws-bedrock` is probed with a
   controller-signed SigV4 `ConverseStream`; `gcp-vertex-ai` still is not.)*
 - **An AgentRun selects exactly one Gateway.** Multi-model-per-run stays
   dropped — this half of ADR 0004 (and the retirement of

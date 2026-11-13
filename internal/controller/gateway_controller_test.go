@@ -848,7 +848,7 @@ var _ = Describe("Gateway Controller", func() {
 			secret, gateway := newBedrockGatewayFixture(name, secretName)
 			// The sample's endpoint, left alone, with a credential elsewhere.
 			secret.StringData[awsRegion] = "eu-west-1"
-			gateway.Spec.Endpoint = "https://bedrock-runtime.us-east-1.amazonaws.com"
+			gateway.Spec.Endpoint = bedrockEndpoint
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 			Expect(k8sClient.Create(ctx, gateway)).To(Succeed())
 
@@ -1059,7 +1059,7 @@ func newBedrockGatewayFixture(name, secretName string) (*corev1.Secret, *konveyo
 		},
 		Spec: konveyoriov1alpha1.GatewaySpec{
 			Provider: testProviderBedrock,
-			Endpoint: "https://bedrock-runtime.us-east-1.amazonaws.com",
+			Endpoint: bedrockEndpoint,
 			CredentialRef: konveyoriov1alpha1.GatewayCredentialRef{
 				SecretName: secretName,
 			},

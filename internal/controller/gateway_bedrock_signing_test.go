@@ -214,6 +214,150 @@ func TestSignBedrockProbeRequestFollowsSecretEndpoint(t *testing.T) {
 	}
 }
 
+// TestSignBedrockProbeRequestBasePathOverride is the regression guard for the
+// second endpoint finding: an override may carry a base path, and the
+// signature has to cover the path actually sent. A proxy at
+// https://proxy.example/bedrock sends /bedrock/model/..., and signing
+// /model/... alone produced an Authorization header AWS could not match.
+//
+// The goldens come from an independent implementation of SigV4, as in
+// TestSignBedrockProbeRequest.
+func TestSignBedrockProbeRequestBasePathOverride(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		wantURL  string
+		wantSig  string
+	}{
+		{
+			name:     "base path is part of the signed path",
+			endpoint: bedrockProxyEndpoint,
+			wantURL: bedrockProxyEndpoint + "/model/" +
+				"us.anthropic.claude-sonnet-4-5-20250929-v1%3A0/converse-stream",
+			wantSig: "ab4329f481d0654a92d78b1e332e1a7217756542fcb08292f9aa1f3af1e57073",
+		},
+		{
+			// A trailing slash must not produce // in the path, which would
+			// be a different path and so a different signature.
+			name:     "trailing slash normalizes to the same request",
+			endpoint: bedrockProxyEndpoint + "/",
+			wantURL: bedrockProxyEndpoint + "/model/" +
+				"us.anthropic.claude-sonnet-4-5-20250929-v1%3A0/converse-stream",
+			wantSig: "ab4329f481d0654a92d78b1e332e1a7217756542fcb08292f9aa1f3af1e57073",
+		},
+		{
+			name:     "multi-segment base path",
+			endpoint: "https://proxy.example/a/b",
+			wantURL: "https://proxy.example/a/b/model/" +
+				"us.anthropic.claude-sonnet-4-5-20250929-v1%3A0/converse-stream",
+			wantSig: "6699e4c1da66733d13139c43fb83035e3ac48e68438347db8de6229dc20d27c3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := signBedrockProbeRequest(
+				testBedrockSecret(nil), tt.endpoint, testBedrockModel, testSigningTime)
+			if err != nil {
+				t.Fatalf("signBedrockProbeRequest: %v", err)
+			}
+			if got.URL != tt.wantURL {
+				t.Errorf("URL = %q, want %q", got.URL, tt.wantURL)
+			}
+			if !strings.HasSuffix(got.Authorization, "Signature="+tt.wantSig) {
+				t.Errorf("Authorization = %q, want signature %s", got.Authorization, tt.wantSig)
+			}
+			if strings.Contains(got.URL, "//model/") {
+				t.Errorf("URL has an empty path segment: %q", got.URL)
+			}
+		})
+	}
+
+	// The host-only cases the reviewer confirmed against the official AWS SDK
+	// must be untouched by the base-path handling.
+	for _, endpoint := range []string{bedrockEndpoint, bedrockVPCEndpoint} {
+		got, err := signBedrockProbeRequest(
+			testBedrockSecret(nil), endpoint, testBedrockModel, testSigningTime)
+		if err != nil {
+			t.Fatalf("signBedrockProbeRequest(%s): %v", endpoint, err)
+		}
+		if !strings.HasPrefix(got.URL, endpoint+"/model/") {
+			t.Errorf("host-only override changed shape: %q", got.URL)
+		}
+	}
+}
+
+// TestSetBedrockEndpointVariants guards the first endpoint finding: goose
+// honours the FIPS and dual-stack settings and each selects a different host
+// from the plain regional one, so a Secret setting either is declined rather
+// than probed against a host the run does not call. Reading an ambiguous value
+// as "set" is deliberate - declining is the safe direction.
+func TestSetBedrockEndpointVariants(t *testing.T) {
+	tests := []struct {
+		name string
+		data map[string]string
+		want []string
+	}{
+		{"unset", nil, nil},
+		{"explicit false", map[string]string{
+			awsUseFIPSEndpointEnv:      "false",
+			awsUseDualStackEndpointEnv: "0",
+		}, nil},
+		{"empty counts as unset", map[string]string{awsUseFIPSEndpointEnv: "  "}, nil},
+		{"fips on", map[string]string{awsUseFIPSEndpointEnv: awsFlagTrue}, []string{awsUseFIPSEndpointEnv}},
+		{"dualstack on", map[string]string{awsUseDualStackEndpointEnv: "TRUE"},
+			[]string{awsUseDualStackEndpointEnv}},
+		{"both on", map[string]string{
+			awsUseFIPSEndpointEnv:      awsFlagTrue,
+			awsUseDualStackEndpointEnv: "1",
+		}, []string{awsUseFIPSEndpointEnv, awsUseDualStackEndpointEnv}},
+		// Anything unrecognized is treated as on, so the probe declines
+		// instead of guessing which host the run resolved.
+		{"unrecognized value", map[string]string{awsUseFIPSEndpointEnv: "yes"},
+			[]string{awsUseFIPSEndpointEnv}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := setBedrockEndpointVariants(testBedrockSecret(tt.data))
+			if len(got) != len(tt.want) {
+				t.Fatalf("variants = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("variants = %v, want %v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestIsSignableEndpointOverride guards which override shapes the signer can
+// reproduce byte for byte. A base path can be signed; a query, a fragment or
+// embedded credentials cannot, and a signature that cannot match is worse than
+// declining to probe.
+func TestIsSignableEndpointOverride(t *testing.T) {
+	cases := map[string]bool{
+		bedrockEndpoint:                      true,
+		bedrockProxyEndpoint:                 true,
+		"https://proxy.example/a/b/":         true,
+		"https://proxy.example:8443/bedrock": true,
+		// Shapes the canonical request would have to model and this does not.
+		bedrockProxyEndpoint + "?x=1":   false,
+		bedrockProxyEndpoint + "#f":     false,
+		"https://user:pw@proxy.example": false,
+		// Still not in the clear, and still needs a host.
+		"http://proxy.example/bedrock": false,
+		"https:///bedrock":             false,
+		"":                             false,
+	}
+	for override, want := range cases {
+		if got := isSignableEndpointOverride(override); got != want {
+			t.Errorf("isSignableEndpointOverride(%q) = %v, want %v", override, got, want)
+		}
+	}
+}
+
 // TestBedrockCommandCarriesNoSigningMaterial is the regression guard for the
 // whole change: the probe pod replays a signature the controller computed, so
 // the command must not reference the secret access key or curl's own signing,
