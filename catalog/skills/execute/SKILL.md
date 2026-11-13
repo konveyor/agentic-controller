@@ -36,9 +36,11 @@ Work through the steps in `docs/plan.md` in order.
 
 You MUST complete this step.
 
-Create `.konveyor/handoff.md` (make the `.konveyor/` directory first if it does
-not exist) and write an `## Execute` section into it. This stage owns the creation
-of the handoff file; later stages append their own sections to it.
+Add an `## Execute` section to `.konveyor/handoff.md`. If the file does not
+exist, create it (make the `.konveyor/` directory first if it does not exist).
+If an earlier stage already wrote to it, keep everything that is there and put
+your section after it, so `## Execute` is the last section in the file. Later
+stages append their own sections.
 
 Record the overall status, then one line per step from `docs/plan.md` — the step
 `id`, the `file` touched, the `action` (MODIFY/CREATE/DELETE), the result
@@ -70,4 +72,5 @@ reason in the table's `Error` column or after the status
 - Do NOT fix build errors — that is the verify stage's job
 - Do NOT run tests — that is the verify stage's job
 - Do NOT modify `docs/plan.md`
-- You MUST create `.konveyor/handoff.md` with your `## Execute` section before finishing
+- You MUST write your `## Execute` section to `.konveyor/handoff.md` before
+  finishing, without removing anything an earlier stage wrote there

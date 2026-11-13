@@ -31,6 +31,10 @@ Execute in order. After each phase, run the project build and stop if it fails.
 5. **Lifecycle** — Replace server-specific lifecycle listeners with Quarkus startup/shutdown events. See `modules/lifecycle.md`.
 6. **Cleanup** — Delete legacy files, remove weblogic/jboss stubs, verify no javax.* EE imports remain. See `modules/cleanup.md`.
 
+## Decisions before planning
+
+Some choices this migration forces are not in the code: the production database, the messaging broker, what happens to a server-rendered view layer, how users authenticate, who calls a remote EJB. `references/decisions.md` lists them, with the evidence that settles each without asking, the options, and a default recommendation. Read it before planning, or when asking a human about the application.
+
 ## How to use
 
 Load each phase's module when starting that phase. Each module contains before/after code examples and references mapping tables in `references/`. Apply every applicable transformation to the codebase.

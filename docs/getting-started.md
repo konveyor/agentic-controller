@@ -214,7 +214,7 @@ kubectl get pods -n agentic-controller-system
 
 Deploy the default domain resources — the SkillCards and SkillCollection
 that make up the skill catalog, plus the Agents and the
-`java-ee-to-quarkus` AgentWorkflow the UI presents for users to run
+`java-ee-to-quarkus` AgentWorkflows the UI presents for users to run
 (these are not included in `make deploy` to avoid name-prefix mangling
 the cross-references between them). This is the same content the operator
 installs on enable. They must land in the Hub namespace (see step 2) or
@@ -340,8 +340,9 @@ kubectl -n "$KONVEYOR_NS" port-forward svc/tackle-hub 8080:8080 &
 curl -s http://localhost:8080/agentic/agents | jq -r '.[].name'
 ```
 
-You should see the default Agents (`migration-plan-agent`,
-`migration-execute-agent`, `migration-verify-agent`). A `500` with
+You should see the default Agents (`migration-interrogate-agent`,
+`migration-plan-agent`, `migration-execute-agent`,
+`migration-verify-agent`). A `500` with
 `is forbidden` in the body means the
 RBAC or the namespace is wrong — see
 [Troubleshooting](#troubleshooting). Add `-u admin:admin` once
@@ -626,15 +627,16 @@ nothing here is auto-installed:
 | `agentrun_example.yaml` | AgentRun | Triggers the example agent |
 
 **Defaults** (`config/defaults/`) are the curated content the operator
-installs on enable — the skill catalog plus the Agents and AgentWorkflow
+installs on enable — the skill catalog plus the Agents and AgentWorkflows
 the UI runs. Apply them with `kubectl apply -k config/defaults/ -n "$KONVEYOR_NS"`:
 
 | File | Kind | Description |
 |------|------|-------------|
-| `skillcard_*.yaml` | SkillCard | Migration-stage skills (plan, execute, verify, javaee-to-quarkus, house-rules) |
+| `skillcard_*.yaml` | SkillCard | Migration-stage skills (interrogate, plan, execute, verify, javaee-to-quarkus, house-rules) |
 | `skillcollection_java_migration.yaml` | SkillCollection | Grouped migration skills |
-| `agent_migration_*.yaml` | Agent | Plan, execute, and verify stage agents (no gateway — named at run time) |
-| `agentworkflow_javaee_to_quarkus.yaml` | AgentWorkflow | Three-stage Java EE → Quarkus workflow |
+| `agent_migration_*.yaml` | Agent | Interrogate, plan, execute, and verify stage agents (no gateway — named at run time) |
+| `agentworkflow_javaee_to_quarkus.yaml` | AgentWorkflow | Three-stage Java EE → Quarkus workflow (plan, execute, verify); asks a human nothing |
+| `agentworkflow_javaee_to_quarkus_attended.yaml` | AgentWorkflow | The same workflow with an interrogate stage first, which asks a human about the application before planning; needs a viewer attached to the run |
 
 ## Local development
 

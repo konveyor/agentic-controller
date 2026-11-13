@@ -150,7 +150,7 @@ while writing up — run this step again first.
 
 You MUST complete this step.
 
-Append a `## Verify` section to `.konveyor/handoff.md` (the execute stage created
+Append a `## Verify` section to `.konveyor/handoff.md` (an earlier stage created
 the file). Do NOT overwrite the `## Execute` section or any earlier content.
 
 Record the overall status, the build/test/runtime results, and a one-sentence
