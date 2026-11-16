@@ -1,6 +1,6 @@
 # Agent Entry Point (`migration-harness`)
 
-**Minimal single-stage entry point (bookends only)** that handles git plumbing, parameter delivery, and [goose](https://github.com/block/goose) runtime lifecycle for AI agent workloads. It is the reference implementation of the [Agent Entry Point Contract](../docs/entry-point.md).
+**Minimal single-stage entry point** that handles git plumbing, parameter delivery, and agent runtime lifecycle for AI agent workloads. The standard agent images use Lightspeed's DeepAgents runtime. It is the reference implementation of the [Agent Entry Point Contract](../docs/entry-point.md).
 
 The entry point manages workspace setup and teardown only — all migration intelligence, tool use, and git commits belong to the agent runtime and its [SkillCards](../CONTEXT.md).
 
@@ -17,7 +17,7 @@ The entry point manages workspace setup and teardown only — all migration inte
 │  2. Resolve app + git creds from Hub API (if configured) │
 │  3. Clone repo, configure author, strip push creds       │
 │  4. Write analysis insights to .konveyor/ (uncommitted)  │
-│  5. Start goose serve (ACP loopback :4001)               │
+│  5. Start agent runtime (ACP loopback :4001)             │
 │  6. Discover skills and assemble layered prompt          │
 │  7. Start ACP tee (:4000) for live streaming & HITL      │
 │  8. Start filesystem watcher (incremental push)          │
@@ -33,14 +33,16 @@ The entry point manages workspace setup and teardown only — all migration inte
 └──────────────────────────────────────────────────────────┘
 ```
 
-The entry point sends **one prompt** per stage. The AgentWorkflowRun controller handles stage sequencing — the entry point binary is identical in every stage image.
+The entry point sends one primary prompt per stage and can send a handoff prompt
+in the same session when a limit is reached. The AgentWorkflowRun controller
+handles stage sequencing; the harness binary is identical in every stage image.
 
 ---
 
 ## Prerequisites
 
-- **Go 1.21+** (to build)
-- **[goose](https://github.com/block/goose)** (started by the entry point via `goose serve`)
+- **Go**, at the version declared in `go.mod` (to build)
+- **Lightspeed runtime and Python dependencies**, supplied by the standard agent images
 - **git**
 
 ---
@@ -55,6 +57,17 @@ go build -o migration-harness ./cmd/migration-harness/
 ---
 
 ## Configuration
+
+The [Lightspeed integration](../docs/lightspeed-runtime-prototype.md) uses the
+same harness and ACP tee. The standard base image sets
+`HARNESS_RUNTIME=lightspeed`, inherited by all language images. It reports token
+usage and supports same-session handoff; positive `maxCost` budgets are rejected
+because the runtime does not yet report monetary cost. `HARNESS_ACP_TEE=off` is
+also unsupported for Lightspeed.
+
+For standalone compatibility, an unset `HARNESS_RUNTIME` still selects Goose.
+That path requires a separately installed Goose binary; it is not included in
+the Lightspeed base image.
 
 Configuration comes from two sources: environment variables (required and optional) and the controller-mounted `/run/konveyor/params.json` file (execution controls and workflow/agent parameter values — see the Parameters section below).
 

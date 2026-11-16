@@ -2,7 +2,7 @@
 #
 # With DEBUG=true it prints every request body it receives to stdout, before
 # it validates the model and before it matches a rule. That is the assertion
-# surface for this test: what goose actually put on the wire, read back out of
+# surface for this test: what the runtime put on the wire, read back out of
 # kubectl logs, rather than something the run reports about itself.
 #
 # It runs in the test's own namespace rather than reusing the one in default,

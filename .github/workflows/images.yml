@@ -12,10 +12,6 @@ on:
       - 'api/**'
       - 'go.mod'
       - 'go.sum'
-      # agent-base-artifact now builds through .github/actions/goose-image, so an
-      # edit to that action changes what this workflow produces. Without these
-      # the arm64 leg -- which has no other consumer anywhere in CI -- would
-      # not run at all on a PR that only touches the action.
       - '.github/actions/**'
       - '.github/workflows/images.yml'
   pull_request:
@@ -37,12 +33,29 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should-build: ${{ steps.check-changes.outputs.should-build }}
+      build-revision: ${{ steps.source.outputs.build-revision }}
+      pr-head-revision: ${{ steps.source.outputs.pr-head-revision }}
+      image-tag-prefix: ${{ steps.source.outputs.image-tag-prefix }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Record image source revisions
+        id: source
+        env:
+          PR_HEAD_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          echo "build-revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "pr-head-revision=${PR_HEAD_REVISION}" >> "$GITHUB_OUTPUT"
+          if [[ -n "$PR_NUMBER" ]]; then
+            echo "image-tag-prefix=pr${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image-tag-prefix=sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Did only non-code files change?
         id: code-changes
@@ -152,24 +165,40 @@ jobs:
         with:
           persist-credentials: false
 
-      # Same ~35 minute goose compile the e2e job pays for, on two runners
-      # here. image-build-push.yml deliberately does not use this: the
-      # published images build goose from source.
-      - name: Restore the prebuilt goose image
-        id: goose
-        uses: ./.github/actions/goose-image
-
       - name: Build and upload agent-base artifact
         uses: konveyor/ci/build-image@e45ec039d03d41be52ae0c9abef260ee3ae8172a # main
         with:
           repo: ${{ github.repository }}
           checked_out: true
           image_name: agent-base
-          image_tag: pr${{ github.event.pull_request.number }}-${{ matrix.arch }}
+          image_tag: ${{ needs.check-changes.outputs.image-tag-prefix }}-${{ matrix.arch }}
           dockerfile_path: images/agent-base/Containerfile
           build_context: "."
-          build_args: GOOSE_IMAGE=${{ steps.goose.outputs.image }}
+          build_args: >-
+            CONTROLLER_REVISION=${{ needs.check-changes.outputs.build-revision }}
+            CONTROLLER_PR_HEAD_REVISION=${{ needs.check-changes.outputs.pr-head-revision }}
           cache-key-file: harness/go.sum
+
+      - name: Verify image provenance
+        env:
+          IMAGE: localhost/agent-base:${{ needs.check-changes.outputs.image-tag-prefix }}-${{ matrix.arch }}
+          PR_HEAD_REVISION: ${{ needs.check-changes.outputs.pr-head-revision }}
+        run: |
+          revision=$(git rev-parse HEAD)
+          runtime_revision=$(sed -n 's/^ARG LIGHTSPEED_REVISION=//p' images/agent-base/Containerfile)
+          labels=$(podman image inspect "$IMAGE" | jq '.[0] | .Labels // .Config.Labels')
+          jq -e --arg revision "$revision" --arg head "$PR_HEAD_REVISION" --arg runtime "$runtime_revision" '
+            .["org.opencontainers.image.revision"] == $revision and
+            .["io.konveyor.controller.pr-head-revision"] == $head and
+            .["io.konveyor.lightspeed.revision"] == $runtime
+          ' <<< "$labels"
+          # A stale/nightly base fallback cannot pass the source-label checks.
+          {
+            echo "### $IMAGE"
+            echo "Build revision: $revision; PR head: $PR_HEAD_REVISION"
+            echo "Labels: $labels"
+            sha256sum image_artifact/*.tar
+          } >> "$GITHUB_STEP_SUMMARY"
 
   agent-lang-images-artifact:
     needs:
@@ -209,13 +238,34 @@ jobs:
           repo: ${{ github.repository }}
           checked_out: true
           image_name: ${{ matrix.image.name }}
-          image_tag: pr${{ github.event.pull_request.number }}-${{ matrix.arch_info.arch }}
+          image_tag: ${{ needs.check-changes.outputs.image-tag-prefix }}-${{ matrix.arch_info.arch }}
           dockerfile_path: ${{ matrix.image.containerfile }}
           build_context: "."
-          base_image: agent-base--pr${{ github.event.pull_request.number }}-${{ matrix.arch_info.arch }}
+          base_image: agent-base--${{ needs.check-changes.outputs.image-tag-prefix }}-${{ matrix.arch_info.arch }}
           base_image_arg: BASE_IMAGE
 
-  # PR-time build check only. The versioned build+push of the controller
+      - name: Verify image provenance
+        env:
+          IMAGE: localhost/${{ matrix.image.name }}:${{ needs.check-changes.outputs.image-tag-prefix }}-${{ matrix.arch_info.arch }}
+          PR_HEAD_REVISION: ${{ needs.check-changes.outputs.pr-head-revision }}
+        run: |
+          revision=$(git rev-parse HEAD)
+          runtime_revision=$(sed -n 's/^ARG LIGHTSPEED_REVISION=//p' images/agent-base/Containerfile)
+          labels=$(podman image inspect "$IMAGE" | jq '.[0] | .Labels // .Config.Labels')
+          jq -e --arg revision "$revision" --arg head "$PR_HEAD_REVISION" --arg runtime "$runtime_revision" '
+            .["org.opencontainers.image.revision"] == $revision and
+            .["io.konveyor.controller.pr-head-revision"] == $head and
+            .["io.konveyor.lightspeed.revision"] == $runtime
+          ' <<< "$labels"
+          # A stale/nightly base fallback cannot pass the source-label checks.
+          {
+            echo "### $IMAGE"
+            echo "Build revision: $revision; PR head: $PR_HEAD_REVISION"
+            echo "Labels: $labels"
+            sha256sum image_artifact/*.tar
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # PR-time controller archive. The versioned build+push of the controller
   # image lives in image-build-push.yml (filter-free so tag pushes fire).
   controller:
     needs: check-changes
@@ -230,8 +280,30 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build image
-        run: make docker-build
+      - name: Build and archive controller image
+        env:
+          IMAGE_TAG: ${{ needs.check-changes.outputs.image-tag-prefix }}-amd64
+          PR_HEAD_REVISION: ${{ needs.check-changes.outputs.pr-head-revision }}
+        run: |
+          image="localhost/agentic-controller:${IMAGE_TAG}"
+          revision=$(git rev-parse HEAD)
+          docker build -t "$image" \
+            --label "org.opencontainers.image.revision=$revision" \
+            --label "io.konveyor.controller.pr-head-revision=$PR_HEAD_REVISION" .
+          mkdir -p image_artifact
+          docker save "$image" -o "image_artifact/agentic-controller--${IMAGE_TAG}.tar"
+          {
+            echo "### $image"
+            echo "Build revision: $revision; PR head: $PR_HEAD_REVISION"
+            sha256sum image_artifact/*.tar
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload controller image archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: agentic-controller--${{ needs.check-changes.outputs.image-tag-prefix }}-amd64
+          path: image_artifact/*.tar
+          retention-days: 7
 
   images:
     if: ${{ always() }}

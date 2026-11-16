@@ -5,12 +5,12 @@ description: "Reuse Lightspeed's DeepAgents runtime and its inspection behavior 
 status: accepted
 status_note: "Approves Konveyor direction only; implementation, backend qualification, and Lightspeed agreement are separate."
 date: "2026-10-20"
-last_updated: null
+last_updated: "2026-11-16"
 authors:
   - "David Zager"
-last_reviewed: "2026-11-04"
-implementation_status: deferred
-review_note: "Runtime reuse and custom-image execution were demonstrated separately. Full runtime adoption requires compatibility work for existing interaction, execution controls, session continuation, and inspection behavior. Operator placement, credential delivery, and lifecycle design remain open. Production integration is unimplemented."
+last_reviewed: "2026-11-16"
+implementation_status: amended
+review_note: "The harness integrates the reusable Lightspeed runtime and official ACP; standard base and language images select Lightspeed. Monetary usage/maxCost support and full qualification remain incomplete. Operator placement, credential delivery, and lifecycle design remain open."
 relates_to:
   - "0001"
   - "0004"
@@ -20,6 +20,19 @@ relates_to:
 ---
 
 # ADR 0021: Shared Runtime and Conditional Lightspeed Execution
+
+**Update (2026-11-16):** Package the reusable runtime integration in the existing
+`agent-base` image and its language-image descendants, replacing the packaged
+Goose runtime. The image selects Lightspeed through `HARNESS_RUNTIME`; the
+standalone harness retains its existing unset-runtime behavior for compatibility.
+This advances the earlier default-runtime boundary without changing the direct
+Agent Sandbox backend or the controller's responsibilities. The runtime fork
+now exposes its prepared graph to official `AgentServerACP`, preserving model
+inspection and inspection-approved live output and viewer replay. The integration
+uses pinned private ACP helpers with compatibility tests. Positive `maxCost`
+budgets still fail before execution because monetary usage is unavailable;
+preserving monetary enforcement remains a full-adoption requirement. The integration and its remaining limits are described in the
+[harness runtime guide](../lightspeed-runtime-prototype.md).
 
 ## Context
 

@@ -1,0 +1,6 @@
+kind: breaking
+description: >
+  Replace Goose in the standard agent images with Lightspeed DeepAgents,
+  retaining ACP interactions, same-session handoff, and token reporting.
+  Positive maxCost budgets are rejected until the runtime provides monetary
+  usage; the harness does not silently ignore those budgets.
