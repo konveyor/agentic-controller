@@ -386,11 +386,14 @@ Child acceptance cannot authorize a parent result. Child graph frames stay
 internal, matching the existing runtime. Pending output is bounded to 256
 results and 8 MiB, with failure rather than release when those limits are exceeded.
 
-The runtime fork remains based on 5ea23f3. It preserves that baseline's checks,
-trusts successful registered local human answers and accepts classifier reasoning
-blocks only as metadata before parsing the actual decision. Current upstream
-a23005e8 moved middleware and added default-on redaction/shaping improvements.
-Those require reconciliation before claiming current-upstream safety parity.
+At the November 11 review, runtime 2291ce9 was based on 5ea23f3. It preserved
+that baseline's checks, trusted successful registered local human answers and
+accepted classifier reasoning blocks only as metadata before parsing the decision.
+The November 17 rebase at 451818c incorporates upstream 7cb8d1d, including its
+combined redaction/inspection middleware and resilient shaping. Native graph
+regressions cover sanitized model input, checkpoints, live output, replay and
+tool spans. The integration guide records current verification; the source links
+below retain the November 11 discussion's exact revisions.
 Tool-output inspection is not a general command-safety guarantee.
 
 Current upstream inspection and approved-result streaming:

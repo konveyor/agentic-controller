@@ -37,7 +37,7 @@ RUN dnf install -y \
 # Source and dependency pins are shared by local, PR, and release builds.
 # Git is also required by the frozen deepagents-acp dependency during uv sync.
 ARG LIGHTSPEED_REPOSITORY=https://github.com/djzager/lightspeed-agentic-sandbox.git
-ARG LIGHTSPEED_REVISION=2291ce9e449976d080dd1a287a72a4e8c12f2359
+ARG LIGHTSPEED_REVISION=451818c50d6c93a8ab7085cf0c70b15510b6ca75
 ARG UV_VERSION=0.8.11
 ARG CONTROLLER_REVISION=unknown
 ARG CONTROLLER_PR_HEAD_REVISION=unknown

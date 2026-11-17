@@ -14,11 +14,11 @@ binary retains its Goose default when `HARNESS_RUNTIME` is unset.
 
 ## Runtime and configuration
 
-The companion [runtime contribution at `2291ce9`](https://github.com/djzager/lightspeed-agentic-sandbox/tree/2291ce9e449976d080dd1a287a72a4e8c12f2359)
-starts from upstream `5ea23f34ad2ad5fc01fb6264fb9304116664dd3d`.
+The companion [runtime contribution at `451818c`](https://github.com/djzager/lightspeed-agentic-sandbox/tree/451818c50d6c93a8ab7085cf0c70b15510b6ca75)
+is rebased on upstream `7cb8d1dd207a026127d0d37a2f40bd71bd253b82`.
 It retains graph state and model clients across prompts, supports human
 questions/approval, steering and cancellation, and provides optional ACP through
-an official `AgentServerACP`. The [runtime ACP contract](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/README.md)
+an official `AgentServerACP`. The [runtime ACP contract](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/README.md)
 documents inspection, approved output release, replay and compatibility tests.
 
 The harness maps existing Gateway provider/model configuration to Lightspeed.
@@ -38,10 +38,12 @@ provider-specific and optional.
 
 Official ACP is pinned to `deepagents-acp` 0.0.13 at
 `f2a6e02dc8e2dcb05885c5133b94102ccc79b794`. Five private overrides require
-compatibility tests when upgrading. The November 11 source review of upstream
-runtime `a23005e8f9ed0edc6e430072f50e4698590de71f` found later redaction/shaping
-changes that still require reconciliation with the fork. Baseline inspection
-preservation does not establish current-upstream safety parity.
+compatibility tests when upgrading. The November 17 rebase incorporates
+upstream's tool-output redaction and resilient structured-output shaping.
+ACP uses the same redaction configuration as batch execution. Native graph
+regressions check sanitized model input, checkpoints, live output, replay and
+tool-span results with inspection enabled and disabled. These offline checks
+do not establish live classifier accuracy or complete production qualification.
 
 ## Verification and presentation
 
@@ -63,6 +65,12 @@ cover automatic execution, approval, a human answer, active cancellation,
 steering/reconnect, and turn-limit handoff. It checks usage, verification, Git
 results and token cleanup. Its scripted classifier approves tool results;
 rejection and inspection/replay boundary regressions belong in the runtime fork.
+
+November 17 verification of `451818c` passed all six harness cases, 79 focused
+session/native/transport tests and the full runtime suite (2,176 passed,
+13 skipped, seven subtests). Ruff, formatting, mypy and hermetic dependency
+coverage checks passed; the latter retains the existing resolver version-skew
+warnings. No live provider or cluster run was performed for this rebase.
 
 The November 11 verification of `2291ce9` passed six local harness cases and 23
 native graph/ACP cases, plus the runtime suite (2,119 passed, 13 skipped), Ruff,
