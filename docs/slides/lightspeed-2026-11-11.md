@@ -1,9 +1,10 @@
 ---
+
 marp: true
 theme: konveyor
 paginate: true
 title: Adopting Lightspeed’s DeepAgents runtime in Konveyor
-description: Konveyor setup, runtime changes and planning demonstration
+description: Current Lightspeed prototype, coverage and two recorded-run plans
 author: David Zager
 style: |
   section.diagram { justify-content: flex-start; }
@@ -17,6 +18,7 @@ style: |
   section.technical p:last-of-type { font-size: 23px; }
   section.demo { font-size: 25px; }
   section.demo h1 { font-size: 46px; }
+
 ---
 
 <!-- _class: lead -->
@@ -25,7 +27,7 @@ style: |
 
 # Adopting Lightspeed’s DeepAgents runtime in Konveyor
 
-November 11, 2026
+November 18, 2026
 
 <!--
 15 seconds.
@@ -39,13 +41,16 @@ Source: accepted ADR 0021
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
+
 ---
+
 # Runtime integration
 
 - Konveyor with Goose
 - The prototype with Lightspeed
 - Changes in Lightspeed’s runtime
-- Coolstore planning demo
+- Coverage and accepted limits
+- Two recorded runs
 - Questions
 
 <!--
@@ -53,12 +58,15 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 First show our setup with Goose, then the prototype with Lightspeed in its
 place. Explain the changes we made in your runtime before showing the demo.
-The technical runtime changes come before the demo. A dedicated Questions
-slide follows the demo, then the operator adoption problems and roadmap discussion.
+The current prototype and technical changes come before coverage and the two
+recorded-run plans. Open the conversation after those, then use the separate
+operator material if useful. No ownership split or contribution boundary is proposed.
 ADR 0021 separates runtime reuse, operator qualification and later resource migration.
 -->
 
+
 ---
+
 <!-- _class: diagram -->
 
 # Konveyor with Goose
@@ -80,7 +88,9 @@ https://github.com/konveyor/agentic-controller/blob/369070c659a71cecf50d57c376cb
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
+
 ---
+
 <!-- _class: diagram -->
 
 # Konveyor with Lightspeed
@@ -111,40 +121,50 @@ Current implementation:
 ../lightspeed-runtime-prototype.md
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
-# Runtime changes and why we need them
+# Current prototype changes
 
-- **Keep the conversation:** retain the graph and clients so the harness can request a handoff in a later prompt.
-- **Reuse official ACP:** connect Lightspeed to our UI through `AgentServerACP`, while preserving user control.
-- **Keep output inspection:** release tool results to viewers after inspection passes, including during replay.
-- **Report execution accurately:** count model turns, report usage, apply model settings and detect incomplete responses.
+- Retain the conversation and model clients across prompts.
+- Connect the prepared runtime to official `AgentServerACP`.
+- Preserve questions, approvals, steering and cancellation.
+- Gate tool output, report usage and enforce model-turn limits.
 
-The harness still owns Hub, verification and Git push.
+**31 changed files, including 18 production files.** About 2,150 added production lines and 2,700 added test lines.
+
+[Runtime fork `451818c`](https://github.com/djzager/lightspeed-agentic-sandbox/compare/7cb8d1dd207a026127d0d37a2f40bd71bd253b82...451818c50d6c93a8ab7085cf0c70b15510b6ca75) · [Controller PR #345 (draft)](https://github.com/konveyor/agentic-controller/pull/345) · [UI PR #3738](https://github.com/konveyor/tackle2-ui/pull/3738)
 
 <!--
-40 seconds. This is the short summary. The following slides show the source
-boundaries behind each change so we can discuss what belongs in Lightspeed.
+45 seconds.
 
-We are reusing Lightspeed's DeepAgents preparation, tools, skills, MCP and
-inspection. Konveyor-specific Hub/Git work remains in our Go harness. The
-runtime changes preserve interactions and execution controls required by ADR
-0021. We do not ask Lightspeed to own our application inventory or Git push.
+This is the complete current prototype, not a claim of a small transport-only
+patch. The 31-file diff is against upstream 7cb8d1d. Approximately 2,150 added
+lines are in 18 production files and approximately 2,700 added lines are tests;
+the remainder includes dependency/configuration and documentation changes.
+These counts describe review scope, not code quality or an ownership proposal.
 
-The revised ACP implementation uses the official AgentServerACP prompt loop.
-The separate demo was recorded with the previous custom ACP implementation at
-4039163. It demonstrates that earlier implementation, not the revised ACP path.
-The runtime is still a prototype, with monetary accounting and current-upstream
-inspection reconciliation remaining adoption work.
+We reuse Lightspeed's DeepAgents preparation, tools, skills, MCP, redaction and
+inspection. The complete prototype also includes integration code around graph
+lifetime, runtime controls, ACP hosting, inspected publication and replay.
+Our Go harness continues to own Hub/Git preparation, verification and push.
+Show what exists and open a conversation about its scope and where code belongs.
+Implementation is frozen for the November 18 discussion. No redesign or chosen
+ownership split is part of this meeting.
 
-Accepted requirement:
-https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
-Official ACP implementation:
-https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L924-L1155
+Current frozen revisions:
+Runtime 451818c50d6c93a8ab7085cf0c70b15510b6ca75
+Controller PR345: 4c036c931666de10dd7c1620928c2e34f8ae17ae
+UI PR3738: ed11b648799322f566b84db309f371c138713cdd
+Current integration guide: ../lightspeed-runtime-prototype.md
+The existing video at 4039163 records the earlier custom ACP adapter and cannot
+validate these later changes. New-runtime recording remains pending.
 -->
 
 ---
+
 <!-- _class: technical -->
 
 # A second prompt in the same conversation
@@ -155,7 +175,7 @@ https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102c
 
 **Why Konveyor needs it:** after the primary prompt reaches `maxTurns`, the harness sends another `session/prompt` request to write a handoff before finalization.
 
-Sources: [current query path](https://github.com/openshift/lightspeed-agentic-sandbox/blob/a23005e8f9ed0edc6e430072f50e4698590de71f/src/lightspeed_agentic/providers/deepagents.py#L999-L1016), [session preparation](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session.py#L106-L139)
+Sources: [current query path](https://github.com/openshift/lightspeed-agentic-sandbox/blob/7cb8d1dd207a026127d0d37a2f40bd71bd253b82/src/lightspeed_agentic/providers/deepagents.py), [session preparation](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py)
 
 <!--
 25–30 seconds.
@@ -180,19 +200,21 @@ dedicated handoff or turn-limit notification. The harness reserves part of the
 run budget for that request, then verifies and pushes as usual.
 
 Current upstream graph/current-prompt construction and cleanup:
-https://github.com/openshift/lightspeed-agentic-sandbox/blob/a23005e8f9ed0edc6e430072f50e4698590de71f/src/lightspeed_agentic/providers/deepagents.py#L811-L815
-https://github.com/openshift/lightspeed-agentic-sandbox/blob/a23005e8f9ed0edc6e430072f50e4698590de71f/src/lightspeed_agentic/providers/deepagents.py#L999-L1016
-https://github.com/openshift/lightspeed-agentic-sandbox/blob/a23005e8f9ed0edc6e430072f50e4698590de71f/src/lightspeed_agentic/providers/deepagents.py#L1135-L1140
+https://github.com/openshift/lightspeed-agentic-sandbox/blob/7cb8d1dd207a026127d0d37a2f40bd71bd253b82/src/lightspeed_agentic/providers/deepagents.py
+https://github.com/openshift/lightspeed-agentic-sandbox/blob/7cb8d1dd207a026127d0d37a2f40bd71bd253b82/src/lightspeed_agentic/providers/deepagents.py
+https://github.com/openshift/lightspeed-agentic-sandbox/blob/7cb8d1dd207a026127d0d37a2f40bd71bd253b82/src/lightspeed_agentic/providers/deepagents.py
 Official ACP stable session/thread and checkpointer:
 https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L792-L802
 https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L964-L974
 Retained runtime resources:
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session.py#L106-L139
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/providers/deepagents.py#L1012-L1038
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/deepagents.py
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # Lightspeed behind the official ACP server
@@ -203,7 +225,7 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 **Why Konveyor needs it:** our harness and UI can keep using ACP while the runtime reuses the official protocol implementation.
 
-Sources: [official server](https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L222-L274), [Lightspeed adapter](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/official.py#L16-L101)
+Sources: [official server](https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L222-L274), [Lightspeed adapter](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/official.py)
 
 <!--
 25–30 seconds.
@@ -233,11 +255,13 @@ The optional dependency pins deepagents-acp source f2a6e02dc8e2dcb05885c5133b941
 (package 0.0.13), with ACP SDK 0.10.1.
 
 Revised-path qualification uses the real Go harness, native graph, inspection,
-tools, ACP and local Git with scripted HTTP model and Hub services. Six harness
-cases cover auto, approve, questions, cancellation, steering/reconnect and
-max-turn handoff. The 23 native regression cases separately exercise the graph/ACP contract,
-including nested agents and independent child/parent inspection. There was no fresh UI or cluster run of this implementation. The
-recording remains evidence for the earlier custom adapter at 4039163.
+tools, ACP and local Git with scripted HTTP model and Hub services. Six harness cases cover auto, approve, questions, cancellation, steering/reconnect
+and max-turn handoff. November 17 verification at451818c also passed 79 focused
+session/native/transport tests and 2,176 full-suite tests, with 13 skipped and seven
+subtests. Native cases include child/parent inspection and upstream redaction.
+These use scripted model/classifier inputs and do not establish live classifier
+accuracy. A new live-provider recording of 451818c remains pending; the older
+4039163 recording covers its earlier custom adapter only.
 
 ACP remains an optional dependency and entrypoint. Our controller creates and
 watches Kubernetes resources. It does not connect to ACP. Our Go harness tee
@@ -247,17 +271,19 @@ Official graph factory and prompt loop:
 https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L222-L274
 https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L924-L1155
 Adapter, native graph gate and host execution:
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/official.py#L16-L101
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/runtime_graph.py#L48-L140
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/server.py#L433-L517
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/__main__.py
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/README.md
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/pyproject.toml#L26-L33
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/tests/test_acp_native.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/official.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/runtime_graph.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/server.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/__main__.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/README.md
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/pyproject.toml
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/tests/test_acp_native.py
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # User control during execution
@@ -268,7 +294,7 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 **Why Konveyor needs it:** users already supervise runs through the UI. The runtime must return control while the harness can still finalize the workload.
 
-Sources: [callbacks and controls](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session.py#L257-L410), [local shell execution](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session_backend.py#L16-L95)
+Sources: [callbacks and controls](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py), [local shell execution](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session_backend.py)
 
 <!--
 25–30 seconds.
@@ -296,17 +322,19 @@ adapter must retain the stronger local session cancellation behavior. This is
 runtime cancellation inside a live workload. Operator termination is separate.
 
 Callbacks, steering, cancellation and history repair:
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session.py#L24-L42
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session.py#L257-L314
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session.py#L257-L410
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session_backend.py#L16-L95
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session_backend.py
 Official cancellation behavior:
 https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L508-L510
 https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L1024-L1027
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # Turn limits, usage and the handoff prompt
@@ -317,7 +345,7 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 **Why Konveyor needs it:** show usage during the run, stop the primary prompt at its allowance, then send a handoff prompt using reserved turns.
 
-Sources: [usage reporting](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/providers/deepagents.py#L370-L401), [turn counter](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session.py#L83-L104)
+Sources: [usage reporting](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/deepagents.py), [turn counter](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py)
 
 <!--
 25–30 seconds.
@@ -339,19 +367,23 @@ Only main-model completions consume the prompt's turn allowance. Isolated
 inspection-classifier calls remain excluded. These are observations, not
 context occupancy or complete billing. Absent usage remains absent and a
 measured zero stays zero. No monetary cost is supplied, so the harness rejects
-configured maxCost before execution. Full-adoption cost behavior remains work
-in the runtime, as ADR 0021 requires.
+configured maxCost before execution. Loss of monetary budget enforcement is
+accepted for runtime adoption by the November 17 ADR 0021 amendment. It is not
+an adoption gate. Existing token-accounting research remains follow-up work;
+never imply that configured maxCost is silently enforced.
 
 Baseline totals:
-https://github.com/openshift/lightspeed-agentic-sandbox/blob/a23005e8f9ed0edc6e430072f50e4698590de71f/src/lightspeed_agentic/providers/deepagents.py#L1156-L1160
+https://github.com/openshift/lightspeed-agentic-sandbox/blob/7cb8d1dd207a026127d0d37a2f40bd71bd253b82/src/lightspeed_agentic/providers/deepagents.py
 Completion observation and turn limit:
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/providers/deepagents.py#L370-L401
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session.py#L83-L104
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session.py#L340-L383
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/deepagents.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # Inspection before model and viewer access
@@ -362,7 +394,7 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 **Why Konveyor needs it:** files and MCP output can contain hostile instructions. Switching transports must preserve both model inspection and approved viewer release.
 
-Sources: [Lightspeed inspection](https://github.com/openshift/lightspeed-agentic-sandbox/blob/a23005e8f9ed0edc6e430072f50e4698590de71f/src/lightspeed_agentic/providers/tool_result_middleware.py#L232-L296), [approved output gate](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/runtime_graph.py#L48-L140)
+Sources: [Lightspeed inspection](https://github.com/openshift/lightspeed-agentic-sandbox/blob/7cb8d1dd207a026127d0d37a2f40bd71bd253b82/src/lightspeed_agentic/providers/tool_result_middleware.py), [approved output gate](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/runtime_graph.py)
 
 <!--
 25–30 seconds.
@@ -392,24 +424,26 @@ accepted classifier reasoning blocks only as metadata before parsing the decisio
 The November 17 rebase at 451818c incorporates upstream 7cb8d1d, including its
 combined redaction/inspection middleware and resilient shaping. Native graph
 regressions cover sanitized model input, checkpoints, live output, replay and
-tool spans. The integration guide records current verification; the source links
-below retain the November 11 discussion's exact revisions.
+tool spans. The integration guide records current verification. The runtime source links
+point to the frozen 451818c prototype.
 Tool-output inspection is not a general command-safety guarantee.
 
 Current upstream inspection and approved-result streaming:
-https://github.com/openshift/lightspeed-agentic-sandbox/blob/a23005e8f9ed0edc6e430072f50e4698590de71f/src/lightspeed_agentic/providers/tool_result_middleware.py#L205-L296
-https://github.com/openshift/lightspeed-agentic-sandbox/blob/a23005e8f9ed0edc6e430072f50e4698590de71f/src/lightspeed_agentic/providers/deepagents.py#L1030-L1046
+https://github.com/openshift/lightspeed-agentic-sandbox/blob/7cb8d1dd207a026127d0d37a2f40bd71bd253b82/src/lightspeed_agentic/providers/tool_result_middleware.py
+https://github.com/openshift/lightspeed-agentic-sandbox/blob/7cb8d1dd207a026127d0d37a2f40bd71bd253b82/src/lightspeed_agentic/providers/deepagents.py
 Official raw live output:
 https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L1068-L1107
 Runtime inspection/parser and ACP gate:
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/inspection/middleware.py#L50-L184
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/inspection/client.py#L101-L130
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/runtime_graph.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/tool_result_middleware.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/tool_result_middleware.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/runtime_graph.py
 Inspection/replay compatibility tests live with the runtime implementation:
-https://github.com/djzager/lightspeed-agentic-sandbox/tree/2291ce9e449976d080dd1a287a72a4e8c12f2359/tests
+https://github.com/djzager/lightspeed-agentic-sandbox/tree/451818c50d6c93a8ab7085cf0c70b15510b6ca75/tests
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # Viewer replay without reopening rejected output
@@ -422,7 +456,7 @@ https://github.com/djzager/lightspeed-agentic-sandbox/tree/2291ce9e449976d080dd1
 
 **Version coupling:** five private overrides require a pinned `deepagents-acp` version and upgrade tests.
 
-Sources: [official replay](https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L818-L920), [Lightspeed replay](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/official.py#L41-L75)
+Sources: [official replay](https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L818-L920), [Lightspeed replay](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/official.py)
 
 <!--
 25–30 seconds.
@@ -456,13 +490,15 @@ authorized publication attempt does not prove a viewer received it.
 Official private replay and raw tool replay:
 https://github.com/langchain-ai/deepagents/blob/f2a6e02dc8e2dcb05885c5133b94102ccc79b794/libs/acp/deepagents_acp/server.py#L818-L920
 Lightspeed journal and private replay override:
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/server.py#L99-L123
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/official.py#L41-L75
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/server.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/official.py
 Offline feasibility evidence, separate from the updated runtime test results:
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/acp/README.md
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/acp/README.md
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # Applying the model settings we choose
@@ -473,7 +509,7 @@ https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1
 
 **Why Konveyor needs it:** the GLM demo selected low effort and a 16,384-token response allowance. Those choices must reach the model request.
 
-Sources: [provider mapping](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/providers/models/anthropic.py#L20-L36), [optional output allowance](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/config.py#L432-L443)
+Sources: [provider mapping](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/models/anthropic.py), [optional output allowance](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/config.py)
 
 <!--
 25–30 seconds.
@@ -497,13 +533,15 @@ cost accounting or monetary budget enforcement.
 
 Baseline thinking/output support and new effort mapping:
 https://github.com/openshift/lightspeed-agentic-sandbox/blob/5ea23f34ad2ad5fc01fb6264fb9304116664dd3d/src/lightspeed_agentic/providers/models/anthropic.py#L61-L74
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/providers/models/anthropic.py#L20-L36
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/models/anthropic.py
 Optional output allowance and application:
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/config.py#L432-L443
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/providers/deepagents.py#L767-L781
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/config.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/deepagents.py
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # Detecting a response that was cut short
@@ -514,7 +552,7 @@ https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1
 
 **Why Konveyor needs it:** a partial answer must not look like completed work. The harness still verifies the requested plan before pushing.
 
-Sources: [current finish-reason reporting](https://github.com/openshift/lightspeed-agentic-sandbox/blob/a23005e8f9ed0edc6e430072f50e4698590de71f/src/lightspeed_agentic/providers/deepagents.py#L280-L295), [execution gate](https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/providers/deepagents.py#L64-L80)
+Sources: [current finish-reason reporting](https://github.com/openshift/lightspeed-agentic-sandbox/blob/7cb8d1dd207a026127d0d37a2f40bd71bd253b82/src/lightspeed_agentic/providers/deepagents.py), [execution gate](https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/deepagents.py)
 
 <!--
 25–30 seconds.
@@ -539,80 +577,151 @@ a truthful runtime stop reason; it does not replace verification or prove that
 an answer is correct merely because it ended normally.
 
 Output cutoff boundary and retained session result handling:
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/providers/deepagents.py#L64-L80
-https://github.com/djzager/lightspeed-agentic-sandbox/blob/2291ce9e449976d080dd1a287a72a4e8c12f2359/src/lightspeed_agentic/session.py#L185-L245
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/deepagents.py
+https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py
+-->
+
+
+---
+
+<!-- _class: technical -->
+
+# Coverage and accepted limits
+
+**Prototype coverage:** questions, approvals, steering, session continuity, cancellation, turn-limit handoff and reconnect.
+
+**Tool output:** inspection and redaction before model and viewer release, including replay.
+
+**Accepted loss:** no monetary budget enforcement. A configured `maxCost` fails clearly before execution.
+
+Token observations are partial. Existing token-accounting research continues; monetary support is not an adoption gate.
+
+<!--
+35 seconds.
+
+The prototype covers Konveyor's runtime use cases except monetary budget
+enforcement. This is an implementation/qualification statement, not a claim that
+all controls appear in one new video. The planned normal run shows questions,
+approvals, steering, conversation continuity and observed usage. A separate
+controlled rejection run must show a real classifier rejection before the
+hostile result reaches the next model call or viewers.
+
+Cancellation, same-session max-turn handoff and steering/reconnect have identified
+regression evidence: hack/lightspeed-runtime/verify.py cases cancel, max-turns
+and steer-reconnect, plus tests/test_sessions.py and tests/test_acp_native.py in
+runtime 451818c. November 17 verification passed all six harness cases, 79 focused
+tests, 2,176 full-suite tests, 13 skips and seven subtests. Those checks use
+scripted model/classifier and Hub inputs. They do not establish live classifier
+quality, restart recovery, production hardening or a new cluster recording.
+
+Token observations exclude isolated inspection-classifier calls and do not
+constitute full billing. No monetary cost estimator or budget enforcement is
+supplied. Configuring maxCost must fail before work starts. The November 17
+ADR 0021 update accepts that loss for adoption and supersedes the earlier
+full-adoption requirement. Existing accounting research is follow-up.
+Current decision: ../adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
+Evidence and recording plan: lightspeed-2026-11-11-demo.md
 -->
 
 ---
+
 <!-- _class: demo -->
 
 # Coolstore planning demo
 
-A Java EE application we want to move to Quarkus
+**Run 1:** plan a Java EE application’s move to Quarkus.
 
-[Play the separate demo video (2:44)](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4)
+- Ask a question, review tool permissions and give guidance.
+- Keep the decisions through plan revisions in one conversation.
+- Show observed usage, review the plan, then verify and push it.
 
-**Recording: earlier custom ACP adapter at `4039163`.**
+**Current-runtime recording pending model access.**
 
-Code and result:
+[Walkthrough and evidence](lightspeed-2026-11-11-demo.md) · [Historical video (2:44)](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4)
 
-- [Konveyor harness integration: PR #345](https://github.com/konveyor/agentic-controller/pull/345) · [source changes](https://github.com/djzager/agentic-controller/compare/8c3c7cdabcf81ddd020c0374724af6a72adff40d...73a44d59f9e4cf6644ab4fc48f42211a7eff2548)
-- [Recorded runtime: custom ACP at 4039163](https://github.com/djzager/lightspeed-agentic-sandbox/compare/5ea23f34ad2ad5fc01fb6264fb9304116664dd3d...403916314aa4f869fc7733bef6e20fff32cf2680)
-- [Updated runtime: official ACP](https://github.com/djzager/lightspeed-agentic-sandbox/compare/403916314aa4f869fc7733bef6e20fff32cf2680...2291ce9e449976d080dd1a287a72a4e8c12f2359)
-- [Konveyor UI changes: djzager/tackle2-ui](https://github.com/djzager/tackle2-ui/compare/65d76136142966f23a6bf01d7765b948da433214...10dc62e6b44036920d3e050ee04d75343fc859a7)
-- [Reviewed plan: djzager/coolstore, docs/plan.md](https://github.com/djzager/coolstore/blob/9e97db02b641dc2608fcc399503bbc1a0ed3b842/docs/plan.md)
+Historical video uses `4039163` and does not validate today’s prototype.
 
 <!--
-3 minutes, including the 2 minute 44 second recording.
+Two separate recorded runs are planned for the November 18 discussion. This
+normal run is a planning deliverable, not a completed application migration.
+It should show the application, selected Agent/model, question and answer,
+approved tool calls, guidance uptake, preserved decisions, observed usage,
+reviewed file, harness verification and pushed Git result.
 
-Coolstore is our example application. This recording used runtime fork 4039163, before the official AgentServerACP
-implementation described above. It was not rerecorded or relabelled. The
-recorded approvals, question, steering, usage and result do not validate the
-updated ACP implementation. Separate scripted tests qualify that later change.
+New recordings remain pending. As of November 17 preparation, image CI
+44127290678 passed and the cluster uses its verified 451818c Java runtime and
+4c036c9 controller images. The restricted-UID redaction/ACP smoke check passed.
+Gateway 401 blocks a new provider recording.
+Use the current demo walkthrough for readiness and recording provenance.
+The required current revisions are 451818c runtime, controller 4c036c9 and
+UI ed11b648. Match source, deployed digest and imported runtime before recording.
 
-The live authenticated OpenShift run used
-GLM 5.3 through an Anthropic-compatible Gateway and the modified Lightspeed
-runtime inside our existing Go harness and Agent Sandbox.
-
-Show the database-reuse question and answer, reviewed tool permissions, and
-guidance taken up by the agent. The reviewer requested changes to the first
-plan, then approved the corrections and final commit. The harness ran all five
-planning checks and pushed commit 9e97db0. The run finished Succeeded, with
-Verified=True for that commit. Only docs/plan.md was added against the actual
-prepared checkout. Inspect the decision in that plan and the Git diff.
-
-The full run took 28 minutes 9 seconds. The recording contains 2 minutes 44 seconds
-of selected normal-speed interactions and labelled pauses to read the actual result.
-Idle waits are omitted. This is live-model evidence, separate
-from the November 9 scripted recording. Planning and passing planning checks
-do not establish a working application migration. Application build/tests and
-runtime/cutover checks remain future work.
-
-The runtime reported 33 native model calls, 563,794 input tokens, and 10,391 output
-tokens. Inspection-classifier calls are excluded and no monetary cost is supplied.
-The deployed image and imported runtime source were independently checked.
-Result:
+The existing separate MP4 is historical: it records 4039163 and the earlier
+custom ACP implementation. Its 164-second edit selected normal-speed portions
+from a 28m9s live Coolstore run, with idle waits omitted. That run produced
+commit 9e97db0, five passing planning checks and an unchanged application tree.
+It does not qualify the official ACP composition or rebased inspection path.
+Historical result:
 https://github.com/djzager/coolstore/blob/9e97db02b641dc2608fcc399503bbc1a0ed3b842/docs/plan.md
-
-Analysis/input revision:
-https://github.com/konveyor-ecosystem/coolstore/tree/32c1722efdf883f5f400170adb770a46a9b58116
-Actual pre-write checkout:
-https://github.com/konveyor-ecosystem/coolstore/tree/b5752b936f01acd858ca21fd2d3c4f03d3a6321e
-32c1722 is the direct child of b5752b9. Their complete tree difference is only
-.vscode/extensions.json. The application source/build/configuration is identical.
-The existing harness cloned default main rather than the configured source ref;
-source-reference selection is follow-up work. The plan and passing checks record
-both revisions and compare the result to the actual frozen checkout.
-Demo preparation:
+Current walkthrough:
 lightspeed-2026-11-11-demo.md
 -->
 
 ---
+
+<!-- _class: technical -->
+
+# Tool-output inspection demo
+
+**Run 2:** read a controlled tool result containing hostile instructions.
+
+- Show the classifier’s actual rejection.
+- Confirm the result never enters the next model call.
+- Confirm viewers receive no release of the rejected result.
+
+**Current-runtime recording pending model access.**
+
+[Walkthrough and evidence](lightspeed-2026-11-11-demo.md)
+
+<!--
+This second recording is a separate controlled test. A technical inspection
+error, timeout, malformed classifier envelope or missing credentials does not
+count as the requested rejection demonstration. The real classifier must
+reject the deliberately hostile tool result through the normal inspection path.
+Keep inspection/redaction enabled and preserve the model choice/configuration.
+
+Evidence must tie the run to the frozen source and deployed image, show the
+classifier decision, prove no next main-model call receives the hostile result,
+and prove no viewer result release. Sanitized metadata and the authorized
+publication/replay record should establish that boundary without publishing
+credentials or raw hostile content. A successful classifier response alone does
+not prove the result was withheld by the graph and ACP publication path.
+
+New recordings remain pending. Frozen CI images are deployed and smoke-checked;
+Gateway 401 prevents this run. Runtime rejection/redaction/replay
+regressions are separate evidence, not a substitute for this live-classifier run.
+Current walkthrough: lightspeed-2026-11-11-demo.md
+-->
+
+---
+
 <!-- _class: lead -->
 
 # Questions
 
+What do you think of the current changes and scope?
+
+Where should this work belong?
+
+<!--
+Open the conversation after demonstrating the current prototype and its scope.
+There is no proposed ownership split or request to approve one. Contribution
+boundaries, API choices, code location and next steps remain open for discussion.
+The later operator material is a separate topic if useful to this group.
+-->
+
 ---
+
 <!-- _class: technical -->
 
 # Lightspeed as the execution backend
@@ -650,12 +759,14 @@ https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec
 https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/controller/agenticrun/sandbox_manager.go#L601-L723
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # Roadblock: selecting the workload image
 
-**Current:** one shared `sandbox-pod-spec` supplies the base image. Agent and AgenticRun have no per-invocation image selector.
+**Reviewed operator:** one shared `sandbox-pod-spec` supplies the base image. Agent and AgenticRun have no per-invocation image selector.
 
 - Java EE to Quarkus needs a JDK and Maven in the workload.
 - A future Go Migrator needs the Go toolchain.
@@ -692,12 +803,14 @@ https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # Problem: workload placement and access
 
-**Current:** Lightspeed watches runs across namespaces but creates workloads in its operator namespace. Agent/LLMProvider are cluster-scoped; Secrets are namespaced.
+**Reviewed operator:** Lightspeed watches runs across namespaces but creates workloads in its operator namespace. Agent/LLMProvider are cluster-scoped; Secrets are namespaced.
 
 **Problem:** the workload needs Hub's run-scoped inputs/token, model credentials and a reachable ACP endpoint for Konveyor's UI.
 
@@ -738,12 +851,14 @@ https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # Problem: harness input and run completion
 
-**Current:** Lightspeed mounts batch inputs and a Result template under `/input`; its operator uses the Pod and a completed Kubernetes Result to determine success.
+**Reviewed operator:** Lightspeed mounts batch inputs and a Result template under `/input`; its operator uses the Pod and a completed Kubernetes Result to determine success.
 
 **Adapter needed:** our harness must consume those inputs, prepare the repo, run the agent, verify/push, clean up and publish the backend Result before exiting.
 
@@ -789,7 +904,9 @@ Accepted common workload/outcome contract:
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # Problem: stopping the agent or its workload
@@ -843,7 +960,9 @@ https://github.com/djzager/lightspeed-agentic-sandbox/blob/403916314aa4f869fc773
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
 
+
 ---
+
 <!-- _class: technical -->
 
 # OpenShell roadmap and integration contract
@@ -893,7 +1012,9 @@ https://github.com/NVIDIA/OpenShell/blob/7d9303690f7de689bddb487efde77365c02f855
 https://github.com/NVIDIA/OpenShell/blob/7d9303690f7de689bddb487efde77365c02f8555/crates/openshell-driver-kubernetes/README.md#L355-L375
 -->
 
+
 ---
+
 <!-- _class: lead -->
 
 # Questions
