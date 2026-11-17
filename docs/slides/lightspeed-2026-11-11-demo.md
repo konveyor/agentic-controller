@@ -5,7 +5,7 @@ Use the [editable deck](lightspeed-2026-11-11.md) and
 existing [2:44 video](lightspeed-2026-11-11-demo.mp4) is historical footage of
 runtime `4039163`; its provenance is linked at the end.
 
-## Recording plan — not yet executed
+## Recording plan and rehearsal status
 
 Record two distinct AgentRuns: normal Coolstore planning and a controlled hostile
 tool-result rejection. The implementation is frozen at runtime
@@ -14,10 +14,57 @@ controller/harness `4c036c9`, and UI `ed11b648` (UI PR 3738). This recording doe
 not include a runtime redesign or ownership proposal. Live wording, latency, and
 classifier decisions can vary; rehearse this sequence against the actual setup.
 
-The frozen runtime's CI-built Java image is now installed and passed the cluster
-startup/import smoke check. **Recording remains blocked:** an actual model
-`POST /v1/messages` returns HTTP 401, and the capture path needs live rehearsal.
-A valid refreshed key is required before either recorded AgentRun.
+The frozen runtime's CI-built Java image is installed and passed the cluster
+startup/import smoke check. The credential was refreshed on November 17; both
+Gateways now verify with HTTP 200, and live model calls work.
+
+The controlled rejection rehearsal, `ui-grxhq`, produced the actual malicious
+classification and withheld the tool result. Its request audit shows no later
+main-model call. The planning rehearsal, `ui-8p5rg`, demonstrated approvals,
+consumed steering, and observed usage, but did not produce a plan: a UI reconnect
+cleared pending permission cards, and the unanswered reads were denied. It is
+not a successful planning demonstration. Final recordings remain pending, with
+the visible pointer and calmer editing described below.
+
+### Presenter cues
+
+Keep these cues visible beside the deck. The detailed task text and evidence
+checks below are the script for each run.
+
+1. **Introduce the setup:** Coolstore, completed analysis, the selected Agent,
+   its Lightspeed image, and the selected model. Explain that the harness still
+   prepares the repository and owns verification and Git push.
+2. **Normal planning:** create an approval-mode run on the clean branch. Review
+   and allow file reads, answer the database question, send guidance, and show
+   that it is picked up. Review the resulting plan before approving the commit.
+3. **Show the result:** the recorded human decision in the plan, actual
+   verification results, observed token usage, and the pushed commit. This is a
+   migration plan; the application has not been migrated.
+4. **Introduce the controlled test:** use the same Agent and image on a separate
+   branch containing the deliberately hostile notes file. Show the fixture
+   before starting. Use automatic mode with questions off, and ask the agent to
+   read the file as data. Those run settings remove permission/question waits
+   as explanations for the expected failure.
+5. **Explain the expected failure:** show the native file read, the actual
+   classifier warning, the failed run, and evidence that the rejected content
+   reached neither another main-model call nor the viewer. The malicious file
+   is the changed input; there is no special rejection-only Agent.
+
+### Recording and editing
+
+Record a visible pointer that follows the actual mouse, with a brief ring at
+each real click. For Playwright, install
+[the pointer aid](lightspeed-demo-pointer.js) using
+`context.addInitScript({ path: "docs/slides/lightspeed-demo-pointer.js" })`
+before creating the recording page. Move the mouse to each control before
+clicking; keyboard-only actions should remain clear from focus and narration.
+
+Hold the prepared form, each question or approval, and each result long enough
+to read. Keep the cursor approach, click, and visible response together at normal
+speed. Cut long idle waits between complete actions, mark elapsed waits when
+useful, and avoid jumping over the context that explains the next screen. Keep
+the full recording and exact edit decisions. The current cursor-free rehearsal
+is preparation footage, not the final presentation recording.
 
 ### Prepare and verify the recording inputs
 
@@ -56,8 +103,9 @@ A valid refreshed key is required before either recorded AgentRun.
    local self-tests: run `python3 docs/slides/lightspeed-demo-recorder.py --self-test`.
    It is deployed as `lightspeed-demo-recorder` in `konveyor-tackle`, with the
    separate `enmaas-recording` Gateway pointing to its private Service. It is
-   **not live-model-rehearsed**. A real `GET /v1/models` passed through it and
-   returned Enmaas's HTTP 401, with complete metadata-only audit records.
+   live-model-rehearsed. The rejection take recorded successful main-model and
+   classifier requests with complete metadata-only audit records. Initial
+   authentication failures are historical setup evidence, not demo outcomes.
    To reproduce, mount it from a ConfigMap at
    `/recorder/lightspeed-demo-recorder.py` in a temporary Pod using the frozen CI
    **agent-base** image. Override the image entrypoint with
@@ -99,7 +147,8 @@ Suggested task text:
 > configuration unchanged. Before choosing the database/service approach, ask
 > me through `ask_user` whether to reuse the existing PostgreSQL service or
 > provision a separate service, with your recommendation and consequences.
-> Record my answer as a human decision. Separate source facts, assumptions, and
+> Keep the question brief; put detailed consequences in the plan. Record my
+> answer as a human decision. Separate source facts, assumptions, and
 > unresolved questions. Under `## Verification`, use unfenced `- Label: command`
 > lines for executable checks of this planning deliverable. Include a check
 > against baseline `32c1722efdf883f5f400170adb770a46a9b58116` that allows the
@@ -115,8 +164,9 @@ Record this UI sequence:
 2. Read the actual `ask_user` recommendation and choose **reuse the existing
    PostgreSQL service**. Show the submitted answer. If another legitimate
    question comes first, answer it and retain that context.
-3. While the agent works, send: **“Explain the consequences of database reuse for
-   schema ownership, transaction boundaries, and the migration testing plan.”**
+3. After answering, while the agent works, send: **“In the plan, call out database
+   reuse risks for schema ownership, transaction boundaries, and migration
+   testing in concise bullets.”**
    Show its queued state, then actual consumption and continuation.
 4. Review and approve the actual requests to inspect files, write the plan, and
    commit. Show representative approvals and the plan review. The human answer,

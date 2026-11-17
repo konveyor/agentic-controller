@@ -44,26 +44,39 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 ---
 
-# Runtime integration
+# What we will show
 
-- Konveyor with Goose
-- The prototype with Lightspeed
-- Changes in Lightspeed’s runtime
-- Coverage and accepted limits
-- Two recorded runs
-- Questions
+- Konveyor with Goose, then the Lightspeed prototype
+- Runtime changes, coverage and accepted limits
+- **Run 1:** normal Coolstore planning with human guidance
+- **Run 2:** controlled rejection with the same Agent and image
+- Questions, followed by the separate operator discussion
 
 <!--
-15 seconds.
+20 seconds. Presenter cues for the two separate runs:
 
-First show our setup with Goose, then the prototype with Lightspeed in its
-place. Explain the changes we made in your runtime before showing the demo.
-The current prototype and technical changes come before coverage and the two
-recorded-run plans. Open the conversation after those, then use the separate
-operator material if useful. No ownership split or contribution boundary is proposed.
-ADR 0021 separates runtime reuse, operator qualification and later resource migration.
+First explain the existing setup and the runtime swap. Show the current changes
+and accepted limits. Then introduce Run 1 as normal planning: review a tool call,
+answer the database question, steer the work, inspect the plan and show the
+actual verification/pushed result only when that successful take exists.
+Run 2 reuses the same Agent definition, image and model. It reads hostile notes
+from a separate branch, in automatic mode with questions off. Run 1 uses
+approval mode with questions on. Show the real classifier rejection and the
+model/viewer withholding evidence.
+
+Both final recordings are pending. The controlled rejection has a successful
+rehearsal; the normal planning rehearsal failed without producing a plan.
+Keep the historical 4039163 video separate from current-runtime evidence.
+
+For recording, capture the actual mouse pointer and actual clicks. Pause on the
+target before clicking, then leave time to read the resulting card. Cut long
+waits at calm points with context preserved. Do not rush, speed up decisions,
+or synthesize cursor movement/clicks in the edit. The separate walkthrough has
+the pointer aid and copyable task text: lightspeed-2026-11-11-demo.md
+
+Open the conversation after the prototype scope and demonstrations. No ownership
+split is proposed. The operator material remains a separate discussion.
 -->
-
 
 ---
 
@@ -635,9 +648,9 @@ Evidence and recording plan: lightspeed-2026-11-11-demo.md
 - Keep the decisions through plan revisions in one conversation.
 - Show observed usage, review the plan, then verify and push it.
 
-**Current-runtime recording pending model access.**
+**Final recording pending.**
 
-[Walkthrough and evidence](lightspeed-2026-11-11-demo.md) · [Historical video (2:44)](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4)
+[Walkthrough and evidence](https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-2026-11-11/docs/slides/lightspeed-2026-11-11-demo.md) · [Historical video (2:44)](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4)
 
 Historical video uses `4039163` and does not validate today’s prototype.
 
@@ -648,13 +661,29 @@ It should show the application, selected Agent/model, question and answer,
 approved tool calls, guidance uptake, preserved decisions, observed usage,
 reviewed file, harness verification and pushed Git result.
 
-New recordings remain pending. As of November 17 preparation, image CI
-44127290678 passed and the cluster uses its verified 451818c Java runtime and
-4c036c9 controller images. The restricted-UID redaction/ACP smoke check passed.
-Gateway 401 blocks a new provider recording.
-Use the current demo walkthrough for readiness and recording provenance.
-The required current revisions are 451818c runtime, controller 4c036c9 and
-UI ed11b648. Match source, deployed digest and imported runtime before recording.
+Final recordings remain pending. The credential was refreshed on November 17.
+Both Gateways are Ready with HTTP 200 and live model calls work. Frozen 451818c
+Java runtime and 4c036c9 controller images are installed and smoke-checked;
+the UI remains ed11b648. Capture actual deployed/source provenance for each take.
+
+Normal rehearsal ui-8p5rg failed without producing a plan. Approved reads passed
+inspection, steering was consumed, usage was captured, and the live process and
+module hashes matched 451818c. A reconnect cleared pending permission/elicitation
+cards because ChatPanel calls setItems([]) after initialization. The harness
+correctly replayed those requests. This is a confirmed UI issue, not evidence
+that the runtime failed to replay. The focused UI reconnect fix has not been
+deployed. The runtime implementation remains frozen.
+
+Do not claim this rehearsal recorded a successful question/answer, verified
+plan or push. Those remain required shots for the successful normal take.
+Use the current walkthrough for the recording checklist and exact task text.
+
+Presenter/editing cues: introduce the application and chosen Agent/model;
+read the action and arguments before clicking approval, allow time for the
+question and answer, point to the accepted guidance and observed usage, then
+inspect the resulting plan/diff before commit approval. Capture the actual
+pointer and clicks, hold each important result long enough to read, and use
+calm jump cuts for waits while preserving the actual interaction order.
 
 The existing separate MP4 is historical: it records 4039163 and the earlier
 custom ACP implementation. Its 164-second edit selected normal-speed portions
@@ -673,34 +702,52 @@ lightspeed-2026-11-11-demo.md
 
 # Tool-output inspection demo
 
-**Run 2:** read a controlled tool result containing hostile instructions.
+**Run 2:** the same Agent, image and model as Run 1.
+
+Read hostile notes on a separate branch. **Automatic mode; questions off.**
 
 - Show the classifier’s actual rejection.
 - Confirm the result never enters the next model call.
 - Confirm viewers receive no release of the rejected result.
 
-**Current-runtime recording pending model access.**
+**Final recording pending.**
 
-[Walkthrough and evidence](lightspeed-2026-11-11-demo.md)
+[Walkthrough and evidence](https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-2026-11-11/docs/slides/lightspeed-2026-11-11-demo.md)
 
 <!--
-This second recording is a separate controlled test. A technical inspection
-error, timeout, malformed classifier envelope or missing credentials does not
-count as the requested rejection demonstration. The real classifier must
-reject the deliberately hostile tool result through the normal inspection path.
-Keep inspection/redaction enabled and preserve the model choice/configuration.
+This uses the same Agent definition, Java image and model as normal planning.
+It reads a deliberately hostile notes file from a separate branch. Normal
+planning uses approve mode with askUser on. This controlled run uses auto mode
+with askUser off, avoiding permission/question waits that would obscure the
+expected classifier rejection. Inspection and redaction remain enabled.
 
-Evidence must tie the run to the frozen source and deployed image, show the
-classifier decision, prove no next main-model call receives the hostile result,
-and prove no viewer result release. Sanitized metadata and the authorized
-publication/replay record should establish that boundary without publishing
-credentials or raw hostile content. A successful classifier response alone does
-not prove the result was withheld by the graph and ACP publication path.
+Controlled rehearsal ui-grxhq produced the expected malicious warning. Classifier
+requests returned HTTP 200, with no subsequent main-model call and no incoming
+viewer result containing the fixture content. Provenance matched the expected
+Java image. The fixture branch stayed unchanged at 89d0ac0. This establishes
+actual rehearsal evidence for rejection and withholding. It does not mean the
+AgentRun completed ordinary application work successfully.
 
-New recordings remain pending. Frozen CI images are deployed and smoke-checked;
-Gateway 401 prevents this run. Runtime rejection/redaction/replay
-regressions are separate evidence, not a substitute for this live-classifier run.
+The recording without a visible pointer is rehearsal footage only. Its review
+cut remains in ignored scratch storage; it is not the final presentation video.
+Both Gateways now verify with HTTP 200 after the November 17 credential fix.
+Final recording still needs the real pointer/clicks,
+readable pauses and calmer jump cuts requested for the presentation.
+
+Presenter cues: explicitly show the same Agent/image/model selection as Run 1,
+then the different branch and read-only task. Point to the actual malicious
+classification and the lack of later main-model/viewer release. This should
+be a real classifier rejection through normal inspection, not a timeout,
+malformed envelope, missing credential or other technical failure. Keep
+inspection/redaction enabled and preserve the model configuration.
+
+Evidence must tie the run to frozen source and deployed image, classifier
+decision, no next main-model request receiving the rejected result, and no
+viewer result release. Keep credentials and raw hostile output out of shared
+artifacts. Regression cases for cancellation, handoff and reconnect remain
+separate from this recorded rejection demonstration.
 Current walkthrough: lightspeed-2026-11-11-demo.md
+
 -->
 
 ---
