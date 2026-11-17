@@ -375,6 +375,119 @@ func TestWriteTerminationLogBoundsOversizedBlob(t *testing.T) {
 	}
 }
 
+// TestWriteTerminationLogCarriesThePushRecord is the shape a consumer of
+// status.terminationData reads (#129): a succeeded run that changed
+// nothing and one that pushed a fix are no longer the same blob.
+func TestWriteTerminationLogCarriesThePushRecord(t *testing.T) {
+	read := func(push *pushReport) map[string]any {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "termination-log")
+		writeTerminationLog(path, terminationBlob{
+			ExitCode: 0, Outcome: outcomeSucceeded.String(), StopReason: "end_turn", Push: push,
+		})
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read back: %v", err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return got
+	}
+
+	fixed, _ := read(recordPush("fix-1", "base", finalPush{
+		outcome: git.PushAdvanced, landed: 1, tip: "tip", commits: 2,
+	}, nil))["push"].(map[string]any)
+	if fixed["status"] != "pushed" || fixed["branch"] != "fix-1" || fixed["base"] != "base" ||
+		fixed["commit"] != "tip" || fixed["commits"] != float64(2) {
+		t.Errorf("push section of a run that pushed = %v", fixed)
+	}
+
+	noop, _ := read(recordPush("fix-1", "base", finalPush{outcome: git.PushSkipped}, nil))["push"].(map[string]any)
+	if noop["status"] != "noChanges" || noop["commits"] != float64(0) {
+		t.Errorf("push section of a run that changed nothing = %v", noop)
+	}
+	if _, ok := noop["commit"]; ok {
+		t.Errorf("a run that changed nothing names a pushed commit: %v", noop)
+	}
+
+	// A run that never reached its push says nothing, and nothing is not
+	// "nothing was pushed".
+	if push, ok := read(nil)["push"]; ok {
+		t.Errorf("a blob without a push record published push=%v, want the key absent", push)
+	}
+}
+
+// TestWriteTerminationLogKeepsThePushVerdictWhenTrimming: an oversized
+// blob sheds context, never the answer to "did this run push anything".
+func TestWriteTerminationLogKeepsThePushVerdictWhenTrimming(t *testing.T) {
+	push := &pushReport{
+		Status: pushPushed, Branch: "fix-1", Base: "base", Commit: "tip", Commits: intPtr(3),
+	}
+	read := func(term terminationBlob) terminationBlob {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "termination-log")
+		writeTerminationLog(path, term)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read back: %v", err)
+		}
+		if len(data) > maxTerminationLogBytes {
+			t.Fatalf("blob size = %d, exceeds max %d", len(data), maxTerminationLogBytes)
+		}
+		var got terminationBlob
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("unmarshal trimmed blob: %v", err)
+		}
+		return got
+	}
+	kept := func(t *testing.T, got *pushReport) {
+		t.Helper()
+		if got == nil {
+			t.Fatal("the push record was dropped, which reads as a run that never pushed")
+		}
+		if got.Status != pushPushed || got.Commit != "tip" || got.Commits == nil || *got.Commits != 3 {
+			t.Errorf("push verdict lost during trim: %+v", got)
+		}
+	}
+
+	t.Run("a long stop reason is cut and the whole record stays", func(t *testing.T) {
+		got := read(terminationBlob{
+			ExitCode: 1, Outcome: "failed", Push: push,
+			StopReason: strings.Repeat("x", maxTerminationLogBytes+500),
+		})
+		kept(t, got.Push)
+		if got.Push.Branch != "fix-1" || got.Push.Base != "base" {
+			t.Errorf("trimming the stop reason should not cost the record its context: %+v", got.Push)
+		}
+	})
+
+	t.Run("the minimal blob keeps the verdict", func(t *testing.T) {
+		got := read(terminationBlob{
+			ExitCode: 1, Outcome: "failed", Push: push,
+			MavenProxyWarning: strings.Repeat("x", maxTerminationLogBytes+500),
+		})
+		kept(t, got.Push)
+		if got.Push.Branch != "" || got.Push.Base != "" {
+			t.Errorf("the minimal blob kept context it is meant to shed: %+v", got.Push)
+		}
+	})
+
+	t.Run("the last resort drops verification and keeps the verdict", func(t *testing.T) {
+		got := read(terminationBlob{
+			ExitCode: 0, Outcome: "succeeded", Push: push,
+			Verification: &verification{
+				Status: verificationFailed, Reason: strings.Repeat("x", maxTerminationLogBytes+500),
+			},
+		})
+		kept(t, got.Push)
+		if got.Verification != nil {
+			t.Errorf("an oversized verification verdict should have been dropped: %+v", got.Verification)
+		}
+	})
+}
+
 func TestWriteTerminationLogTrimsStopReasonOnRuneBoundary(t *testing.T) {
 	// "世" is 3 bytes; a run of them straddles the 200-byte trim point so a
 	// naive byte-slice truncation would leave a partial (invalid) rune,

@@ -301,6 +301,11 @@ type terminationBlob struct {
 	// the agent's account of the same work; this is the measurement, and
 	// the two disagreeing is the case the field exists for.
 	Verification *verification `json:"verification,omitempty"`
+	// Push is what the run left on the branch it pushes to: whether its
+	// commits reached the remote, which commit, and how many (#129). Set
+	// once the final push has been attempted, so it is absent from a run
+	// that failed during setup — see pushReport for what absence means.
+	Push *pushReport `json:"push,omitempty"`
 }
 
 // executeErrorTerminationBlob builds the termination-log blob for an error
@@ -366,11 +371,17 @@ func writeTerminationLog(path string, term terminationBlob) {
 			// limitReached — and the verification verdict, which is the one
 			// field whose absence is read as a pass (#300). Retain the Maven
 			// setup warning too, since it explains missing proxy configuration.
+			// The push verdict stays for the reason the verification verdict
+			// does: without it nobody can tell a run that changed nothing
+			// from one that pushed a fix (#129). It is small and bounded,
+			// so unlike the verification verdict it survives the last
+			// resort below as well.
 			term = terminationBlob{
 				ExitCode:          term.ExitCode,
 				Outcome:           term.Outcome,
 				LimitReached:      term.LimitReached,
 				Verification:      term.Verification.verdictOnly(),
+				Push:              term.Push.verdictOnly(),
 				MavenProxyWarning: truncateRuneSafe(term.MavenProxyWarning, 200),
 			}
 			data, err = json.Marshal(term)

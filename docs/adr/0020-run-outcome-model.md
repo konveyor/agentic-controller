@@ -5,7 +5,7 @@ description: "Consolidates the terminal-outcome taxonomy that is currently accre
 status: proposed
 status_note: "Opened with its Decision section unresolved. Six questions (Q1-Q6) need answers before this ADR can be accepted; the Context and Consequences are settled."
 date: "2026-10-09"
-last_updated: null
+last_updated: "2026-11-16"
 authors:
   - "Ian Bolton"
 last_reviewed: "2026-10-09"
@@ -75,6 +75,16 @@ retention, both of which look wrong for a correct no-op.
 
 Options: (a) `Succeeded=False{NoChanges}`; (b) `Succeeded=True{NoChanges}`;
 (c) `Succeeded=True` plus a separate `Changed` condition carrying the fact.
+
+**Update (2026-11-16):** The fact this question turns on is now recorded,
+and the question is still open. The harness writes a `push` section to the
+termination blob (#129; see Push Record in `CONTEXT.md`) whose `status` is
+`pushed`, `noChanges` or `failed`. It is a record, not an outcome: no exit
+code, phase or condition changed, the controller does not read it, and a
+run that changed nothing is still `Succeeded=True` with exit `0`, as it was
+before. None of options (a) to (c) has been chosen or ruled out by it; a
+consumer that needs to tell a no-op from a fix can read the record
+meanwhile.
 
 ### Q2 — Does `cancelled` imply `Succeeded=False`?
 

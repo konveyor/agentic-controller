@@ -19,6 +19,10 @@
 # Both runs are expected to succeed. That matters: if the control's expected
 # outcome were a failed run, it would pass for free on any broken cluster.
 #
+# The same two runs are also held to the harness's push record (#129). They
+# change nothing, so each must end recording noChanges: this is the only place
+# the real harness's final push is followed into AgentRun.status.
+#
 # Prerequisites: hack/start-kind.sh, hack/setup-e2e.sh and
 # hack/install-konveyor.sh, plus an agent-base image built and loaded under the
 # tag AGENT_IMAGE names below -- which is not the Makefile's default:
@@ -366,6 +370,31 @@ if kc logs "$(run_pod rule-on)" -c agent 2>/dev/null | grep "always-loaded rules
 else
     fail "the harness never reported the rule, so it did not read it back from the manifest"
 fi
+
+echo "--- What the runs left on the branch ---"
+# Neither run changes a file, so the push is skipped (see APP_REPO above) and
+# the harness's push record has to say so: noChanges, a measured zero, on the
+# branch the run was given, from a base it resolved, with no commit claimed
+# (#129). Asserted here because this is the one e2e that drives the real
+# harness end to end: the lines that carry the final push into the termination
+# blob run only inside runStage, where no unit test reaches.
+push_field() { kc get agentrun "$1" -o jsonpath="{.status.terminationData.push.$2}" 2>/dev/null || true; }
+assert_no_changes_pushed() {
+    local status commits branch base commit
+    status="$(push_field "$1" status)"
+    commits="$(push_field "$1" commits)"
+    branch="$(push_field "$1" branch)"
+    base="$(push_field "$1" base)"
+    commit="$(push_field "$1" commit)"
+    if [ "${status}" = noChanges ] && [ "${commits}" = 0 ] && [ "${branch}" = rule-e2e-target ] \
+        && [ "${#base}" = 40 ] && [ -z "${commit}" ]; then
+        pass "run $1 recorded noChanges: 0 commits on ${branch} from ${base:0:12}"
+    else
+        fail "run $1 push record is status='${status}' commits='${commits}' branch='${branch}' base='${base}' commit='${commit}'; want noChanges, 0, rule-e2e-target, a 40-character base and no commit"
+    fi
+}
+assert_no_changes_pushed rule-on
+assert_no_changes_pushed rule-off
 
 # Informational, not an assertion: which tools goose offered the model. The
 # emulator can only return a tool call naming one of these.

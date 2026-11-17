@@ -802,12 +802,6 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	pushOutcome, pushErr := emitPush(fmt.Sprintf("git push to branch %s (final)", creds.Branch), func() (git.PushOutcome, error) {
 		return git.Push(pushCtx, creds, repo, creds.Branch, baseSHA)
 	})
-	// The closing notices ask a different question of the push than the
-	// rung's counter does: not "did the remote move just now" but "is
-	// this run's work on the branch at all". A final push that finds the
-	// remote already up to date still means yes — the watcher put it
-	// there — so only a skipped push counts as nothing to report.
-	pushed := pushOutcome != git.PushSkipped
 	if pushErr != nil {
 		emitOutcome("stage failed — final push error: %v", pushErr)
 		term.ExitCode = 1
@@ -817,19 +811,41 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 		// carries from the completed turn above, is the actual reason this
 		// stage failed — surface it instead of the stale value.
 		term.StopReason = fmt.Sprintf("final push: %v", pushErr)
+		// The push record says it too. A consumer asking only what the
+		// run pushed has to find "failed" there, not a missing section,
+		// which would read as a run that never got as far as pushing.
+		term.Push = recordPush(creds.Branch, baseSHA, finalPush{
+			outcome: pushOutcome, err: pushErr, landed: int(pushesLanded.Load()),
+		}, red)
 		return 1, fmt.Errorf("final push: %w", pushErr)
 	}
-	// What the run produced, counted once now that the last commit is in:
-	// the closing rung says "pushed 7 commits to branch x" rather than
-	// repeating the instruction it was given at the start. Counted on the
-	// branch that was just pushed, which is the only history the remote
-	// received — HEAD may be somewhere else entirely by now.
-	if n, err := git.CommitsSince(repo, creds.Branch, baseSHA); err != nil {
-		logging.Warn("count commits for the plan ladder: %v — the rung omits the count", err)
-	} else {
-		commitsPushed.Store(int64(n))
+	// What the run left on the branch, worked out once now that the last
+	// commit is in and then said three times: on the ladder's closing
+	// rung ("pushed 7 commits to branch x" rather than a repeat of the
+	// instruction it started with), in the closing notice, and in the
+	// termination blob. The blob is the new one (#129): the ladder goes
+	// with the pod, and what a consumer of the finished run reads could
+	// not tell a run that changed nothing from one that pushed a fix.
+	//
+	// Counted on the branch that was just pushed, which is the only
+	// history the remote received — HEAD may be somewhere else entirely
+	// by now.
+	term.Push = recordPush(creds.Branch, baseSHA,
+		observePush(repo, creds.Branch, baseSHA, pushOutcome, int(pushesLanded.Load())), red)
+	if term.Push.Reason != "" {
+		logging.Warn("push record: %s — %s", term.Push.Status, term.Push.Reason)
+	}
+	// The rung and the notices both read the record rather than the raw
+	// count and git.Push's outcome, so the three cannot disagree. The
+	// question they share is not "did the remote move just now" but "is
+	// this run's work on the branch at all": a final push that finds the
+	// remote already up to date means yes when the watcher put it there,
+	// and no when nothing of this run ever landed — see recordPush.
+	if term.Push.Commits != nil {
+		commitsPushed.Store(int64(*term.Push.Commits))
 	}
 	emitPlan("completed", "completed", "completed")
+	pushed := term.Push.pushed()
 
 	// 15. Exit. pushed is false when the run produced no commits, so the
 	// notices must not claim work landed on the branch.
