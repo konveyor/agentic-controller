@@ -196,12 +196,14 @@ type AgentRunReconciler struct {
 	DefaultStartupDeadline *time.Duration
 
 	// apiReader reads directly from the API server, bypassing the manager
-	// cache. It is used only for the best-effort pod termination-message
-	// lookup: a direct read avoids surfacing a stale generic message when
-	// the label-restricted Pod cache (see SandboxPodCacheOptions) lags the
-	// Sandbox "Finished" condition. The cache-backed client still serves the
-	// phase=Running read, so the controller keeps watching sandbox pods. Set
-	// by SetupWithManager.
+	// cache. It is used where a cache miss would otherwise be acted on
+	// irreversibly: the best-effort pod termination-message lookup (a direct
+	// read avoids surfacing a stale generic message when the label-restricted
+	// Pod cache, see SandboxPodCacheOptions, lags the Sandbox "Finished"
+	// condition), the orphan sweep, and confirming that a Sandbox really is
+	// gone before failing its run. Routine reads stay on the cache-backed
+	// client, so the controller keeps watching sandbox pods. Set by
+	// SetupWithManager.
 	apiReader client.Reader
 }
 
@@ -381,6 +383,21 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	sandboxKey := types.NamespacedName{Namespace: run.Namespace, Name: run.Status.SandboxName}
 	if err := r.Get(ctx, sandboxKey, &sandbox); err != nil {
 		if errors.IsNotFound(err) {
+			// Failing here is terminal and the run's spec is immutable, so a
+			// cache miss alone is not enough to declare the Sandbox deleted.
+			// The reconcile that records SandboxName is triggered by our own
+			// status patch, which can outrun the Sandbox informer, and
+			// Sandbox events are not ordered against AgentRun events. Confirm
+			// against the uncached API before failing the run.
+			if r.apiReader != nil {
+				if err := r.apiReader.Get(ctx, sandboxKey, &sandbox); err == nil {
+					// It exists; the cache is only behind. Requeue and read it
+					// again rather than act on this reconcile's stale view.
+					return ctrl.Result{Requeue: true}, nil
+				} else if !errors.IsNotFound(err) {
+					return ctrl.Result{}, err
+				}
+			}
 			run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
 			setRunSucceeded(&run, metav1.ConditionFalse, "SandboxNotFound",
 				fmt.Sprintf("Sandbox %q was deleted", run.Status.SandboxName))
@@ -1714,6 +1731,7 @@ func (r *AgentRunReconciler) effectiveStartupDeadline(run *konveyoriov1alpha1.Ag
 const (
 	harnessExitSucceeded    = 0
 	harnessExitLimitReached = 2
+	harnessExitRefused      = 3
 )
 
 // setTerminalOutcome sets the AgentRun's terminal phase and the
@@ -1721,11 +1739,12 @@ const (
 // back to the Sandbox's coarse Finished reason when the pod's container
 // exit code is unavailable.
 //
-// Note the exit-2 remap: a limit-reached run exits non-zero, so the pod
-// is Failed and the Sandbox reports a non-PodSucceeded reason — the
-// controller must read the container exit code to tell "stopped on
-// budget" (Succeeded=False, LimitReached) from a genuine error
-// (Succeeded=False, Failed). Only exit 0 is a clean success.
+// Note the exit-2 and exit-3 remaps: a limit-reached or refused run exits
+// non-zero, so the pod is Failed and the Sandbox reports a non-PodSucceeded
+// reason — the controller must read the container exit code to tell
+// "stopped on budget" (Succeeded=False, LimitReached) and "the agent
+// declared it did not do the work" (Succeeded=False, Refused) from a
+// genuine error (Succeeded=False, Failed). Only exit 0 is a clean success.
 //
 // failureMessage, when non-empty, is the harness's human-readable
 // termination message (e.g. a non-git source, #143); it is preferred over
@@ -1743,6 +1762,13 @@ func (r *AgentRunReconciler) setTerminalOutcome(
 		run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
 		setRunSucceeded(run, metav1.ConditionFalse, konveyoriov1alpha1.AgentRunReasonLimitReached,
 			"Execution limit reached; the agent committed a handoff")
+	case haveExit && exitCode == harnessExitRefused:
+		// The detail (why the stage refused) rides terminationData's
+		// stopReason, as the limit kind does for exit 2; the condition
+		// names the outcome and where the agent's own account is.
+		run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseFailed
+		setRunSucceeded(run, metav1.ConditionFalse, konveyoriov1alpha1.AgentRunReasonRefused,
+			"The agent's handoff records that the stage did not do its work; .konveyor/handoff.md on the run's branch says why")
 	case (haveExit && exitCode == harnessExitSucceeded) ||
 		(!haveExit && sandboxReason == sandboxFinishedReasonSucceeded):
 		run.Status.Phase = konveyoriov1alpha1.AgentRunPhaseSucceeded

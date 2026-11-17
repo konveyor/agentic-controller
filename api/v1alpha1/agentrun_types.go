@@ -65,6 +65,11 @@ const (
 	// AgentRunReasonLimitReached — an execution budget was exhausted and
 	// the harness committed a handoff (harness exit 2, ADR 0011/0018).
 	AgentRunReasonLimitReached = "LimitReached"
+	// AgentRunReasonRefused — the agent ended its turn but its handoff
+	// (.konveyor/handoff.md on the run's branch) records that the stage
+	// did not do its work (harness exit 3, ADR 0018). Pairs with
+	// Succeeded=False; a workflow stops here like any other non-success.
+	AgentRunReasonRefused = "Refused"
 	// AgentRunReasonRunning — the agent process is executing; Succeeded
 	// is Unknown until the run ends.
 	AgentRunReasonRunning = "Running"

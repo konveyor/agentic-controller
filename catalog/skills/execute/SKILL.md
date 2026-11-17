@@ -44,6 +44,13 @@ Record the overall status, then one line per step from `docs/plan.md` — the st
 `id`, the `file` touched, the `action` (MODIFY/CREATE/DELETE), the result
 (`applied` or `failed`), and the error message for any failure.
 
+The overall status is `completed` when you worked through the plan, even if
+some steps failed — the table says which. It is `failed` only when you could
+not execute at all (no `docs/plan.md`, nothing applicable). The harness reads
+that line: `failed` ends the run as refused and stops the workflow, so put the
+reason in the table's `Error` column or after the status
+(`- Status: failed — docs/plan.md not found`).
+
 ```markdown
 ## Execute
 - Status: completed

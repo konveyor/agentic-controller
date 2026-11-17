@@ -1,0 +1,7 @@
+kind: bugfix
+description: >
+  A stage whose handoff records `- Status: failed` no longer reports success:
+  the harness reads the stage's own verdict from `.konveyor/handoff.md` after
+  the turn and exits 3, the AgentRun ends `Succeeded=False` with reason
+  `Refused` (the handoff's reason in `terminationData.stopReason`), and the
+  workflow stops instead of carrying on from a stage that did nothing.
