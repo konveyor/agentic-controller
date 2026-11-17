@@ -62,7 +62,9 @@ The [Lightspeed integration](../docs/lightspeed-runtime-prototype.md) uses the
 same harness and ACP tee. The standard base image sets
 `HARNESS_RUNTIME=lightspeed`, inherited by all language images. It reports token
 usage and supports same-session handoff; positive `maxCost` budgets are rejected
-because the runtime does not yet report monetary cost. `HARNESS_ACP_TEE=off` is
+because the runtime does not report monetary cost. Loss of monetary budget
+enforcement is accepted for this adoption; accounting coverage and future cost
+support remain follow-up work under ADR 0021. `HARNESS_ACP_TEE=off` is
 also unsupported for Lightspeed.
 
 For standalone compatibility, an unset `HARNESS_RUNTIME` still selects Goose.
@@ -114,13 +116,14 @@ Execution limits and mode, plus workflow/agent parameter values, are delivered v
 {
   "workflow": { "application_name": "coolstore" },
   "agent": { "source_url": "https://github.com/example/app", "dry_run": true },
-  "execution": { "mode": "auto", "maxTurns": 200, "maxCost": "10.00" }
+  "execution": { "mode": "auto", "maxTurns": 200 }
 }
 ```
 
 - `execution.mode` sets runtime supervision (`auto` or `approve`).
 - `execution.maxTurns` configures runtime turn limits.
-- `execution.maxCost` sets cumulative spend budget monitored via ACP.
+- `execution.maxCost` requires runtime-reported monetary cost. The Lightspeed
+  runtime does not support it, so a positive value fails before execution.
 - Workflow and agent values are appended to the agent's prompt under `## Parameters`.
 
 ---

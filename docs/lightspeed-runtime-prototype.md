@@ -36,6 +36,12 @@ with `LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS`; explicit provider output cutoff fails
 before executing tools from the unfinished response. Reasoning settings remain
 provider-specific and optional.
 
+Loss of monetary budget enforcement is accepted for this runtime adoption
+(ADR 0021, November 17 amendment). It is not an adoption gate. Token-accounting
+coverage and future monetary support follow the existing accounting research.
+The prototype's upstream contribution scope and eventual ownership remain open
+for discussion with Lightspeed.
+
 Official ACP is pinned to `deepagents-acp` 0.0.13 at
 `f2a6e02dc8e2dcb05885c5133b94102ccc79b794`. Five private overrides require
 compatibility tests when upgrading. The November 17 rebase incorporates
