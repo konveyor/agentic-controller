@@ -5,7 +5,7 @@ description: "Reuse Lightspeed's DeepAgents runtime and its inspection behavior 
 status: accepted
 status_note: "Approves Konveyor direction only; implementation, backend qualification, and Lightspeed agreement are separate."
 date: "2026-10-20"
-last_updated: "2026-11-17"
+last_updated: "2026-11-18"
 authors:
   - "David Zager"
 last_reviewed: "2026-11-17"
@@ -20,6 +20,10 @@ relates_to:
 ---
 
 # ADR 0021: Shared Runtime and Conditional Lightspeed Execution
+
+**Update (2026-11-18):** Consolidate runtime configuration and integration-check
+instructions in the [harness reference](../../harness/README.md#configuration),
+replacing the standalone prototype guide.
 
 **Update (2026-11-17):** Accept loss of monetary budget enforcement when adopting
 Lightspeed's runtime. This supersedes the original requirement, reiterated in
@@ -48,7 +52,7 @@ inspection and inspection-approved live output and viewer replay. The integratio
 uses pinned private ACP helpers with compatibility tests. Positive `maxCost`
 budgets still fail before execution because monetary usage is unavailable;
 preserving monetary enforcement remains a full-adoption requirement. The integration and its remaining limits are described in the
-[harness runtime guide](../lightspeed-runtime-prototype.md).
+[harness configuration reference](../../harness/README.md#configuration).
 
 ## Context
 

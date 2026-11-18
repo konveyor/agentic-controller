@@ -3,4 +3,9 @@ description: >
   Replace Goose in the standard agent images with Lightspeed DeepAgents,
   retaining ACP interactions, same-session handoff, and token reporting.
   Positive maxCost budgets are rejected until the runtime provides monetary
-  usage; the harness does not silently ignore those budgets.
+  usage; the harness does not silently ignore those budgets. Before upgrading,
+  remove positive spec.execution.maxCost values from Agents and AgentRuns, and
+  spec.stages[].execution.maxCost values from AgentWorkflows, or explicitly
+  override an inherited budget with "0.00" for a Lightspeed run. Removing only
+  a run override leaves the Agent's default budget in effect. Workloads that
+  require enforced monetary budgets must keep using a Goose-based image.

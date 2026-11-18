@@ -58,7 +58,7 @@ go build -o migration-harness ./cmd/migration-harness/
 
 ## Configuration
 
-The [Lightspeed integration](../docs/lightspeed-runtime-prototype.md) uses the
+The [Lightspeed integration](../docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md) uses the
 same harness and ACP tee. The standard base image sets
 `HARNESS_RUNTIME=lightspeed`, inherited by all language images. It reports token
 usage and supports same-session handoff; positive `maxCost` budgets are rejected
@@ -70,6 +70,29 @@ also unsupported for Lightspeed.
 For standalone compatibility, an unset `HARNESS_RUNTIME` still selects Goose.
 That path requires a separately installed Goose binary; it is not included in
 the Lightspeed base image.
+
+The harness maps Gateway configuration for `anthropic`, `openai`, `xai`,
+`aws-bedrock` and `gcp-vertex-ai`. `execution.mode`, `askUser` and `maxTurns`
+configure supervision, questions and turn limits. `/workspace` is a viewer
+alias for the prepared `/workspace/repo`; execution stays in the latter.
+Conversation state and viewer replay last only for the runtime process.
+
+Observed token usage excludes isolated inspection-classifier calls and is not
+a billing total. `LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS` optionally sets the main
+model's per-response output allowance. Reasoning settings remain optional and
+provider-specific. The installed runtime revision and frozen dependency build
+are described in [Container Images](../images/README.md#pr-artifacts).
+
+Before upgrading an existing workload, remove positive `spec.execution.maxCost`
+values from its Agent and AgentRun and `spec.stages[].execution.maxCost` values
+from its AgentWorkflow, or override the inherited budget with `"0.00"` for a
+Lightspeed run. Removing a run override still leaves the Agent's default in
+effect. Workloads requiring monetary budget enforcement must keep using a
+Goose-based image.
+
+Provider failures report bounded HTTP status/category diagnostics over ACP and
+into termination data. Arbitrary provider messages and response bodies remain
+suppressed because they can contain credentials or request content.
 
 Configuration comes from two sources: environment variables (required and optional) and the controller-mounted `/run/konveyor/params.json` file (execution controls and workflow/agent parameter values — see the Parameters section below).
 
@@ -125,6 +148,30 @@ Execution limits and mode, plus workflow/agent parameter values, are delivered v
 - `execution.maxCost` requires runtime-reported monetary cost. The Lightspeed
   runtime does not support it, so a positive value fails before execution.
 - Workflow and agent values are appended to the agent's prompt under `## Parameters`.
+
+### Runtime regression checks
+
+Run Go harness regressions from `harness/` with `go test ./...`. For the full
+Lightspeed integration, install a checkout of the image's pinned runtime with
+its frozen development and ACP dependencies, then run from the repository root:
+
+```sh
+/path/to/lightspeed-agentic-sandbox/.venv/bin/python \
+  hack/lightspeed-runtime/verify.py \
+  --runtime-dir /path/to/lightspeed-agentic-sandbox \
+  --evidence-dir .scratch/lightspeed-verification
+```
+
+Use a fresh evidence directory and leave ports 4000 and 4001 available. The
+helper drives the real Go harness, runtime, graph and local Git repositories
+against scripted model/classifier and Hub services, without paid model calls
+or remote Git pushes. Its cases cover automatic execution, approval, a human
+answer, cancellation, steering/reconnect, turn-limit handoff, skill loading and
+provider authentication/rate-limit failures. Use `--cases`
+to select cases. It checks usage, verification, Git results and token cleanup.
+The scripted classifier approves results; inspection rejection, redaction and
+viewer-release regressions belong in the runtime's native graph/ACP tests.
+These checks do not establish live classifier accuracy or cluster qualification.
 
 ---
 
