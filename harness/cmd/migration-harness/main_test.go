@@ -64,6 +64,35 @@ func TestRunStagePreservesErrorInTerminationLog(t *testing.T) {
 	}
 }
 
+// TestRunStageSetupFailureLeavesNoPushRecord: a run that fails before
+// its push has nothing to say about it, and says nothing. The push
+// section is then absent rather than "noChanges", because a consumer
+// reads noChanges as "the run looked and found nothing to change" (#129).
+func TestRunStageSetupFailureLeavesNoPushRecord(t *testing.T) {
+	for _, k := range requiredConfigEnvVars {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+	logPath := filepath.Join(t.TempDir(), "termination-log")
+	t.Setenv("HARNESS_TERMINATION_LOG_PATH", logPath)
+
+	if _, err := runStage(nil, nil); err == nil {
+		t.Fatal("expected an error from missing configuration, got nil")
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read termination log: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("termination log is not valid JSON: %v (data: %s)", err, data)
+	}
+	if push, ok := got["push"]; ok {
+		t.Errorf("a setup failure published push=%v, want the key absent", push)
+	}
+}
+
 func TestDiscoverSkills_NoSkills(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HARNESS_SKILLS_DIR", dir)

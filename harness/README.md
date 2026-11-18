@@ -277,8 +277,47 @@ agent image remains a release/QE check.
 5. **Checkout branch** — checks out `TARGET_BRANCH`
 6. **Agent commits** — the agent authors all commits locally with descriptive messages. The entry point **never creates commits of its own**.
 7. **Watcher** — background fsnotify watcher pushes agent commits after a 30s quiet period
-8. **Final push** — pushes agent commits on stage completion. If no new commits were created, push is skipped to avoid empty remote branches.
+8. **Final push** — pushes agent commits on stage completion. If no new commits were created, push is skipped to avoid empty remote branches. Either way the result is kept in the termination blob (see [The push record](#the-push-record)).
 9. **Handoff verdict** — reads the `- Status:` line of the last section of `.konveyor/handoff.md` when the stage wrote or changed it. `failed` means the stage did not do its work and the run exits `3` (refused), whatever the agent's turn looked like. Nothing else in the handoff is read.
+
+### The push record
+
+The plan ladder tells a live viewer "Pushed 7 commits" or "No changes to push",
+and goes with the pod. The termination blob keeps the same facts under `push`
+(#129), so whatever reads a finished run can tell one that changed nothing from
+one that pushed a fix without asking the remote:
+
+| `push.status` | Meaning | Also set |
+|---------------|---------|----------|
+| `pushed` | The remote branch holds commits this run put there | `commit`, the branch tip on the remote; `commits` when it could be counted |
+| `noChanges` | The run left no commits on the branch, so the final push sent nothing | `commits: 0`; `reason` when the remote is not where the branch is |
+| `failed` | The final push returned an error and the stage exits `1` | `reason`, which `stopReason` carries too |
+
+`branch` and `base` (the commit the run started from) come with every status.
+A blob that had to be cut to fit the kubelet's 4096-byte limit keeps only
+`status`, `commit` and `commits`.
+
+The question the status answers is whether *this run* put anything on the
+remote, so a final push that finds the remote already up to date is `pushed`
+when the watcher got there first and `noChanges` when no push of the run ever
+moved the remote.
+
+Three rules for a consumer:
+
+- **Only `pushed` means there is work on the branch.** An absent section, or a
+  status you do not recognise, does not.
+- **Absent means unknown, present means measured.** The section is absent when
+  the run ended before its final push (a setup failure) and from a harness that
+  predates it. `"commits": 0` is a count; a missing `commits` is not.
+- **It is a record, not an outcome.** The exit code and the `Succeeded`
+  condition are unchanged, so a run can be `succeeded` and `noChanges`. Whether
+  that should stay a success is an open question in ADR 0020; this is the fact
+  it turns on. It works the other way too: a run that failed, was refused or
+  hit a limit can be `pushed`, because partial work and handoffs are commits.
+  Read it beside `outcome`, not instead of it.
+
+The ladder's closing rung and the closing notice are built from the record, so
+a viewer and a consumer of the finished run are told the same thing.
 
 ---
 
@@ -481,6 +520,7 @@ cmd/migration-harness/
 ├── main.go        CLI entry point (cobra, single "run" command)
 ├── handoff.go     The stage's own verdict from .konveyor/handoff.md
 ├── verify.go      The harness's own verdict: docs/plan.md's Verification commands, re-run
+├── push.go        What the run left on its branch: the push record in the termination log
 └── outcome.go     Outcome classification & termination log
 internal/
 ├── config/        Env-var & params.json configuration

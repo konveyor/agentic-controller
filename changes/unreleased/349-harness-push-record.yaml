@@ -1,0 +1,8 @@
+kind: feature
+description: >
+  Record what a run left on its target branch under `push` in the harness
+  termination blob (status `pushed`, `noChanges` or `failed`, with the branch,
+  the starting commit, the pushed tip and how many commits the run added), so a
+  finished AgentRun that changed nothing is distinguishable from one that pushed
+  a fix without asking the git remote. It is a record, not an outcome: exit
+  codes, phases and the Succeeded condition are unchanged.

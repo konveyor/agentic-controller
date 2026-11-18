@@ -192,8 +192,9 @@ to runtime-specific configuration (e.g. `GOOSE_MAX_TURNS`,
 for cumulative cost and enforces cost limits via cancel-then-handoff.
 Turn limits are enforced by the runtime natively; the harness
 reserves 15-20% of the turn budget for a handoff prompt when the
-runtime stops. On exit, the harness writes usage data and its own
-verification record to `/dev/termination-log` as opaque JSON; the
+runtime stops. On exit, the harness writes usage data, its own
+verification record and a record of what it pushed (see Push Record)
+to `/dev/termination-log` as opaque JSON; the
 controller copies the blob to `AgentRunStatus.terminationData`
 verbatim and reads exactly two keys of it — `verification.status`,
 which it maps onto the `Verified` condition, and `verification.commit`,
@@ -314,6 +315,23 @@ evidence from the controller — it stays in `terminationData` for the
 UI to render; `notRun` for a section whose content the harness dropped
 — unreadable is not absent, and `notRun` is the verdict enforcement
 ignores.
+
+**Push Record** — What a run left on the target branch, kept under the
+`push` key of the termination blob (#129): `pushed` (the remote branch
+holds commits this run put there, and the record names its tip),
+`noChanges` (the run left no commits on the branch, so the final push
+sent nothing) or `failed` (the final push returned an error). It also carries the branch, the
+commit the run started from, and how many commits the run added when
+that could be counted. It is the plan ladder's closing rung kept after
+the pod is gone, and the rung is built from it, so a viewer and a
+consumer of the finished run are told the same thing. It is a record,
+not an outcome: it changes neither the exit code nor `Succeeded`, so a
+run can be `Succeeded=True` and `noChanges`. Whether that should stay a
+success is ADR 0020's open question, and this is the fact it turns on.
+The controller does not read it.
+_Avoid_: reading an absent record as `noChanges` — absent means the
+run ended before its push, or the harness predates the record; reading
+any status but `pushed` as work on the branch.
 
 **Interrogation Record** — The committed file an Interrogation
 produces, `.konveyor/interrogation.md`: one block per decision carrying
