@@ -18,6 +18,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+SKILL_NAME = "fixture-workflow"
+SKILL_DESCRIPTION = "Use the fixture workflow before completing the task."
+SKILL_INSTRUCTION = "Preserve SKILL_INSTRUCTION_MARKER_7f39 when completing the task."
+PROVIDER_ERRORS = {
+    "provider-auth": (
+        401,
+        "authentication_error",
+        "Model provider authentication failed",
+    ),
+    "provider-rate-limit": (
+        429,
+        "rate_limit_error",
+        "Model provider rate limit exceeded",
+    ),
+}
 
 
 def git(*args: str, cwd: Path | None = None) -> str:
@@ -80,6 +95,39 @@ class Fixture:
             self.model_ready.set()
             if not self.viewer_ready.wait(getattr(self, "viewer_timeout", 15)):
                 raise RuntimeError("viewer failed to attach")
+        if self.case == "auto":
+            if self.calls == 1:
+                system = "\n".join(
+                    str(m.get("content", ""))
+                    for m in messages
+                    if m.get("role") == "system"
+                )
+                skill_path = f"/skills/user/{SKILL_NAME}/SKILL.md"
+                assert SKILL_NAME in system and SKILL_DESCRIPTION in system, (
+                    "harness-mounted skill metadata was not discovered"
+                )
+                assert skill_path in system, "native skill read path was not advertised"
+                assert SKILL_INSTRUCTION not in json.dumps(messages), (
+                    "on-demand skill content loaded before the native read"
+                )
+                assert any(
+                    t.get("function", {}).get("name") == "read_file"
+                    for t in request.get("tools", [])
+                ), "native read_file tool was not advertised"
+                return "", {
+                    "id": "skill-tool",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": json.dumps({"file_path": skill_path}),
+                    },
+                }
+            assert any(
+                m.get("role") == "tool"
+                and m.get("tool_call_id") == "skill-tool"
+                and SKILL_INSTRUCTION in str(m.get("content", ""))
+                for m in messages
+            ), "native SKILL.md contents did not reach the main model"
         handoff = any(
             "You have reached your execution limit" in str(m.get("content", ""))
             for m in messages
@@ -130,7 +178,7 @@ class Fixture:
                     "arguments": json.dumps({"command": command}),
                 },
             }
-        if self.calls == (2 if self.case == "ask-user" else 1):
+        if self.calls == (2 if self.case in ("auto", "ask-user") else 1):
             command = (
                 'set -e; test -z "${HUB_TOKEN+x}${HUB_TOKEN_ID+x}${HUB_BASE_URL+x}${APP_ID+x}"; '
                 + "mkdir -p docs; printf 'fixture result\\n' > result.txt; printf '# Plan\\n\\n## Verification\\n- Build: test -f result.txt\\n' > docs/plan.md; git add result.txt docs/plan.md; git commit -m 'Implement fixture task'; printf 'PRIMARY_CONTEXT_MARKER\\n'"
@@ -219,6 +267,23 @@ class Fixture:
                     self.rfile.read(int(self.headers["Content-Length"]))
                 )
                 fixture.requests.append(request)
+                if fixture.case in PROVIDER_ERRORS:
+                    status, error_type, _summary = PROVIDER_ERRORS[fixture.case]
+                    fixture.calls += 1
+                    fixture.model_ready.set()
+                    if not fixture.viewer_ready.wait(15):
+                        raise RuntimeError("viewer failed to attach")
+                    self.send_json(
+                        {
+                            "error": {
+                                "message": "provider-response-supersecret fixture-hub-token fixture-model-key",
+                                "type": error_type,
+                                "code": "untrusted-supersecret-code",
+                            }
+                        },
+                        status,
+                    )
+                    return
                 text, tool = fixture.model(request)
                 message = {"role": "assistant", "content": text}
                 if tool:
@@ -488,6 +553,15 @@ def run_case(case: str, args, binary: Path) -> dict:
     )
     home = directory / "home"
     home.mkdir()
+    skills = directory / "skills"
+    if case == "auto":
+        # Match a mounted SkillCard's layout; only the harness creates the home link.
+        skill = skills / SKILL_NAME
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            f"---\nname: {SKILL_NAME}\ndescription: {SKILL_DESCRIPTION}\n---\n"
+            f"{SKILL_INSTRUCTION}\n"
+        )
     with server(fixture) as url:
         # An allowlist prevents accidental use of any developer credentials.
         env = {
@@ -502,7 +576,7 @@ def run_case(case: str, args, binary: Path) -> dict:
             "HARNESS_WORK_DIR": str(directory / "workspace"),
             "HARNESS_PARAMS_FILE": str(params),
             "HARNESS_TERMINATION_LOG_PATH": str(directory / "termination.json"),
-            "HARNESS_SKILLS_DIR": str(directory / "empty-skills"),
+            "HARNESS_SKILLS_DIR": str(skills),
             "HARNESS_HITL_TIMEOUT_SECONDS": "20",
             "HARNESS_VERIFY_ENFORCE": "on",
             "HUB_BASE_URL": url,
@@ -549,7 +623,13 @@ def run_case(case: str, args, binary: Path) -> dict:
         json.dumps(fixture.viewer_frames, indent=2)
     )
     term = json.loads((directory / "termination.json").read_text())
-    expected = 2 if case == "max-turns" else 1 if case == "cancel" else 0
+    expected = (
+        2
+        if case == "max-turns"
+        else 1
+        if case == "cancel" or case in PROVIDER_ERRORS
+        else 0
+    )
     assert code == expected, (
         f"{case}: exit {code}, expected {expected}; see {directory / 'harness.log'}; termination={term}"
     )
@@ -563,6 +643,29 @@ def run_case(case: str, args, binary: Path) -> dict:
     assert (
         "fixture-hub-token" not in (directory / "workspace/.git/config").read_text()
     ), "Hub credential reached Git config"
+    if case in PROVIDER_ERRORS:
+        status, error_type, summary = PROVIDER_ERRORS[case]
+        assert term["exitCode"] == 1 and term["outcome"] == "failed", term
+        assert summary in term["stopReason"], term
+        assert f'"statusCode":{status}' in term["stopReason"], term
+        assert error_type in term["stopReason"], term
+        frames = json.dumps(fixture.viewer_frames)
+        assert summary in frames, "provider failure did not reach the viewer"
+        output = (directory / "harness.log").read_text() + frames + json.dumps(term)
+        for secret in (
+            "provider-response-supersecret",
+            "fixture-hub-token",
+            "fixture-model-key",
+            "untrusted-supersecret-code",
+        ):
+            assert secret not in output, "untrusted provider error leaked to output"
+        return {
+            "case": case,
+            "exitCode": code,
+            "modelCalls": fixture.calls,
+            "providerStatus": status,
+            "tokenRevoked": fixture.revoked,
+        }
     if case == "cancel":
         assert fixture.cancel_sent and (directory / "workspace/started.txt").exists(), (
             "viewer did not cancel an active tool"
@@ -617,6 +720,11 @@ def run_case(case: str, args, binary: Path) -> dict:
             m.get("method") == "session/request_permission"
             for m in fixture.viewer_frames
         ), "approval did not reach viewer"
+    if case == "auto":
+        link = home / ".agents/skills"
+        assert link.is_symlink() and link.resolve() == skills, (
+            "harness did not link the mounted SkillCard directory"
+        )
     return {
         "case": case,
         "exitCode": code,
@@ -648,6 +756,7 @@ def main():
             "cancel",
             "steer-reconnect",
             "max-turns",
+            *PROVIDER_ERRORS,
         ],
         default=[
             "auto",
@@ -656,6 +765,7 @@ def main():
             "cancel",
             "steer-reconnect",
             "max-turns",
+            *PROVIDER_ERRORS,
         ],
     )
     args = parser.parse_args()

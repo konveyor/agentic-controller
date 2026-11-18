@@ -97,7 +97,8 @@ func startLightspeed(ctx context.Context, cfg Config) (Process, error) {
 	cmd.Cancel = terminate
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Env = env
-	// Runtime errors are returned with ACP error data; preserve process logs too.
+	// Provider failures carry bounded status/category diagnostics over ACP.
+	// Runtime process logs remain separate from provider response bodies.
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -121,8 +122,9 @@ func (s *lightspeedProcess) Alive() bool {
 	}
 }
 
-// Lightspeed returns structured error details over ACP rather than Goose's
-// unstructured provider-error log convention.
+// Lightspeed returns bounded provider status/category diagnostics over ACP.
+// It deliberately omits arbitrary provider wording, which can contain secrets;
+// do not recover unredacted exception text from the process logs.
 func (s *lightspeedProcess) ProviderError(_, _ time.Time, _ time.Duration) string { return "" }
 func (s *lightspeedProcess) Stop() error {
 	defer os.RemoveAll(s.tempDir)
@@ -180,6 +182,9 @@ func lightspeedEnv(base []string, cfg Config, dir string) ([]string, error) {
 		values["OPENAI_API_KEY"] = cfg.APIKey
 		if cfg.APIKey == "" {
 			values["OPENAI_API_KEY"] = values["XAI_API_KEY"]
+		}
+		if values["OPENAI_API_KEY"] == "" {
+			return nil, fmt.Errorf("xAI API key is required: configure the Gateway credential or XAI_API_KEY")
 		}
 		if endpoint == "" {
 			endpoint = "https://api.x.ai/v1"

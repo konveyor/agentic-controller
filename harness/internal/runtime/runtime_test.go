@@ -62,6 +62,15 @@ func TestLightspeedXAIProviderCredentials(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env, err := lightspeedEnv([]string{"OPENAI_API_KEY=unrelated-openai", "OPENAI_BASE_URL=https://unrelated.example/v1", "XAI_API_KEY=" + tc.inheritedXAIKey}, Config{Provider: "xai", Model: "grok-4", APIKey: tc.configuredKey}, t.TempDir())
+			if tc.wantKey == "" {
+				if err == nil || !strings.Contains(err.Error(), "xAI API key is required") {
+					t.Fatalf("missing xAI key must fail clearly, got %v", err)
+				}
+				if env != nil || strings.Contains(err.Error(), "unrelated-openai") {
+					t.Fatal("missing-key failure exposed credentials or returned a child environment")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,6 +79,23 @@ func TestLightspeedXAIProviderCredentials(t *testing.T) {
 				t.Fatal("xAI provider, endpoint, model, or isolated credential not mapped")
 			}
 		})
+	}
+}
+
+func TestLightspeedXAIKeyRejectedBeforeProcessStartup(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "python3"), []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("OPENAI_API_KEY", "unrelated-openai")
+	t.Setenv("XAI_API_KEY", "")
+	process, err := Start(context.Background(), Config{Name: "lightspeed", Provider: "xai", BindLoopback: true})
+	if process != nil {
+		defer process.Stop()
+	}
+	if process != nil || err == nil || !strings.Contains(err.Error(), "xAI API key is required") {
+		t.Fatalf("missing xAI key must fail before launching Python, got process=%v error=%v", process, err)
 	}
 }
 
@@ -83,7 +109,7 @@ func TestLightspeedOpenAICompatibleGatewayEndpoints(t *testing.T) {
 			{"https://model.example/custom", "https://model.example/custom/v1"},
 		} {
 			t.Run(provider+"/"+tc.endpoint, func(t *testing.T) {
-				env, err := lightspeedEnv(nil, Config{Provider: provider, Endpoint: tc.endpoint}, t.TempDir())
+				env, err := lightspeedEnv(nil, Config{Provider: provider, Endpoint: tc.endpoint, APIKey: "fixture-key"}, t.TempDir())
 				if err != nil {
 					t.Fatal(err)
 				}
