@@ -51,7 +51,7 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 - Konveyor with Goose, then the Lightspeed prototype
 - UI, harness and runtime changes, coverage and accepted limits
 - **Run 1:** normal Coolstore planning with human guidance
-- **Run 2:** controlled rejection with the same Agent and image
+- **Run 2:** controlled rejection with the same Agent reference and image
 - What to do with the runtime
 - Lightspeed AgenticRun controller adoption feasibility
 
@@ -61,19 +61,20 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 First explain the existing setup, the runtime swap, and the UI/harness/runtime
 architecture. Say what changed in the UI and harness as well as the runtime.
 Show the current changes
-and accepted limits. Then introduce Run 1 as normal planning: review a tool call,
-answer the database question, steer the work, inspect the plan and show the
-actual verification/pushed result only when that successful take exists.
-Run 2 reuses the same Agent definition, image and model. It reads hostile notes
+and accepted limits. Then introduce Run 1 as automatic planning with ask_user:
+answer the database question, steer the work, review the plan and show the
+pushed result. Four independent planning checks passed; harness verification
+did not run. Keep those outcomes distinct.
+Run 2 reuses the same Agent reference, image and model. It reads hostile notes
 from a separate branch, in automatic mode with questions off. Run 1 uses
-approval mode with questions on. Show the real classifier rejection and the
+automatic mode with questions on. Show the real classifier rejection and the
 model/viewer withholding evidence.
 
 The current-runtime inspection recording is ready: an ordinary POM read passes,
 then hostile notes are rejected. Play the 2:34 recording on the inspection slide.
-The normal planning recording is still pending; its rehearsal failed without
-producing a plan. Keep the historical 4039163 planning video separate from the
-current 451818c inspection evidence.
+The positive take ui-jxx5v succeeded and pushed a planning-only commit. Its
+201-second separate MP4 is available. Keep the historical 4039163 planning video separate
+from the two current 451818c demonstrations.
 
 For recording, capture the actual mouse pointer and actual clicks. Pause on the
 target before clicking, then leave time to read the resulting card. Cut long
@@ -215,12 +216,15 @@ Runtime and recorded-inspection revisions:
 Runtime 451818c50d6c93a8ab7085cf0c70b15510b6ca75
 Recorded controller/harness source: 4c036c931666de10dd7c1620928c2e34f8ae17ae
 Recorded inspection UI: ed11b648799322f566b84db309f371c138713cdd
-UI PR 3738: 3a83a095 passed full CI and is deployed from its PR CI image; live validation is in progress.
+UI PR 3738: 3a83a095 passed full CI and is deployed from its PR CI image.
+Positive take ui-jxx5v exercised questions and steering on that UI; pending-request
+replay was tested separately in earlier take 06.
 Current integration guide: ../lightspeed-runtime-prototype.md
 The existing video at 4039163 records the earlier custom ACP adapter and cannot
 validate these later changes. The current 451818c inspection recording supplies
-separate controlled rejection evidence; successful current-runtime planning
-remains pending.
+separate controlled rejection evidence. Current-runtime planning take ui-jxx5v
+succeeded and pushed docs/plan.md; the 201-second positive MP4 is available.
+Four independent checks passed; harness verification did not run.
 -->
 
 
@@ -324,8 +328,8 @@ subtests. Native cases include child/parent inspection and upstream redaction.
 These use scripted model/classifier inputs and do not establish live classifier
 accuracy. The 154-second inspection recording now exercises 451818c with a real
 benign read followed by an actual classifier rejection. Its captured interval
-supports withholding from the next model call and attached viewer. Successful
-current-runtime planning remains pending. The older 4039163 planning recording
+supports withholding from the next model call and attached viewer. Current-runtime planning take ui-jxx5v succeeded
+and pushed a plan; independent checks passed but harness verification did not run. The older 4039163 planning recording
 covers its earlier custom adapter only.
 
 ACP remains an optional dependency and entrypoint. Our controller creates and
@@ -673,12 +677,13 @@ Token observations are partial. Existing token-accounting research continues; mo
 
 The prototype covers Konveyor's runtime use cases except monetary budget
 enforcement. This is an implementation/qualification statement, not a claim that
-all controls appear in one new video. The planned normal run shows questions,
-approvals, steering, conversation continuity and observed usage. A separate
+all controls appear in one new video. The positive automatic run shows ask_user, steering, conversation continuity
+and observed usage; it does not show per-file approvals. A separate
 recorded controlled rejection run shows a benign POM read passing inspection,
 then hostile notes rejected before another model call or viewer result release.
 This is evidence for the captured controlled attempt, not general classifier
-accuracy or a successful normal planning run.
+accuracy. The separate positive take produced a plan and pushed commit; it
+did not validate an application migration or run harness verification.
 
 Cancellation, same-session max-turn handoff and steering/reconnect have identified
 regression evidence: hack/lightspeed-runtime/verify.py cases cancel, max-turns
@@ -705,59 +710,44 @@ Evidence and recording plan: lightspeed-2026-11-11-demo.md
 
 # Coolstore planning demo
 
-**Run 1:** plan a Java EE application’s move to Quarkus.
+**Run 1:** produce a focused Coolstore persistence plan. **Automatic mode; questions on.**
 
-- Ask a question, review tool permissions and give guidance.
-- Keep the decisions through plan revisions in one conversation.
-- Show observed usage, review the plan, then verify and push it.
+- Answer the database question and give guidance.
+- Keep those decisions in the same conversation and review the plan.
+- Show observed usage, the pushed plan and the separate check results.
 
-**Final recording pending.**
-
+**Recording available as a separate MP4 (3:21).**
 
 <!--
-Two separate recorded runs are planned for the November 18 discussion. This
-normal run is a planning deliverable, not a completed application migration.
-It should show the application, selected Agent/model, question and answer,
-approved tool calls, guidance uptake, preserved decisions, observed usage,
-reviewed file, harness verification and pushed Git result.
+Positive take 07, AgentRun ui-jxx5v, succeeded and pushed commit
+bf1afd36bdef31f5e88d511e654a7d8cee0ade13 to djzager/coolstore. Only docs/plan.md
+changed. This is focused persistence planning, not a completed or validated
+application migration. The 201-second separate MP4 is available as
+lightspeed-2026-11-18-planning.mp4.
 
-The successful current-runtime planning recording remains pending. The separate
-inspection recording is ready. Both Gateways verify with HTTP 200 after the
-November 17 credential refresh. Runtime 451818c and controller 4c036c9 are unchanged.
-The inspection take used UI ed11b648 before the reconnect correction. Capture
-actual deployed/source provenance for the next planning take.
+The run used automatic mode with ask_user on, inspection enabled, frozen runtime
+451818c, the CI-built Java image 3bf3e1e and deployed UI 3a83a095 from PR CI.
+There are no per-file tool permission approvals in this positive demonstration.
+The actual database answer was submitted at 14:08:42; guidance at 14:08:44 was
+consumed at 14:12:24. Final text review occurred at 14:13:01; the run reached
+Succeeded at 14:13:29. The current take has no reconnect interruption.
+Pending-request replay was tested separately in earlier take 06.
 
-Normal rehearsal ui-8p5rg failed without producing a plan. Approved reads passed
-inspection, steering was consumed, usage was captured, and the live process and
-module hashes matched 451818c. A reconnect cleared pending permission/elicitation
-cards because ChatPanel calls setItems([]) after initialization. The harness
-correctly replayed those requests. This is a confirmed UI issue, not evidence
-that the runtime failed to replay. UI reconnect fix 3a83a095 is committed in
-PR 3738, has passed full CI including end-to-end checks, and is deployed from
-its PR CI image. Live validation is in progress; do not claim that planning has
-passed. This approved UI-only exception leaves the frozen
-runtime/controller implementation unchanged.
+Four independent planning checks exited zero. Harness Verified=False/NotRun:
+the model's Verification lines lacked the required '- ' list markers, so the
+harness did not discover or execute them. Do not call this harness-verified or
+claim application build/test validation. Show the independent check results and
+the actual harness status separately. The harness still pushed the local commit.
 
-Do not claim this rehearsal recorded a successful question/answer, verified
-plan or push. Those remain required shots for the successful normal take.
-Use the current walkthrough for the recording checklist and exact task text.
+Presenter cues: introduce Coolstore and the selected Agent/model; explain auto
+mode and questions on. Pause on the real ask_user question and submitted answer,
+then show steering being sent and actually consumed. Review the final text and
+plan, observed token usage, terminal state and pushed commit. Preserve actual
+pointer/clicks and calm cuts; no per-file approval sequence is promised.
 
-Presenter/editing cues: introduce the application and chosen Agent/model;
-read the action and arguments before clicking approval, allow time for the
-question and answer, point to the accepted guidance and observed usage, then
-inspect the resulting plan/diff before commit approval. Capture the actual
-pointer and clicks, hold each important result long enough to read, and use
-calm jump cuts for waits while preserving the actual interaction order.
-
-The existing separate MP4 is historical: it records 4039163 and the earlier
-custom ACP implementation. Its 164-second edit selected normal-speed portions
-from a 28m9s live Coolstore run, with idle waits omitted. That run produced
-commit 9e97db0, five passing planning checks and an unchanged application tree.
-It does not qualify the official ACP composition or rebased inspection path.
-Historical result:
-https://github.com/djzager/coolstore/blob/9e97db02b641dc2608fcc399503bbc1a0ed3b842/docs/plan.md
-Current walkthrough:
-lightspeed-2026-11-11-demo.md
+The inspection take remains separate and uses the earlier UI ed11b648. Both
+current demonstrations use runtime 451818c. The old 4039163 planning MP4 remains
+historical and does not qualify the current official ACP integration.
 -->
 
 
@@ -767,7 +757,7 @@ lightspeed-2026-11-11-demo.md
 
 # Tool-output inspection demo
 
-**Run 2:** the same Agent, image and model as Run 1.
+**Run 2:** the same Agent reference, image and model as Run 1.
 
 Read `pom.xml`, then hostile notes on a separate branch. **Automatic mode; questions off.**
 
@@ -780,9 +770,9 @@ Read `pom.xml`, then hostile notes on a separate branch. **Automatic mode; quest
 <!--
 Play the 154-second inspection recording and narrate it live. Take 03 records
 AgentRun ui-pgsqx on demo/lightspeed-rejection-20261118-take-03, with runtime 451818c,
-controller 4c036c9 and UI ed11b648. This is the same Agent definition, Java image
+controller 4c036c9 and UI ed11b648. This is the same Agent reference, Java image
 and model as normal planning. It reads pom.xml first, then the hostile notes
-from a separate branch. Normal planning uses approve mode with askUser on;
+from a separate branch. Normal planning uses auto mode with askUser on;
 this controlled run uses auto mode with askUser off. Inspection/redaction remain on.
 
 Point out the ordinary POM read completing, then the real malicious warning
@@ -800,8 +790,9 @@ The walkthrough discloses a final capture-wait timeout after the real Failed
 state was visible and preserves the full source and exact edit decisions.
 
 The recording predates UI reconnect fix 3a83a095, now deployed from PR 3738 CI
-after all checks passed. Live validation is in progress. Successful
-current-runtime planning remains pending. The 4039163 normal-planning video remains historical.
+after all checks passed. Current-runtime planning take ui-jxx5v succeeded and
+pushed a plan; independent checks passed but harness verification did not run.
+Its 201-second positive MP4 is available. The 4039163 planning video remains historical.
 
 The MP4 is silent for live narration and stored in immutable asset commit
 ca578232b434e21a4c96f57c62629c0e04ee7631. Cancellation, handoff and reconnect

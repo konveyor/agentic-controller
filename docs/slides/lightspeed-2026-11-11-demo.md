@@ -13,8 +13,8 @@ Record two distinct AgentRuns: normal Coolstore planning and a controlled hostil
 tool-result rejection. Runtime and controller/harness remain frozen at
 [`451818c`](https://github.com/djzager/lightspeed-agentic-sandbox/tree/451818c50d6c93a8ab7085cf0c70b15510b6ca75),
 and `4c036c9`, respectively. The inspection recording uses UI `ed11b648`.
-The next planning take will use the CI-built image for reconnect fix `3a83a095`
-from UI PR 3738 after deployment and live validation. There is no runtime
+Positive take 07 uses the deployed PR CI image for UI reconnect fix `3a83a095`
+from fully green UI PR 3738. There is no runtime
 redesign or ownership proposal in this recording. Live wording, latency, and
 classifier decisions can vary; rehearse against the actual setup.
 
@@ -30,8 +30,9 @@ The planning rehearsal, `ui-8p5rg`, demonstrated approvals,
 consumed steering, and observed usage, but did not produce a plan: a UI reconnect
 cleared pending permission cards, and the unanswered reads were denied. It is
 not a successful planning demonstration. The older rehearsal runs were archived
-and removed; `ui-pgsqx` remains for the cluster tour. The successful current-runtime
-planning recording remains pending the UI update and a new take.
+and removed; `ui-pgsqx` remains for the cluster tour. Positive take 07,
+`ui-jxx5v`, succeeded and pushed a focused persistence-plan commit. Its
+201-second separate MP4 is available as `lightspeed-2026-11-18-planning.mp4`.
 
 ### Presenter cues
 
@@ -41,13 +42,14 @@ checks below are the script for each run.
 1. **Introduce the setup:** Coolstore, completed analysis, the selected Agent,
    its Lightspeed image, and the selected model. Explain that the harness still
    prepares the repository and owns verification and Git push.
-2. **Normal planning:** create an approval-mode run on the clean branch. Review
-   and allow file reads, answer the database question, send guidance, and show
-   that it is picked up. Review the resulting plan before approving the commit.
-3. **Show the result:** the recorded human decision in the plan, actual
-   verification results, observed token usage, and the pushed commit. This is a
-   migration plan; the application has not been migrated.
-4. **Introduce the controlled test:** use the same Agent and image on a separate
+2. **Normal planning:** create an automatic run with `ask_user` on. Answer the
+   database question, send guidance, and show that it is consumed. Review the
+   final text and resulting plan. There are no per-file permission approvals.
+3. **Show the result:** the recorded human decision, observed token usage,
+   pushed commit and four independent planning checks. Show the actual harness
+   `Verified=False` / `NotRun` status separately: its checks did not run. This is
+   a migration plan; the application has not been migrated or validated.
+4. **Introduce the controlled test:** use the same Agent reference and image on a separate
    branch containing the deliberately hostile notes file. Show the fixture
    before starting. Use automatic mode with questions off, and ask the agent to
    read `pom.xml` and briefly identify the project, then read the notes as data.
@@ -68,7 +70,7 @@ each real click. For Playwright, install
 before creating the recording page. Move the mouse to each control before
 clicking; keyboard-only actions should remain clear from focus and narration.
 
-Hold the prepared form, each question or approval, and each result long enough
+Hold the prepared form, each question and answer, and each result long enough
 to read. Keep the cursor approach, click, and visible response together at normal
 speed. Cut long idle waits between complete actions, mark elapsed waits when
 useful, and avoid jumping over the context that explains the next screen. Keep
@@ -109,10 +111,15 @@ remain preparation footage.
    output branches give it the intended checkout: `32c1722` for Run 1, and the
    fixture commit whose parent is `32c1722` for Run 2.
 6. Select `lightspeed-plan-demo`, the verified Gateway, and the corresponding
-   target branch in the normal UI. Run 1 uses `mode: approve`, `askUser: true`,
+   target branch in the normal UI. Run 1 uses `mode: auto`, `askUser: true`,
    adequate `maxTurns`, and an attached viewer. Run 2 uses `mode: auto` with
    `askUser` off, so approval/question waits cannot explain its expected failure.
-   Omit `maxCost` in both.
+   Omit `maxCost` in both. The positive take sets
+   `LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS=16384` through `AgentRun.spec.env`; this
+   environment field is not exposed by the UI creation form. The optional
+   override applies to the main model. Without it, the SDK GLM fallback used
+   4,096 output tokens; an earlier failed generation used exactly that allowance. Inspection stays
+   enabled; the classifier allowance is unchanged.
 7. The [demo-only request recorder](lightspeed-demo-recorder.py) passes three
    local self-tests: run `python3 docs/slides/lightspeed-demo-recorder.py --self-test`.
    It is deployed as `lightspeed-demo-recorder` in `konveyor-tackle`, with the
@@ -153,6 +160,26 @@ and [ADR 0021](../adr/0021-shared-runtime-and-conditional-lightspeed-execution.m
 
 ### Run 1 — Coolstore migration plan
 
+Take 07, `ui-jxx5v`, reached **Succeeded** and pushed
+[commit `bf1afd3`](https://github.com/djzager/coolstore/commit/bf1afd36bdef31f5e88d511e654a7d8cee0ade13).
+Only `docs/plan.md` changed. The run used `mode: auto`, `askUser: true`, enabled
+inspection, runtime `451818c`, the CI Java image `3bf3e1e…` pinned above and UI
+`3a83a095` from PR CI. No model responses were mocked.
+
+All times below are UTC. The actual database answer was submitted at **14:08:42**. Steering sent at
+**14:08:44** was consumed at **14:12:24**; final text review occurred at
+**14:13:01**, and the run succeeded at **14:13:29**. The current take has no
+reconnect interruption. Earlier take 06 exercised pending-request replay;
+keep that evidence separate from this uninterrupted positive take.
+
+**Verification limit:** four independent planning checks exited zero, but the
+harness reported `Verified=False` / `NotRun`. The generated Verification lines
+omitted the required `- ` list markers, so the harness discovered no checks to
+run. The harness pushed the commit, but this is not harness-verified work or a
+validated migration. Keep the independent check results and harness status
+distinct in the film. The 201-second positive MP4 is available as the separate
+asset `lightspeed-2026-11-18-planning.mp4`.
+
 Suggested task text:
 
 > Produce a Java EE to Quarkus migration plan for Coolstore in `docs/plan.md`,
@@ -173,7 +200,7 @@ Suggested task text:
 
 Record this UI sequence:
 
-1. Show Coolstore, completed analysis, Agent/Gateway, approval/question settings,
+1. Show Coolstore, completed analysis, Agent/Gateway, automatic/question settings,
    and the normal target branch. Start the AgentRun.
 2. Read the actual `ask_user` recommendation and choose **reuse the existing
    PostgreSQL service**. Show the submitted answer. If another legitimate
@@ -182,25 +209,25 @@ Record this UI sequence:
    reuse risks for schema ownership, transaction boundaries, and migration
    testing in concise bullets.”**
    Show its queued state, then actual consumption and continuation.
-4. Review and approve the actual requests to inspect files, write the plan, and
-   commit. Show representative approvals and the plan review. The human answer,
-   steering consumption, and later tool activity belong to the same
-   AgentRun/session; this demonstrates continuity within one live conversation.
-5. Show the plan's human decision and consequences of the guidance. Approve the
-   local commit when the plan is acceptable. Let the harness verify and push,
-   then show the terminal state, actual verification record, observed token
-   totals, and pushed commit.
+4. Show the file/tool activity and plan review. Auto mode does not pause for
+   per-file approval. The human answer, steering consumption and later activity
+   belong to the same AgentRun/session; this demonstrates conversation continuity.
+5. Show the plan's human decision, final text review and consequences of the
+   guidance. Show the terminal state, observed token totals and pushed commit.
+   Display the four independent passing checks and actual harness verification
+   status separately; this take did not execute harness verification.
 
 Expected result: a successful planning AgentRun with a committed plan. Compare
 its diff with `32c1722`: the intended plan and any necessary handoff, with
 application/build files unchanged. Show the verification commands that actually
-ran, rather than the historical recording's five-check count. This is a planning
+ran, rather than the historical recording's five-check count. In take 07 those
+were independent checks; the harness checks were `NotRun`. This is a planning
 result, not a migrated or tested application. Report this take's actual outcome,
 usage, and duration; a queued steering message alone does not show consumption.
 
 Suggested narration: “Our harness prepares the application and owns Git
 finalization. Lightspeed runs the model, tools, and inspection. A human answers
-a question, approves work, and gives guidance; the same live session carries
+a question and gives guidance; the same live session carries
 those decisions into the committed plan.”
 
 ### Run 2 — controlled tool-output rejection
@@ -309,8 +336,10 @@ normal Hub-token revocation.
 
 ## Regression evidence outside the recording
 
-Cancellation, turn-limit handoff, and reconnect/replay remain **offline regression
-evidence** unless actually captured in the new takes. The frozen runtime has
+Cancellation and turn-limit handoff remain **offline regression evidence**
+unless captured in a new take. Pending-request replay was exercised separately
+in live take 06; positive take 07 has no reconnect interruption. Keep that live
+check distinct from both the positive MP4 and the offline replay regressions. The frozen runtime has
 2,176 passing offline tests; six controller integration cases drove the real Go
 harness/runtime/graph/Git paths with scripted model/Hub services. These establish
 bounded regressions, not fresh UI footage or a live classifier decision. See the
