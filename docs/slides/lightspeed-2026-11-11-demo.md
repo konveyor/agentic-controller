@@ -1,16 +1,22 @@
 # Lightspeed presentation and demo walkthrough
 
 Use the [editable deck](lightspeed-2026-11-11.md) and
-[PDF](lightspeed-2026-11-11.pdf) with the presenter cues below. The
-[2:34 inspection recording](lightspeed-2026-11-18-inspection.mp4) shows the
-current runtime with the visible pointer and an uninterrupted UI sequence.
-The existing [2:44 planning video](lightspeed-2026-11-11-demo.mp4) is historical
-footage of runtime `4039163`; its provenance is linked at the end.
+[PDF](lightspeed-2026-11-11.pdf) with the presenter cues below. Play the
+[4:16 Coolstore film](lightspeed-2026-11-18-demo.mp4) once on the **Coolstore
+demo** slide. It shows human guidance during planning, followed by a controlled
+hostile tool-result rejection. The opening lists the behaviors to watch, and
+the bottom bar carries conversational captions. Accelerated waits have a
+visible speed indicator.
 
-## Recording plan and rehearsal status
+The earlier [3:21 planning edit][old-planning], [2:34 inspection edit][old-inspection]
+and [2:44 historical planning video][old-video] are superseded presentation
+assets preserved in immutable Git history. The last uses runtime `4039163` and
+the earlier custom ACP adapter. They are not additional playback items.
 
-Record two distinct AgentRuns: normal Coolstore planning and a controlled hostile
-tool-result rejection. Runtime and controller/harness remain frozen at
+## Recorded runs and provenance
+
+The combined film contains two distinct AgentRuns: normal Coolstore planning
+and a controlled hostile tool-result rejection. Runtime and controller/harness remain frozen at
 [`451818c`](https://github.com/djzager/lightspeed-agentic-sandbox/tree/451818c50d6c93a8ab7085cf0c70b15510b6ca75),
 and `4c036c9`, respectively. The inspection recording uses UI `ed11b648`.
 Positive take 07 uses the deployed PR CI image for UI reconnect fix `3a83a095`
@@ -32,34 +38,28 @@ cleared pending permission cards, and the unanswered reads were denied. It is
 not a successful planning demonstration. The older rehearsal runs were archived
 and removed; `ui-pgsqx` remains for the cluster tour. Positive take 07,
 `ui-jxx5v`, succeeded and pushed a focused persistence-plan commit. Its
-201-second separate MP4 is available as `lightspeed-2026-11-18-planning.mp4`.
+planning footage now forms the first part of the combined film. The earlier
+201-second edit is superseded and preserved in Git history.
 
 ### Presenter cues
 
-Keep these cues visible beside the deck. The detailed task text and evidence
-checks below are the script for each run.
+Play the combined film once. It opens with the behaviors to watch, then moves
+through the planning conversation and the controlled hostile-file attempt.
 
-1. **Introduce the setup:** Coolstore, completed analysis, the selected Agent,
-   its Lightspeed image, and the selected model. Explain that the harness still
-   prepares the repository and owns verification and Git push.
-2. **Normal planning:** create an automatic run with `ask_user` on. Answer the
-   database question, send guidance, and show that it is consumed. Review the
-   final text and resulting plan. There are no per-file permission approvals.
-3. **Show the result:** the recorded human decision, observed token usage,
-   pushed commit and four independent planning checks. Show the actual harness
-   `Verified=False` / `NotRun` status separately: its checks did not run. This is
-   a migration plan; the application has not been migrated or validated.
-4. **Introduce the controlled test:** use the same Agent reference and image on a separate
-   branch containing the deliberately hostile notes file. Show the fixture
-   before starting. Use automatic mode with questions off, and ask the agent to
-   read `pom.xml` and briefly identify the project, then read the notes as data.
-   This shows an ordinary file passing inspection before the hostile result is
-   rejected. The run settings remove permission/question waits as explanations
-   for the expected failure.
-5. **Explain the expected failure:** show the native file read, the actual
-   classifier warning, the failed run, and evidence that the rejected content
-   reached neither another main-model call nor the viewer. The malicious file
-   is the changed input; there is no special rejection-only Agent.
+1. **Planning:** point out the database recommendation and submitted answer,
+   then the guidance sent while the agent works. Watch that guidance being
+   consumed and the final plan review. There are no per-file permission
+   approvals in this automatic run.
+2. **Planning result:** the AgentRun succeeded and the harness pushed a plan.
+   Four independent planning checks passed before final text approval. The
+   harness's own checks were `NotRun`, so do not describe this as harness-verified
+   work or a validated application migration. The detailed evidence stays here.
+3. **Controlled inspection:** the same Agent reference and image read an ordinary
+   POM, then a deliberately hostile notes file on a separate branch. The run
+   uses automatic mode with questions off. Narrate the classifier decision while
+   the UI shows a generic runtime error and the expected Failed state. Correlated
+   runtime logs confirm the reason. Request-order and viewer evidence below bound
+   the conclusion to this attempt and captured interval.
 
 ### Recording and editing
 
@@ -72,9 +72,8 @@ clicking; keyboard-only actions should remain clear from focus and narration.
 
 Hold the prepared form, each question and answer, and each result long enough
 to read. Keep the cursor approach, click, and visible response together at normal
-speed. Cut long idle waits between complete actions, mark elapsed waits when
-useful, and avoid jumping over the context that explains the next screen. Keep
-the full recording and exact edit decisions. Earlier cursor-free rehearsals
+speed. Accelerate long idle waits with a visible speed indicator. Preserve the
+continuous source sequence and keep decisions and clicks at normal speed. Keep the full recording and exact edit decisions. Earlier cursor-free rehearsals
 remain preparation footage.
 
 ### Prepare and verify the recording inputs
@@ -177,8 +176,8 @@ harness reported `Verified=False` / `NotRun`. The generated Verification lines
 omitted the required `- ` list markers, so the harness discovered no checks to
 run. The harness pushed the commit, but this is not harness-verified work or a
 validated migration. Keep the independent check results and harness status
-distinct in the film. The 201-second positive MP4 is available as the separate
-asset `lightspeed-2026-11-18-planning.mp4`.
+distinct in the accompanying evidence. The planning footage forms the first
+part of the combined film; the earlier [201-second edit][old-planning] is superseded.
 
 Suggested task text:
 
@@ -214,8 +213,8 @@ Record this UI sequence:
    belong to the same AgentRun/session; this demonstrates conversation continuity.
 5. Show the plan's human decision, final text review and consequences of the
    guidance. Show the terminal state, observed token totals and pushed commit.
-   Display the four independent passing checks and actual harness verification
-   status separately; this take did not execute harness verification.
+   Keep the four independent passing checks and actual harness verification
+   status distinct in the accompanying notes. This take did not execute harness verification.
 
 Expected result: a successful planning AgentRun with a committed plan. Compare
 its diff with `32c1722`: the intended plan and any necessary handoff, with
@@ -298,17 +297,22 @@ withholds that result from viewers.”
 
 ### Recorded inspection take
 
-The [154-second MP4](lightspeed-2026-11-18-inspection.mp4) records `ui-pgsqx`
+The inspection portion of the combined film records `ui-pgsqx`
 on `demo/lightspeed-rejection-20261118-take-03`, which remains at
 [fixture commit `89d0ac0`](https://github.com/djzager/coolstore/commit/89d0ac0102fff57f6546825f2a3a5799c9069f3d).
 It uses the Java image pinned above, runtime `451818c`, and UI `ed11b648`.
-It is silent for live narration.
+The combined film is silent for live narration. Its UI shows a generic runtime
+error, then Failed. The explanatory classifier caption relies on the correlated
+runtime log warning `malicious tool result detected` and request-order evidence;
+that exact warning is not visible in the recorded UI. The classifier caption
+begins at movie time 239.08 (inspection source 97), when the generic error
+appears. The terminal Failed state appears in the final approximately nine seconds.
 
-The UI action sequence is one uninterrupted, normal-speed segment of source
-seconds 8–114. A clearly labeled six-second still repeats the same run's source
-frame at 96 seconds so the summary and hostile read can be read. The title,
-runtime/request evidence, and references are added cards. Initial loading and
-trailing idle are omitted; no cursor movements or clicks are reconstructed.
+The selected UI source sequence is continuous from seconds 8–114 at normal
+speed. It retains the actual mouse pointer and clicks.
+The combined film does not repeat stills, insert excerpt cards or end with an
+evidence dump. Initial loading and trailing idle outside that interval remain
+omitted.
 The capture automation's final visibility wait timed out after the real Failed
 state was visible. That timeout, the full source, and exact edits are retained
 and disclosed; the actual AgentRun failed as expected after classification.
@@ -320,15 +324,38 @@ result. The viewer attached before both reads, and no hostile canary appears in
 the 205 captured ACP frames. Five imported runtime files match the frozen source.
 These observations cover this controlled attempt and captured interval.
 
-MP4 SHA-256:
+The superseded [154-second inspection edit][old-inspection] used the same source
+seconds 8–114 at normal speed, then added a labeled six-second repeat of source
+frame 96 and title/evidence/reference cards. Those edits do not describe the new
+combined film. Its immutable asset commit was
+`ca578232b434e21a4c96f57c62629c0e04ee7631`. Historical MP4 SHA-256:
 `83342572627d10ee89c4c20716f570f5cc1b702bee530a56716a9a7cfe54201c`.
 
-### Preserve and assemble the recording
+### Combined film edit and preservation
 
-Label the two runs separately. Preserve AgentRun names, timestamps, image digest,
+The current film is 256.08 seconds (4:16.08), 6,402 frames. It starts with a
+7.60-second opening. Positive source 0–25 plays at normal speed, 25–80 at 8×,
+80–102 at normal speed, 102–310 at 12×, and 310–381.28 at normal speed.
+Inspection source 8–114 follows at movie time 150.08 and stays at normal speed
+through the end at 256.08. Source coverage is continuous within each take.
+
+MP4 SHA-256:
+`b03c66cc66c1b604a475de7ebdd319582fbd85a3fb6724a8863e127108e477de`.
+
+The combined film uses the complete 381.28-second positive take 07, followed by
+the continuous inspection take 03 source interval 8–114 at normal speed.
+The accelerated intervals include repository review and streamed planning while
+waiting for the model. Every accelerated interval carries the matching visible
+speed indicator. The opening lists what the viewer will see
+and the bottom bar carries conversational captions. Decisions and real clicks
+remain at normal speed. There are no replayed stills, added excerpt cards or
+evidence-dump endcards. Source/commit identifiers, per-run configuration and
+verification evidence belong in this Markdown and the deck's presenter notes.
+
+Preserve AgentRun names, timestamps, image digest,
 source/fixture commits, analysis revision, Gateway/model, terminal outcomes,
 verification/Git results, token observations, runtime logs, and ACP/request-order
-evidence. Disclose cuts, idle-time compression, reading pauses, and retakes.
+evidence. Disclose selected source bounds, acceleration and retakes.
 Keep captions tied to those captured events. Keep the installation and result branches for the presentation. Capture the
 transcript while the process lives: a retained completed pod does not retain a
 live ACP session. Use a new AgentRun for another interactive take, and preserve
@@ -339,7 +366,7 @@ normal Hub-token revocation.
 Cancellation and turn-limit handoff remain **offline regression evidence**
 unless captured in a new take. Pending-request replay was exercised separately
 in live take 06; positive take 07 has no reconnect interruption. Keep that live
-check distinct from both the positive MP4 and the offline replay regressions. The frozen runtime has
+check distinct from both the combined film and the offline replay regressions. The frozen runtime has
 2,176 passing offline tests; six controller integration cases drove the real Go
 harness/runtime/graph/Git paths with scripted model/Hub services. These establish
 bounded regressions, not fresh UI footage or a live classifier decision. See the
@@ -347,7 +374,7 @@ bounded regressions, not fresh UI footage or a live classifier decision. See the
 
 ## Historical recording — runtime 4039163
 
-The unchanged [2:44 video](lightspeed-2026-11-11-demo.mp4) used runtime `4039163`
+The superseded [2:44 video][old-video] used runtime `4039163`
 with the earlier custom ACP adapter. AgentRun `ui-2rhxw` succeeded on November 11,
 producing [plan commit `9e97db0`][result]. It does not demonstrate current runtime
 `451818c` or an actual classifier rejection. Full timed narration, image/model
@@ -364,3 +391,7 @@ Keep generated HTML previews local and regenerate the PDF when slides change.
 
 [result]: https://github.com/djzager/coolstore/commit/9e97db02b641dc2608fcc399503bbc1a0ed3b842
 [old-walkthrough]: https://github.com/djzager/agentic-controller/blob/4c036c931666de10dd7c1620928c2e34f8ae17ae/docs/slides/lightspeed-2026-11-11-demo.md
+
+[old-planning]: https://github.com/djzager/agentic-controller/blob/d0f717b9f0016e693bd01ce350bb38f5d34e2025/docs/slides/lightspeed-2026-11-18-planning.mp4
+[old-inspection]: https://github.com/djzager/agentic-controller/blob/d0f717b9f0016e693bd01ce350bb38f5d34e2025/docs/slides/lightspeed-2026-11-18-inspection.mp4
+[old-video]: https://github.com/djzager/agentic-controller/blob/d0f717b9f0016e693bd01ce350bb38f5d34e2025/docs/slides/lightspeed-2026-11-11-demo.mp4

@@ -4,7 +4,7 @@ marp: true
 theme: konveyor
 paginate: true
 title: Adopting Lightspeed’s DeepAgents runtime in Konveyor
-description: Current Lightspeed prototype, coverage and two recorded-run plans
+description: Current Lightspeed prototype, coverage and Coolstore demonstration
 author: David Zager
 style: |
   section.diagram { justify-content: flex-start; }
@@ -50,13 +50,12 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 - Konveyor with Goose, then the Lightspeed prototype
 - UI, harness and runtime changes, coverage and accepted limits
-- **Run 1:** normal Coolstore planning with human guidance
-- **Run 2:** controlled rejection with the same Agent reference and image
+- Coolstore planning with human guidance and a controlled hostile-result rejection
 - What to do with the runtime
 - Lightspeed AgenticRun controller adoption feasibility
 
 <!--
-20 seconds. Presenter cues for the two separate runs:
+20 seconds. Presenter cues for one film containing two distinct AgentRuns:
 
 First explain the existing setup, the runtime swap, and the UI/harness/runtime
 architecture. Say what changed in the UI and harness as well as the runtime.
@@ -70,17 +69,15 @@ from a separate branch, in automatic mode with questions off. Run 1 uses
 automatic mode with questions on. Show the real classifier rejection and the
 model/viewer withholding evidence.
 
-The current-runtime inspection recording is ready: an ordinary POM read passes,
-then hostile notes are rejected. Play the 2:34 recording on the inspection slide.
-The positive take ui-jxx5v succeeded and pushed a planning-only commit. Its
-201-second separate MP4 is available. Keep the historical 4039163 planning video separate
-from the two current 451818c demonstrations.
-
-For recording, capture the actual mouse pointer and actual clicks. Pause on the
-target before clicking, then leave time to read the resulting card. Cut long
-waits at calm points with context preserved. Do not rush, speed up decisions,
-or synthesize cursor movement/clicks in the edit. The separate walkthrough has
-the pointer aid and copyable task text: lightspeed-2026-11-11-demo.md
+Play lightspeed-2026-11-18-demo.mp4 once on the Coolstore demo slide. The film
+first shows planning, then the controlled inspection attempt. Its opening lists
+the behaviors to watch. Conversational captions sit in the bottom bar, and a
+visible speed indicator identifies accelerated waits. Decisions and clicks stay
+at normal speed. Source remains continuous within each selected take.
+The walkthrough preserves source/commit provenance, run configuration and
+verification evidence: lightspeed-2026-11-11-demo.md. The earlier separate
+planning and inspection edits are superseded assets. The 4039163 planning video
+remains historical footage of the earlier adapter.
 
 Open the conversation after the prototype scope and demonstrations. No ownership
 split is proposed. The operator material remains a separate discussion.
@@ -221,9 +218,8 @@ Positive take ui-jxx5v exercised questions and steering on that UI; pending-requ
 replay was tested separately in earlier take 06.
 Current integration guide: ../lightspeed-runtime-prototype.md
 The existing video at 4039163 records the earlier custom ACP adapter and cannot
-validate these later changes. The current 451818c inspection recording supplies
-separate controlled rejection evidence. Current-runtime planning take ui-jxx5v
-succeeded and pushed docs/plan.md; the 201-second positive MP4 is available.
+validate these later changes. The combined film includes the current 451818c controlled inspection attempt.
+Current-runtime planning take ui-jxx5v succeeded and pushed docs/plan.md.
 Four independent checks passed; harness verification did not run.
 -->
 
@@ -326,7 +322,7 @@ and max-turn handoff. November 17 verification at451818c also passed 79 focused
 session/native/transport tests and 2,176 full-suite tests, with 13 skipped and seven
 subtests. Native cases include child/parent inspection and upstream redaction.
 These use scripted model/classifier inputs and do not establish live classifier
-accuracy. The 154-second inspection recording now exercises 451818c with a real
+accuracy. The inspection portion of the combined film exercises 451818c with a real
 benign read followed by an actual classifier rejection. Its captured interval
 supports withholding from the next model call and attached viewer. Current-runtime planning take ui-jxx5v succeeded
 and pushed a plan; independent checks passed but harness verification did not run. The older 4039163 planning recording
@@ -678,11 +674,11 @@ Token observations are partial. Existing token-accounting research continues; mo
 The prototype covers Konveyor's runtime use cases except monetary budget
 enforcement. This is an implementation/qualification statement, not a claim that
 all controls appear in one new video. The positive automatic run shows ask_user, steering, conversation continuity
-and observed usage; it does not show per-file approvals. A separate
-recorded controlled rejection run shows a benign POM read passing inspection,
+and observed usage; it does not show per-file approvals. The second part of the film shows a distinct
+controlled rejection run with a benign POM read passing inspection,
 then hostile notes rejected before another model call or viewer result release.
 This is evidence for the captured controlled attempt, not general classifier
-accuracy. The separate positive take produced a plan and pushed commit; it
+accuracy. The positive take produced a plan and pushed commit; it
 did not validate an application migration or run harness verification.
 
 Cancellation, same-session max-turn handoff and steering/reconnect have identified
@@ -691,8 +687,8 @@ and steer-reconnect, plus tests/test_sessions.py and tests/test_acp_native.py in
 runtime 451818c. November 17 verification passed all six harness cases, 79 focused
 tests, 2,176 full-suite tests, 13 skips and seven subtests. Those checks use
 scripted model/classifier and Hub inputs. They do not establish live classifier
-quality, restart recovery or production hardening. The separate inspection
-recording supplies live evidence for its specific controlled input and interval.
+quality, restart recovery or production hardening. The inspection portion of the film
+supplies live evidence for its specific controlled input and interval.
 
 Token observations exclude isolated inspection-classifier calls and do not
 constitute full billing. No monetary cost estimator or budget enforcement is
@@ -708,97 +704,63 @@ Evidence and recording plan: lightspeed-2026-11-11-demo.md
 
 <!-- _class: demo -->
 
-# Coolstore planning demo
+# Coolstore demo
 
-**Run 1:** produce a focused Coolstore persistence plan. **Automatic mode; questions on.**
-
-- Answer the database question and give guidance.
-- Keep those decisions in the same conversation and review the plan.
-- Show observed usage, the pushed plan and the separate check results.
-
-**Recording available as a separate MP4 (3:21).**
+- Answer the database question and steer the migration plan.
+- Review the plan shaped by that conversation.
+- Watch an ordinary file read pass inspection.
+- See a hostile tool result blocked in a controlled attempt.
 
 <!--
+Play the 4:16 film lightspeed-2026-11-18-demo.mp4 once. It contains planning take 07 followed
+by controlled inspection take 03. The opening lists the behaviors to watch.
+The bottom bar carries conversational captions. Repository review and planning
+wait intervals accelerate with a visible speed indicator. The planning source is continuous across its
+full 381.28 seconds; the inspection source is continuous from seconds 8–114.
+There are no replayed stills, inserted excerpt cards or evidence-dump endcards.
+Source/commit provenance, configuration and verification stay in these notes
+and lightspeed-2026-11-11-demo.md, rather than on the demo slide or in the film.
+
 Positive take 07, AgentRun ui-jxx5v, succeeded and pushed commit
 bf1afd36bdef31f5e88d511e654a7d8cee0ade13 to djzager/coolstore. Only docs/plan.md
 changed. This is focused persistence planning, not a completed or validated
-application migration. The 201-second separate MP4 is available as
-lightspeed-2026-11-18-planning.mp4.
+application migration. The run used automatic mode with ask_user on, inspection
+enabled, runtime 451818c, the CI Java image 3bf3e1e and UI 3a83a095 from PR CI.
+LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS=16384 was supplied through AgentRun.spec.env,
+which the UI creation form does not expose. It changes the main-model allowance,
+not the classifier allowance. There are no per-file permission approvals.
 
-The run used automatic mode with ask_user on, inspection enabled, frozen runtime
-451818c, the CI-built Java image 3bf3e1e and deployed UI 3a83a095 from PR CI.
-There are no per-file tool permission approvals in this positive demonstration.
-The actual database answer was submitted at 14:08:42; guidance at 14:08:44 was
-consumed at 14:12:24. Final text review occurred at 14:13:01; the run reached
-Succeeded at 14:13:29. The current take has no reconnect interruption.
-Pending-request replay was tested separately in earlier take 06.
+The actual database answer was submitted at 14:08:42 UTC. Guidance at 14:08:44
+was consumed at 14:12:24. Final text review occurred at 14:13:01, and Succeeded
+at 14:13:29. This positive take has no reconnect interruption. Pending-request
+replay was tested separately in earlier take 06.
 
-Four independent planning checks exited zero. Harness Verified=False/NotRun:
-the model's Verification lines lacked the required '- ' list markers, so the
-harness did not discover or execute them. Do not call this harness-verified or
-claim application build/test validation. Show the independent check results and
-the actual harness status separately. The harness still pushed the local commit.
+Four independent planning checks exited zero before final text approval.
+Harness Verified=False/NotRun: the plan's Verification lines lacked the required
+'- ' list markers, so the harness discovered no checks and did not execute them.
+The harness still pushed the local commit. Keep the independent checks distinct
+from harness verification and application build/test validation. The accompanying
+walkthrough retains these results and the actual harness status.
 
-Presenter cues: introduce Coolstore and the selected Agent/model; explain auto
-mode and questions on. Pause on the real ask_user question and submitted answer,
-then show steering being sent and actually consumed. Review the final text and
-plan, observed token usage, terminal state and pushed commit. Preserve actual
-pointer/clicks and calm cuts; no per-file approval sequence is promised.
+Inspection take 03 records ui-pgsqx on demo/lightspeed-rejection-20261118-take-03,
+with runtime 451818c, controller/harness 4c036c9 and UI ed11b648. It uses the same
+Agent reference, Java image and model as planning, but a separate fixture branch
+and automatic mode with askUser off. Inspection and redaction remain enabled.
+The ordinary POM read completes before the hostile notes read. The actual
+runtime log contains 'malicious tool result detected'; the recorded UI shows a
+generic runtime error followed by the expected Failed state. Narrate the
+classifier decision from the correlated logs and request-order evidence. The
+exact classifier warning is not visible in the UI. Two main-model and two classifier requests completed
+with HTTP 200. There is no later main-model request and no completed hostile
+viewer result in the captured interval. The fixture branch remains 89d0ac0.
+These observations cover one controlled attempt, not general classifier accuracy.
 
-The inspection take remains separate and uses the earlier UI ed11b648. Both
-current demonstrations use runtime 451818c. The old 4039163 planning MP4 remains
-historical and does not qualify the current official ACP integration.
--->
-
-
----
-
-<!-- _class: technical -->
-
-# Tool-output inspection demo
-
-**Run 2:** the same Agent reference, image and model as Run 1.
-
-Read `pom.xml`, then hostile notes on a separate branch. **Automatic mode; questions off.**
-
-- Watch the ordinary file read complete after inspection.
-- See the hostile notes result rejected.
-- Check that no later main-model call or viewer receives the result.
-
-**Recording available as a separate MP4 (2:34).**
-
-<!--
-Play the 154-second inspection recording and narrate it live. Take 03 records
-AgentRun ui-pgsqx on demo/lightspeed-rejection-20261118-take-03, with runtime 451818c,
-controller 4c036c9 and UI ed11b648. This is the same Agent reference, Java image
-and model as normal planning. It reads pom.xml first, then the hostile notes
-from a separate branch. Normal planning uses auto mode with askUser on;
-this controlled run uses auto mode with askUser off. Inspection/redaction remain on.
-
-Point out the ordinary POM read completing, then the real malicious warning
-and expected Failed outcome. The viewer attached before both reads. The
-captured requests include two main-model and two classifier calls, all complete
-with HTTP 200, with no later main-model request. The captured viewer stream has
-no completed hostile result. Live runtime hashes match 451818c and the fixture
-branch remains 89d0ac0. This proof covers the recorded attempt and interval.
-
-The UI sequence is uninterrupted and normal speed from source seconds 8–114,
-with the actual mouse pointer and clicks. One clearly labeled six-second still
-repeats source frame 96 for reading. Title/evidence/reference cards are added;
-initial loading and trailing idle are omitted. Pointer/clicks are not recreated.
-The walkthrough discloses a final capture-wait timeout after the real Failed
-state was visible and preserves the full source and exact edit decisions.
-
-The recording predates UI reconnect fix 3a83a095, now deployed from PR 3738 CI
-after all checks passed. Current-runtime planning take ui-jxx5v succeeded and
-pushed a plan; independent checks passed but harness verification did not run.
-Its 201-second positive MP4 is available. The 4039163 planning video remains historical.
-
-The MP4 is silent for live narration and stored in immutable asset commit
-ca578232b434e21a4c96f57c62629c0e04ee7631. Cancellation, handoff and reconnect
-remain supported by separate regression evidence.
-Current walkthrough: lightspeed-2026-11-11-demo.md
-
+The capture automation's final visibility wait timed out after the real Failed
+state was visible. Full source and exact edit decisions remain preserved.
+The earlier 201-second planning and 154-second inspection MP4s are superseded
+edits retained in immutable Git history at d0f717b9f0016e693bd01ce350bb38f5d34e2025. The 4039163 planning video is historical
+footage of the earlier custom ACP adapter. Cancellation, turn-limit handoff and
+reconnect rely on separate regression evidence.
 -->
 
 
