@@ -12,7 +12,7 @@ testing. Used by:
 - E2E tests (proves the controller → Sandbox → Pod pipeline)
 
 This is NOT the production agent base image. The real agent images
-(harness, goose runtime, language toolchains) are Stream 4 work
+(harness, Lightspeed runtime, language toolchains) are Stream 4 work
 tracked in the [agent-base-image-composition enhancement](https://github.com/konveyor/enhancements/pull/296).
 
 ```bash
@@ -26,7 +26,7 @@ Production agent image hierarchy. Skills are mounted at runtime via
 SkillCards, not baked into images.
 
 ```text
-agent-base             UBI 10 + goose CLI + git + harness binary
+agent-base             UBI 10 + Lightspeed + git + harness binary
 ├── agent-java         + JDK 21, Maven
 ├── agent-go           + Go toolchain
 ├── agent-csharp       + .NET SDK
@@ -88,8 +88,8 @@ The tag is derived from the ref by the reusable workflow:
 We publish tags only; the operator converts a tag to a `@sha256` digest at
 bundle time.
 
-`images.yml` keeps the `paths:`-filtered PR artifact builds, a PR-time
-controller build check, and the `controller-agent` build+push.
+`images.yml` keeps the `paths:`-filtered PR artifact builds, including a
+controller archive, and the `controller-agent` build+push.
 `skills.yml` keeps the PR-time skill validate + build check.
 
 ### Multi-arch (agent images)
@@ -135,5 +135,45 @@ transitively, via `e2e-image-build.yaml`):
 
 Each per-arch tar is a plain `podman load`-able single-arch image (`docker
 load` works too) — grab the one matching your machine's architecture to
-test it locally; it loads as `localhost/<image>:pr<N>-<arch>`. Artifacts
-expire after 1 day.
+test it locally; it loads as `localhost/<image>:pr<N>-<arch>`. The shared action
+expires these artifacts after 1 day; download them before expiry. The controller
+archive (`agentic-controller--pr<N>-amd64`) is retained for 7 days.
+
+
+The base image installs the Lightspeed source revision pinned by
+`LIGHTSPEED_REVISION` in `images/agent-base/Containerfile` into
+`/opt/lightspeed`, with dependencies from its frozen lockfile. The `openai`
+and `acp` extras include the DeepAgents provider integrations for OpenAI,
+Anthropic, Bedrock, and Vertex. Every native image build imports those
+integrations and the ACP bridge as UID 1001, without model credentials.
+The Red Hat Go toolset continues to build the harness with strict FIPS
+runtime support; that alone does not qualify all Python dependencies for FIPS.
+
+PR builds label the base and inherited language images with the actual
+checkout revision (`org.opencontainers.image.revision`), PR head
+(`io.konveyor.controller.pr-head-revision`), and pinned runtime revision
+(`io.konveyor.lightspeed.revision`). The checkout normally represents
+GitHub's test merge commit, so it can differ from the PR head. CI verifies
+these labels for each image and records the revisions and archive checksums
+in its job summaries. Language images consume the matching base archive
+from the same workflow run; stale fallback images fail provenance checks.
+
+Download all required archives from a successful **Build and Push Images**
+run for the intended PR head. For example, for an amd64 cluster:
+
+```bash
+gh run download <run-id> --repo konveyor/agentic-controller \
+  --name agent-base--pr345-amd64 --dir /tmp/agent-images
+podman load -i /tmp/agent-images/agent-base--pr345-amd64.tar
+```
+
+Load the imported image into Kind or minikube using its normal image-loading
+mechanism; `hack/lib/cluster.sh` also supports a `LOAD_IMAGE_HOOK`. Use Docker
+instead when required by that cluster's container provider. For a remote
+cluster, tag and push the unchanged GitHub-built image to a registry the
+cluster can pull from, using the registry access supplied for the demo.
+These steps transfer the built image rather than rebuilding it locally. Use
+an explicit tag and `IfNotPresent` when an image is available only on nodes.
+PR artifact creation needs no registry credentials and performs no registry
+publication. The workflow has no draft-PR exclusion; a draft can produce
+these archives. Workflow dispatch builds do not produce PR archives.

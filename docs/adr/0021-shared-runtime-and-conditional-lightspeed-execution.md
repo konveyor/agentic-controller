@@ -5,12 +5,12 @@ description: "Reuse Lightspeed's DeepAgents runtime and its inspection behavior 
 status: accepted
 status_note: "Approves Konveyor direction only; implementation, backend qualification, and Lightspeed agreement are separate."
 date: "2026-10-20"
-last_updated: null
+last_updated: "2026-11-18"
 authors:
   - "David Zager"
-last_reviewed: "2026-11-04"
-implementation_status: deferred
-review_note: "Runtime reuse and custom-image execution were demonstrated separately. Full runtime adoption requires compatibility work for existing interaction, execution controls, session continuation, and inspection behavior. Operator placement, credential delivery, and lifecycle design remain open. Production integration is unimplemented."
+last_reviewed: "2026-11-17"
+implementation_status: amended
+review_note: "Accept loss of monetary budget enforcement for runtime adoption; configured maxCost remains explicitly unsupported. Token-accounting research and qualification of the other controls continue. The prototype's contribution scope and ownership remain open for discussion with Lightspeed; operator qualification remains separate."
 relates_to:
   - "0001"
   - "0004"
@@ -20,6 +20,39 @@ relates_to:
 ---
 
 # ADR 0021: Shared Runtime and Conditional Lightspeed Execution
+
+**Update (2026-11-18):** Consolidate runtime configuration and integration-check
+instructions in the [harness reference](../../harness/README.md#configuration),
+replacing the standalone prototype guide.
+
+**Update (2026-11-17):** Accept loss of monetary budget enforcement when adopting
+Lightspeed's runtime. This supersedes the original requirement, reiterated in
+the November 16 update, to preserve `maxCost` before full adoption. The current
+integration reports token counts but supplies no monetary cost. A configured
+positive `maxCost` must continue to fail explicitly before execution; it must
+not be accepted as an enforced budget. Token-accounting coverage and any future
+monetary reporting or enforcement remain follow-up work under the existing
+accounting research, not adoption prerequisites. The other interaction,
+turn-limit, inspection and handoff requirements remain in force.
+
+The complete prototype includes both runtime changes and Konveyor-specific
+integration code. Its current location does not decide upstream contribution
+scope or eventual ownership. Demonstrate that implementation and open the
+conversation with Lightspeed before restructuring it; no proposed ownership
+split is selected by this amendment.
+
+**Update (2026-11-16):** Package the reusable runtime integration in the existing
+`agent-base` image and its language-image descendants, replacing the packaged
+Goose runtime. The image selects Lightspeed through `HARNESS_RUNTIME`; the
+standalone harness retains its existing unset-runtime behavior for compatibility.
+This advances the earlier default-runtime boundary without changing the direct
+Agent Sandbox backend or the controller's responsibilities. The runtime fork
+now exposes its prepared graph to official `AgentServerACP`, preserving model
+inspection and inspection-approved live output and viewer replay. The integration
+uses pinned private ACP helpers with compatibility tests. Positive `maxCost`
+budgets still fail before execution because monetary usage is unavailable;
+preserving monetary enforcement remains a full-adoption requirement. The integration and its remaining limits are described in the
+[harness configuration reference](../../harness/README.md#configuration).
 
 ## Context
 
@@ -48,21 +81,24 @@ preparation, Git push, token cleanup, and final outcome reporting.
 Runtime reuse does not require Lightspeed to implement those Konveyor-specific
 behaviors. We can prototype the integration with focused runtime changes and
 contribute reusable changes upstream; full adoption requires preserving our
-existing behavior.
+existing behavior subject to the accepted monetary-budget exception above.
 
 **Preserve existing interaction and execution controls.** Production integration
 must preserve tool approval (`mode: approve`), `ask_user`, steering, viewer
-cancellation, execution limits (`maxTurns`, `maxCost`), and limit-triggered
+cancellation, turn limits (`maxTurns`), and limit-triggered
 handoff. Address gaps through runtime and harness integration changes in
-collaboration with Lightspeed. The prototype demonstrates a subset of this
-behavior; its restrictions do not narrow the product's existing capabilities.
+collaboration with Lightspeed. The prototype implements these controls; its
+demo and regression records identify which paths have been exercised. Monetary budget
+enforcement is the accepted capability loss recorded in the November 17 update.
 
 Usage and cost accounting belong to Lightspeed's runtime. Konveyor consumes
 runtime-reported usage/cost for its execution controls and reporting, rather
-than maintaining a parallel accounting implementation. Contribute upstream
-where reporting or controls are missing. Budget enforcement requires timely
-reporting and working cancellation; a completed-run total alone does not
-provide that behavior.
+than maintaining a parallel accounting implementation. Token-accounting coverage
+and future monetary support follow the existing accounting research and are not
+prerequisites for adopting this runtime. Observed token counts must describe
+their coverage, including excluded classifier calls. Any future monetary budget
+enforcement requires timely cost reporting and working cancellation; a
+completed-run total alone does not provide that behavior.
 
 **Preserve the runtime's inspection path when integrating it with our harness.**
 Reuse Lightspeed's DeepAgents integration, including inspection before untrusted
@@ -70,9 +106,10 @@ tool results enter model context and its inspection-approved tool-result release
 to clients. Inspection rejection and technical inspection failure must retain
 the upstream failure behavior.
 
-The prototype's ACP bridge preserved model-boundary inspection but bypassed
-delayed tool-result release to viewers; production integration must address
-that gap. This is tool-output prompt-injection inspection, not a guarantee that
+The earlier ACP prototype preserved model-boundary inspection but bypassed
+delayed tool-result release to viewers. The updated prototype gates live output
+and viewer replay on inspection approval, with native graph regressions covering
+that behavior. This is tool-output prompt-injection inspection, not a guarantee that
 every harmful command or request is prevented.
 
 **Add the Lightspeed operator as an alternative execution backend when ready.**
@@ -136,7 +173,7 @@ the workload for ACP. Where backend integration code lives remains an
 implementation choice, subject to these behavioral boundaries.
 
 **Keep the session available through limit-triggered handoff.** Existing
-unattended execution can require a second prompt: when a turn or cost limit is
+unattended execution can require a second prompt: when a turn limit is
 reached, the harness asks the same session to write its handoff before finalizing
 the workload. Production runtime integration must support that continuation.
 Distinguish prompt completion from workload finalization, and collaborate on
@@ -151,7 +188,7 @@ committed handoff files serve different needs.
 
 Primary use cases are the preview priority. A one-hour budget per step and
 restarting rare interrupted work from a fresh session are acceptable. These
-trade-offs do not defer existing interaction or execution-control behavior.
+trade-offs do not defer the other interaction or execution-control requirements.
 Normal finalization revokes Hub tokens; existing short-lived tokens bound rare
 abrupt loss.
 

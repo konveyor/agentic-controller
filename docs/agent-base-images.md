@@ -13,7 +13,7 @@ and [ADR 0007](adr/0007-harness-thin-runner-and-skillcard-skills.md).
 toolchain needed by that language:
 
 ```text
-agent-base             UBI + goose + git + harness
+agent-base             UBI + Lightspeed + git + harness
 ├── agent-java         JDK 21 + Maven
 ├── agent-go           Go toolchain
 ├── agent-csharp       .NET SDK
@@ -30,7 +30,7 @@ An agentic base image must provide:
 | Component | Contract |
 | --- | --- |
 | Harness binary | `/opt/migration-harness/bin/migration-harness`, normally exposed as `migration-harness` on `PATH` |
-| Agent runtime | The `goose` CLI, started by the harness with `goose serve` |
+| Agent runtime | The pinned Lightspeed DeepAgents runtime, selected by `HARNESS_RUNTIME=lightspeed` and started over ACP by the harness |
 | Git | Required for cloning the source repository and pushing the agent's commits |
 | Skills mount point | `/opt/skills`, populated by the controller's `skill-loader` init container |
 | Writable workspace | `/workspace`; the default clone directory is `/workspace/repo` |
@@ -92,23 +92,12 @@ make agent-java-build CONTAINER_TOOL=podman
 make agent-images-build CONTAINER_TOOL=podman
 ```
 
-Compiling goose is roughly 35 of the 38 minutes an `agent-base-build` takes.
-When rebuilding repeatedly, build the binary once and hand it back in, which
-skips the compile:
-
-```bash
-make goose-dist-build CONTAINER_TOOL=podman
-make agent-base-build CONTAINER_TOOL=podman GOOSE_IMAGE='$(GOOSE_DIST_IMG)'
-```
-
-`GOOSE_DIST_IMG` defaults to `localhost/goose-dist:<the Containerfile's
-GOOSE_VERSION>`, so passing it by name rather than by value means a bump to
-`ARG GOOSE_VERSION` gives you a tag you have not built yet instead of silently
-reusing the old binary. Re-run `goose-dist-build` after any such bump.
-
-Leave `GOOSE_IMAGE` unset and goose is compiled from source, which is what CI's
-release build does. `make agent-images-multiarch-build` ignores it deliberately:
-a single-architecture goose image would poison the manifest.
+The standard base installs the Lightspeed revision pinned in its Containerfile
+with frozen Python dependencies. For PR validation and demonstrations, use the
+native GitHub-built image archives described in [PR artifacts](../images/README.md#pr-artifacts).
+Language images consume the matching base archive from the same workflow run.
+Local builds remain available for image authors; no separate runtime build
+context or Goose compilation is required.
 
 The image names default to `quay.io/konveyor/agent-*`. Override them for a
 development registry without changing the repository:
@@ -162,7 +151,7 @@ these ten operational steps:
 4. Write available Hub analysis data to `.konveyor/analysis.json`.
 5. Discover `/opt/skills/*/SKILL.md` and always-loaded rules.
 6. Link the skills into the runtime's expected skills directory.
-7. Start `goose serve`, connect over ACP, and create a session.
+7. Start Lightspeed, connect over ACP, and create a session.
 8. Assemble the agent, workflow, skill, and stage context into one prompt.
 9. Run the prompt, monitor the session, push commits incrementally, and wind
    down with a handoff when an execution limit is reached.

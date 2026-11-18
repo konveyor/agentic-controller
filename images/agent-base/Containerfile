@@ -1,60 +1,5 @@
-# agent-base: Foundation image with goose CLI, git, and the migration
-# harness binary. All language images extend this.
-#
-# Build context must be the repository root:
-#   podman build -t agent-base -f images/agent-base/Containerfile .
-#
-# Compiling goose takes ~35 minutes, which is nearly all of any build of
-# this image. The compile is therefore reachable on its own, as the
-# goose-dist target, and the stage that consumes it is an overridable ARG,
-# so CI can build the binary once and hand it back in:
-#
-#   podman build --target goose-dist -t goose:v1.55.0 -f images/agent-base/Containerfile .
-#   podman build --build-arg GOOSE_IMAGE=goose:v1.55.0 -f images/agent-base/Containerfile .
-#
-# With GOOSE_IMAGE set, the goose-builder and goose-dist stages are
-# unreferenced and the builder skips them. Left unset it defaults to
-# goose-dist, so a plain build still compiles goose from source and no
-# caller outside CI has to know any of this. Everything the binary depends
-# on lives between this ARG and the goose stage below, and that region is
-# what .github/actions/goose-image hashes for its cache key -- keep it that
-# way, or a stale binary survives a real change.
-ARG GOOSE_IMAGE=goose-dist
-
-# --- Goose build stage ---
-FROM golang:1.26 AS goose-builder
-
-# Goose CLI build deps
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    && apt-get update && apt-get install -y \
-        build-essential \
-        git \
-        cmake \
-        pkg-config \
-        libssl-dev \
-        libclang-dev \
-        clang \
-        libdbus-1-dev \
-        libxcb1-dev \
-        perl \
-    && rm -rf /var/lib/apt/lists/*
-
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# Build goose from source (BUILDING_LINUX.md)
-ARG GOOSE_VERSION=v1.55.0
-WORKDIR /src/goose
-RUN git clone https://github.com/aaif-goose/goose.git . \
-    && git checkout ${GOOSE_VERSION} \
-    && cargo build --release -p goose-cli --bin goose \
-    && mv target/release/goose /usr/local/bin/goose
-
-# Just the binary, so what CI caches and reloads is ~100MB rather than the
-# whole Rust toolchain the compile needed.
-FROM scratch AS goose-dist
-COPY --from=goose-builder /usr/local/bin/goose /usr/local/bin/goose
-
-FROM ${GOOSE_IMAGE} AS goose
+# agent-base: UBI foundation with Lightspeed runtime, git, and the migration
+# harness. All language images extend this. Build context is the repository root.
 
 # --- Build stage ---
 # Red Hat go-toolset (not upstream golang) is required for FIPS: built with
@@ -82,19 +27,46 @@ FROM registry.access.redhat.com/ubi10/ubi:latest
 
 RUN dnf install -y \
     git \
+    python3 \
+    python3-pip \
     ca-certificates \
     bzip2 \
     tar \
     && dnf clean all
 
-# Copy goose binary from the goose stage
-COPY --from=goose /usr/local/bin/goose /usr/local/bin/goose
+# Source and dependency pins are shared by local, PR, and release builds.
+# Git is also required by the frozen deepagents-acp dependency during uv sync.
+ARG LIGHTSPEED_REPOSITORY=https://github.com/djzager/lightspeed-agentic-sandbox.git
+ARG LIGHTSPEED_REVISION=c254c823e4226741d9429cbef4c57925ee3fdc9c
+ARG UV_VERSION=0.8.11
+ARG CONTROLLER_REVISION=unknown
+ARG CONTROLLER_PR_HEAD_REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/konveyor/agentic-controller" \
+    org.opencontainers.image.revision="${CONTROLLER_REVISION}" \
+    io.konveyor.controller.pr-head-revision="${CONTROLLER_PR_HEAD_REVISION}" \
+    io.konveyor.lightspeed.source="${LIGHTSPEED_REPOSITORY}" \
+    io.konveyor.lightspeed.revision="${LIGHTSPEED_REVISION}"
+
+WORKDIR /opt/lightspeed
+RUN git init . \
+    && git remote add origin "${LIGHTSPEED_REPOSITORY}" \
+    && git fetch --depth=1 origin "${LIGHTSPEED_REVISION}" \
+    && git checkout --detach FETCH_HEAD \
+    && test "$(git rev-parse HEAD)" = "${LIGHTSPEED_REVISION}" \
+    && python3 -m venv /opt/uv \
+    && /opt/uv/bin/pip install --no-cache-dir "uv==${UV_VERSION}" \
+    && UV_PYTHON_DOWNLOADS=never /opt/uv/bin/uv sync --frozen --no-dev \
+        --extra openai --extra acp --python /usr/bin/python3 --no-cache \
+    && rm -rf /opt/uv /opt/lightspeed/.git
+
+ENV PATH="/opt/lightspeed/.venv/bin:${PATH}" \
+    HARNESS_RUNTIME=lightspeed
 
 ENV PATH="/opt/migration-harness/bin:${PATH}"
 ENV HARNESS_WORK_DIR=/workspace/repo
 # OpenShift runs containers as a random UID with no passwd entry, which
-# leaves HOME=/ — goose then panics creating /.local/... (state, session
-# DBs). Pin HOME to the harness home, which is group-0 writable (g=u).
+# leaves HOME=/. Pin HOME to the harness home, which is group-0 writable
+# (g=u), for runtime state and caches.
 ENV HOME=/home/harness
 
 COPY --from=builder /migration-harness /opt/migration-harness/bin/migration-harness
@@ -104,9 +76,12 @@ RUN mkdir -p /opt/skills /workspace /home/harness/.migration-harness \
     && chown -R 1001:0 /home/harness /workspace \
     && chmod -R g=u /home/harness /workspace
 
-ENV HOME=/home/harness
 WORKDIR /workspace
 USER 1001
+
+# Every native CI build checks the installed ACP bridge and all provider routes.
+# Imports require no model credentials or network access.
+RUN python3 -c 'import importlib, sys; assert sys.version_info >= (3, 12); [importlib.import_module(name) for name in ("lightspeed_agentic.acp.official", "lightspeed_agentic.providers.model_router", "lightspeed_agentic.providers.models.openai", "lightspeed_agentic.providers.models.anthropic", "lightspeed_agentic.providers.models.gemini", "langchain_aws", "langchain_google_vertexai")]'
 
 ENTRYPOINT ["migration-harness"]
 CMD ["run"]

@@ -140,8 +140,8 @@ export AGENT_GO_IMG ?= quay.io/konveyor/agent-go:latest
 export AGENT_CSHARP_IMG ?= quay.io/konveyor/agent-csharp:latest
 export AGENT_NODEJS_IMG ?= quay.io/konveyor/agent-nodejs:latest
 # AGENT_PLATFORMS defines the target platforms for multi-arch agent image
-# builds (make agent-images-multiarch-build/-push). Limited to what
-# agent-base's goose install step resolves: x86_64 and aarch64.
+# builds (make agent-images-multiarch-build/-push). Matches the native
+# amd64 and arm64 runners used by CI.
 export AGENT_PLATFORMS ?= linux/amd64,linux/arm64
 
 .PHONY: build
@@ -167,31 +167,9 @@ controller-agent-build: ## Build the controller's test/verification agent image.
 controller-agent-push: controller-agent-build ## Build and push the controller's test/verification agent image.
 	$(CONTAINER_TOOL) push $(CONTROLLER_AGENT_IMG)
 
-# Compiling goose is ~35 of the ~38 minutes an agent-base build takes. Point
-# GOOSE_IMAGE at a prebuilt goose image (see goose-dist-build) and the build
-# skips the compile entirely; leave it empty and goose is built from source,
-# which is what a plain local build and the release build both do.
-#
-# Only agent-base-build honours it. agent-images-multiarch-build deliberately
-# does not: goose-dist is built for one architecture, so handing it to a
-# --platform build would put that one binary in every entry of the manifest.
-GOOSE_IMAGE ?=
-GOOSE_BUILD_ARG = $(if $(GOOSE_IMAGE),--build-arg GOOSE_IMAGE=$(GOOSE_IMAGE))
-# The default tag carries the version the Containerfile names, so a goose-dist
-# image built before a GOOSE_VERSION bump cannot be silently reused after one:
-# podman's default --pull=missing finds a stale :latest and says nothing, and
-# you debug the new goose against the old binary. CI never sees this default,
-# the action passes its own version+digest name.
-GOOSE_DIST_VERSION := $(shell sed -n 's/^ARG GOOSE_VERSION=//p' images/agent-base/Containerfile | head -1)
-GOOSE_DIST_IMG ?= localhost/goose-dist:$(GOOSE_DIST_VERSION)
-
-.PHONY: goose-dist-build
-goose-dist-build: ## Build just the goose binary as a standalone image, for reuse as GOOSE_IMAGE.
-	$(CONTAINER_TOOL) build --target goose-dist -t $(GOOSE_DIST_IMG) -f images/agent-base/Containerfile .
-
 .PHONY: agent-base-build
-agent-base-build: ## Build the base agent image (goose + git + harness binary).
-	$(CONTAINER_TOOL) build $(GOOSE_BUILD_ARG) -t $(AGENT_BASE_IMG) -f images/agent-base/Containerfile .
+agent-base-build: ## Build the base agent image (Lightspeed + git + harness binary).
+	$(CONTAINER_TOOL) build -t $(AGENT_BASE_IMG) -f images/agent-base/Containerfile .
 
 .PHONY: agent-java-build
 agent-java-build: agent-base-build ## Build the Java agent image (JDK 21 + Maven).

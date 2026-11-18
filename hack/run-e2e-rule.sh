@@ -3,14 +3,14 @@
 #
 # Every other check in this repo proves a rule was delivered to the pod. This
 # one follows it one hop further, onto the wire: the emulator records the exact
-# request body goose sent, and the assertion is made against those bytes.
+# request body the runtime sent, and the assertion is made against those bytes.
 #
 # That is the whole cross-image contract in one claim. The rule's text starts
 # as a SkillCard, is staged by the controller, assembled into
 # /opt/skills/<frontmatter-name>/SKILL.md by the skill-loader out of the
 # controller's image, written into .konveyor-skills.json under rules[], read
 # back by the harness out of the agent's image, composed by prompt.Build and
-# handed to goose over ACP. If any link is wrong the marker cannot appear.
+# handed to the runtime over ACP. If any link is wrong the marker cannot appear.
 #
 #   rule attached     the marker appears, under the ## Rules heading
 #   rule detached     it does not, so the marker came from the rule and not
@@ -63,7 +63,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MARKER="RULE-MARKER-$$-${RANDOM}"
 RUN_ON="run-on-$$-${RANDOM}"
 RUN_OFF="run-off-$$-${RANDOM}"
-# The script is keyed by bearer token, and this is the token goose will send,
+# The script is keyed by bearer token, and this is the token the runtime will send,
 # because it is what the Gateway credential holds.
 TOKEN="rule-e2e-token-$$"
 # Hub requires application names to be unique, and it outlives the run's
@@ -120,20 +120,8 @@ hub_get() {
 # answer, so both runs complete normally and the phase stays a precondition
 # rather than becoming the assertion. times: -1 is load-bearing: a rule that
 # omits it is treated as exhausted and skipped, and every request would 500.
-#
-# This script once carried a second, higher-priority rule that returned a shell
-# tool call when the rule's marker appeared in the prompt, so the test could
-# follow the marker back out through goose and ACP into the harness. goose
-# v1.55 moved its <turn-context> block out of the user turn: where v1.45
-# prepended it into the latest user message (alongside the ## Rules section and
-# its marker), v1.55 sends it as a separate, agent-appended user message that
-# lands last. The emulator keys a pattern on the *last* user message only (see
-# ExtractUserMessage in the pinned llemulator), and that message is now the
-# turn-context block -- byte-identical whether the rule is attached or not, and
-# never carrying the marker. So no pattern over it can tell the two runs apart,
-# and the tool call can no longer be made to fire on the rule alone. The claim
-# that the rule's text reaches the model is still proven one layer earlier,
-# against the exact request bytes goose sent (assert_marker, below).
+# The assertion reads recorded requests directly, so it does not depend on
+# runtime-specific shell tool names or extra messages the runtime may append.
 script_json() {
     cat <<JSON
 {"reset": true, "models": ["gpt-4o"],
@@ -190,8 +178,8 @@ spec:
   provider: openai
   # Port 80, and no /v1: the Gateway endpoint is a base URL.
   endpoint: http://openai-emulator-debug.${NS}.svc
-  # Not a gpt-5 or o-series name. Those switch goose to the Responses API,
-  # whose payload has input rather than messages, and this test reads messages.
+  # The emulator implements Chat Completions; this test records messages.
+  # The runtime uses its compatible-provider path for this custom endpoint.
   model: {name: gpt-4o, contextWindow: 128000}
   credentialRef: {secretName: rule-e2e-creds, key: API_KEY}
 ---
@@ -290,16 +278,20 @@ recorded_bodies() {
                for (i = 2; i <= n; i++) { sub(/\[DEBUG\] Request:.*/, "", p[i]); print p[i] } }'
 }
 
-# The user message of the turn belonging to run $1. goose also asks the model
-# to name the session, and that request embeds the user message, so it carries
-# the run id too. It has no rules layer, so select on the turn by requiring the
-# turn-context wrapper that only the real turn has.
+# User text in a request carrying this invocation's unique run marker.
+# OpenAI-compatible clients may encode content as a string or text blocks.
+# Match the harness instruction rather than runtime-specific context wrappers.
 user_message_for() {
     recorded_bodies | jq -r --arg id "$1" '
+        def user_text:
+            if type == "string" then .
+            elif type == "array" then
+                [ .[] | select(type == "object" and (.type == "text" or .type == "input_text"))
+                  | .text | select(type == "string") ] | join("\n")
+            else "" end;
         select(type == "object" and has("messages"))
-        | [ .messages[] | select(.role == "user") | .content | select(type == "string") ] as $u
-        | select(any($u[]; contains($id)))
-        | select(any($u[]; contains("<turn-context>")))
+        | [ .messages[] | select(.role == "user") | .content | user_text ] as $u
+        | select(any($u[]; contains("Run marker: " + $id)))
         | $u[]' 2>/dev/null
 }
 
@@ -330,9 +322,9 @@ assert_marker() {
     case "$2" in
     present)
         if [ -z "${marker_ln}" ]; then
-            fail "$3: the rule body never reached the prompt goose sent"
+            fail "$3: the rule body never reached the prompt the runtime sent"
         elif [ -n "${rules_ln}" ] && [ "${marker_ln}" -gt "${rules_ln}" ]; then
-            pass "$3: the rule arrived under ## Rules in the prompt goose sent"
+            pass "$3: the rule arrived under ## Rules in the prompt the runtime sent"
         else
             fail "$3: marker present but not under the ## Rules layer"
         fi
@@ -367,10 +359,10 @@ else
     fail "the harness never reported the rule, so it did not read it back from the manifest"
 fi
 
-# Informational, not an assertion: which tools goose offered the model. The
+# Informational, not an assertion: which tools the runtime offered the model. The
 # emulator can only return a tool call naming one of these.
 echo ""
-echo "--- Tools goose advertised (informational) ---"
+echo "--- Tools the runtime advertised (informational) ---"
 recorded_bodies | jq -r 'select(type == "object") | [.tools[]?.function.name] | join(", ")' 2>/dev/null \
     | grep -v '^$' | sort -u | sed 's/^/    /' || echo "    (none)"
 

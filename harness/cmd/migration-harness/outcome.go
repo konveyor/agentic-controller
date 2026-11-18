@@ -137,7 +137,7 @@ func classifyOutcome(result *acp.PromptResult, err error, nativeMaxTurns int, pr
 		// available that the native limit fired, rather than a genuine
 		// early failure (disconnect before any turn ran).
 		if errors.Is(err, acp.ErrConnectionLost) &&
-			result != nil &&
+			result != nil && !result.StopReasonAuthoritative &&
 			nativeMaxTurns > 0 &&
 			result.TurnsUsed >= nativeMaxTurns {
 			return outcomeLimitReached, limitMaxTurns
@@ -159,7 +159,7 @@ func classifyOutcome(result *acp.PromptResult, err error, nativeMaxTurns int, pr
 		return outcomeFailed, limitNone
 	case result.StopReason == stopReasonMaxTurns:
 		return outcomeLimitReached, limitMaxTurns
-	case nativeMaxTurns > 0 && result.TurnsUsed >= nativeMaxTurns:
+	case !result.StopReasonAuthoritative && nativeMaxTurns > 0 && result.TurnsUsed >= nativeMaxTurns:
 		// Confirmed empirically: goose reports a clean "end_turn" even
 		// when it silently truncated the task at its native
 		// GOOSE_MAX_TURNS ceiling — stopReason does not distinguish
@@ -181,10 +181,27 @@ func classifyOutcome(result *acp.PromptResult, err error, nativeMaxTurns int, pr
 
 // usage is the compact usage-stats section of the termination blob.
 type usage struct {
-	TurnsUsed   int     `json:"turnsUsed,omitempty"`
-	ContextUsed int     `json:"contextUsed,omitempty"`
-	ContextSize int     `json:"contextSize,omitempty"`
-	Cost        float64 `json:"cost,omitempty"`
+	TurnsUsed    int     `json:"turnsUsed,omitempty"`
+	ContextUsed  int     `json:"contextUsed,omitempty"`
+	ContextSize  int     `json:"contextSize,omitempty"`
+	Cost         float64 `json:"cost,omitempty"`
+	CostReported bool    `json:"-"`
+	InputTokens  *int64  `json:"inputTokens,omitempty"`
+	OutputTokens *int64  `json:"outputTokens,omitempty"`
+}
+
+// MarshalJSON preserves the compact existing usage shape, including a genuine
+// zero cost while omitting monetary data the runtime did not report.
+func (u usage) MarshalJSON() ([]byte, error) {
+	type fields usage
+	var cost *float64
+	if u.CostReported || u.Cost != 0 {
+		cost = &u.Cost
+	}
+	return json.Marshal(struct {
+		fields
+		Cost *float64 `json:"cost,omitempty"`
+	}{fields: fields(u), Cost: cost})
 }
 
 // combineUsage merges the primary prompt's result with an optional
@@ -196,15 +213,26 @@ type usage struct {
 // neither should be summed across the two calls.
 func combineUsage(primary, handoff *acp.PromptResult) usage {
 	u := usage{
-		TurnsUsed:   primary.TurnsUsed,
-		ContextUsed: primary.ContextUsed,
-		ContextSize: primary.ContextSize,
-		Cost:        primary.Cost,
+		TurnsUsed:    primary.TurnsUsed,
+		ContextUsed:  primary.ContextUsed,
+		ContextSize:  primary.ContextSize,
+		Cost:         primary.Cost,
+		CostReported: primary.CostReported,
+		InputTokens:  primary.InputTokens,
+		OutputTokens: primary.OutputTokens,
 	}
 	if handoff == nil {
 		return u
 	}
 	u.TurnsUsed += handoff.TurnsUsed
+	u.CostReported = u.CostReported || handoff.CostReported
+	// Tokens, like cost, already include earlier prompts in the session.
+	if handoff.InputTokens != nil && (u.InputTokens == nil || *handoff.InputTokens >= *u.InputTokens) {
+		u.InputTokens = handoff.InputTokens
+	}
+	if handoff.OutputTokens != nil && (u.OutputTokens == nil || *handoff.OutputTokens >= *u.OutputTokens) {
+		u.OutputTokens = handoff.OutputTokens
+	}
 	if handoff.Cost > u.Cost {
 		u.Cost = handoff.Cost
 	}

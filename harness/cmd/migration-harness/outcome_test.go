@@ -666,3 +666,60 @@ func TestPromptFailureDetailBoundsAnEnormousGooseLine(t *testing.T) {
 		t.Errorf("promptFailureDetail is %d runes, want it cut near %d", n, providerErrorSummaryLen)
 	}
 }
+
+func TestCombineCumulativeTokenSnapshots(t *testing.T) {
+	input, output, laterInput, laterOutput := int64(100), int64(10), int64(125), int64(15)
+	u := combineUsage(&acp.PromptResult{TurnsUsed: 2, InputTokens: &input, OutputTokens: &output}, &acp.PromptResult{TurnsUsed: 1, InputTokens: &laterInput, OutputTokens: &laterOutput})
+	if u.TurnsUsed != 3 || u.InputTokens == nil || *u.InputTokens != 125 || u.OutputTokens == nil || *u.OutputTokens != 15 {
+		t.Fatalf("usage=%+v", u)
+	}
+	// A prompt with no new measurement preserves the last known snapshot.
+	u = combineUsage(&acp.PromptResult{InputTokens: &input}, &acp.PromptResult{})
+	if u.InputTokens == nil || *u.InputTokens != 100 || u.OutputTokens != nil {
+		t.Fatalf("partial usage=%+v", u)
+	}
+}
+
+func TestUsageJSONDistinguishesMissingAndZero(t *testing.T) {
+	zero := int64(0)
+	for _, tc := range []struct {
+		value               usage
+		wantCost, wantInput bool
+	}{
+		{usage{}, false, false},
+		{usage{CostReported: true, InputTokens: &zero}, true, true},
+	} {
+		data, err := json.Marshal(tc.value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(data, &fields); err != nil {
+			t.Fatal(err)
+		}
+		_, hasCost := fields["cost"]
+		_, hasInput := fields["inputTokens"]
+		if hasCost != tc.wantCost || hasInput != tc.wantInput {
+			t.Fatalf("usage JSON=%s", data)
+		}
+	}
+}
+
+func TestAuthoritativeRuntimeStopReason(t *testing.T) {
+	// A runtime with explicit native limit reporting must not inherit Goose's
+	// tool-count heuristic: several tools can belong to one model response.
+	result := &acp.PromptResult{StopReason: "end_turn", TurnsUsed: 5, StopReasonAuthoritative: true}
+	got, limit := classifyOutcome(result, nil, 1, false)
+	if got != outcomeSucceeded || limit != limitNone {
+		t.Fatalf("outcome=%s limit=%s", got, limit)
+	}
+	result.StopReason = stopReasonMaxTurns
+	got, limit = classifyOutcome(result, nil, 10, false)
+	if got != outcomeLimitReached || limit != limitMaxTurns {
+		t.Fatalf("outcome=%s limit=%s", got, limit)
+	}
+	got, limit = classifyOutcome(result, acp.ErrConnectionLost, 1, false)
+	if got != outcomeFailed || limit != limitNone {
+		t.Fatalf("unexpected disconnect inferred as limit: outcome=%s limit=%s", got, limit)
+	}
+}

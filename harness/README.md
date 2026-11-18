@@ -1,6 +1,6 @@
 # Agent Entry Point (`migration-harness`)
 
-**Minimal single-stage entry point (bookends only)** that handles git plumbing, parameter delivery, and [goose](https://github.com/block/goose) runtime lifecycle for AI agent workloads. It is the reference implementation of the [Agent Entry Point Contract](../docs/entry-point.md).
+**Minimal single-stage entry point** that handles git plumbing, parameter delivery, and agent runtime lifecycle for AI agent workloads. The standard agent images use Lightspeed's DeepAgents runtime. It is the reference implementation of the [Agent Entry Point Contract](../docs/entry-point.md).
 
 The entry point manages workspace setup and teardown only — all migration intelligence, tool use, and git commits belong to the agent runtime and its [SkillCards](../CONTEXT.md).
 
@@ -17,7 +17,7 @@ The entry point manages workspace setup and teardown only — all migration inte
 │  2. Resolve app + git creds from Hub API (if configured) │
 │  3. Clone repo, configure author, strip push creds       │
 │  4. Write analysis insights to .konveyor/ (uncommitted)  │
-│  5. Start goose serve (ACP loopback :4001)               │
+│  5. Start agent runtime (ACP loopback :4001)             │
 │  6. Discover skills and assemble layered prompt          │
 │  7. Start ACP tee (:4000) for live streaming & HITL      │
 │  8. Start filesystem watcher (incremental push)          │
@@ -33,14 +33,16 @@ The entry point manages workspace setup and teardown only — all migration inte
 └──────────────────────────────────────────────────────────┘
 ```
 
-The entry point sends **one prompt** per stage. The AgentWorkflowRun controller handles stage sequencing — the entry point binary is identical in every stage image.
+The entry point sends one primary prompt per stage and can send a handoff prompt
+in the same session when a limit is reached. The AgentWorkflowRun controller
+handles stage sequencing; the harness binary is identical in every stage image.
 
 ---
 
 ## Prerequisites
 
-- **Go 1.21+** (to build)
-- **[goose](https://github.com/block/goose)** (started by the entry point via `goose serve`)
+- **Go**, at the version declared in `go.mod` (to build)
+- **Lightspeed runtime and Python dependencies**, supplied by the standard agent images
 - **git**
 
 ---
@@ -55,6 +57,42 @@ go build -o migration-harness ./cmd/migration-harness/
 ---
 
 ## Configuration
+
+The [Lightspeed integration](../docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md) uses the
+same harness and ACP tee. The standard base image sets
+`HARNESS_RUNTIME=lightspeed`, inherited by all language images. It reports token
+usage and supports same-session handoff; positive `maxCost` budgets are rejected
+because the runtime does not report monetary cost. Loss of monetary budget
+enforcement is accepted for this adoption; accounting coverage and future cost
+support remain follow-up work under ADR 0021. `HARNESS_ACP_TEE=off` is
+also unsupported for Lightspeed.
+
+For standalone compatibility, an unset `HARNESS_RUNTIME` still selects Goose.
+That path requires a separately installed Goose binary; it is not included in
+the Lightspeed base image.
+
+The harness maps Gateway configuration for `anthropic`, `openai`, `xai`,
+`aws-bedrock` and `gcp-vertex-ai`. `execution.mode`, `askUser` and `maxTurns`
+configure supervision, questions and turn limits. `/workspace` is a viewer
+alias for the prepared `/workspace/repo`; execution stays in the latter.
+Conversation state and viewer replay last only for the runtime process.
+
+Observed token usage excludes isolated inspection-classifier calls and is not
+a billing total. `LIGHTSPEED_MODEL_MAX_OUTPUT_TOKENS` optionally sets the main
+model's per-response output allowance. Reasoning settings remain optional and
+provider-specific. The installed runtime revision and frozen dependency build
+are described in [Container Images](../images/README.md#pr-artifacts).
+
+Before upgrading an existing workload, remove positive `spec.execution.maxCost`
+values from its Agent and AgentRun and `spec.stages[].execution.maxCost` values
+from its AgentWorkflow, or override the inherited budget with `"0.00"` for a
+Lightspeed run. Removing a run override still leaves the Agent's default in
+effect. Workloads requiring monetary budget enforcement must keep using a
+Goose-based image.
+
+Provider failures report bounded HTTP status/category diagnostics over ACP and
+into termination data. Arbitrary provider messages and response bodies remain
+suppressed because they can contain credentials or request content.
 
 Configuration comes from two sources: environment variables (required and optional) and the controller-mounted `/run/konveyor/params.json` file (execution controls and workflow/agent parameter values — see the Parameters section below).
 
@@ -101,14 +139,39 @@ Execution limits and mode, plus workflow/agent parameter values, are delivered v
 {
   "workflow": { "application_name": "coolstore" },
   "agent": { "source_url": "https://github.com/example/app", "dry_run": true },
-  "execution": { "mode": "auto", "maxTurns": 200, "maxCost": "10.00" }
+  "execution": { "mode": "auto", "maxTurns": 200 }
 }
 ```
 
 - `execution.mode` sets runtime supervision (`auto` or `approve`).
 - `execution.maxTurns` configures runtime turn limits.
-- `execution.maxCost` sets cumulative spend budget monitored via ACP.
+- `execution.maxCost` requires runtime-reported monetary cost. The Lightspeed
+  runtime does not support it, so a positive value fails before execution.
 - Workflow and agent values are appended to the agent's prompt under `## Parameters`.
+
+### Runtime regression checks
+
+Run Go harness regressions from `harness/` with `go test ./...`. For the full
+Lightspeed integration, install a checkout of the image's pinned runtime with
+its frozen development and ACP dependencies, then run from the repository root:
+
+```sh
+/path/to/lightspeed-agentic-sandbox/.venv/bin/python \
+  hack/lightspeed-runtime/verify.py \
+  --runtime-dir /path/to/lightspeed-agentic-sandbox \
+  --evidence-dir .scratch/lightspeed-verification
+```
+
+Use a fresh evidence directory and leave ports 4000 and 4001 available. The
+helper drives the real Go harness, runtime, graph and local Git repositories
+against scripted model/classifier and Hub services, without paid model calls
+or remote Git pushes. Its cases cover automatic execution, approval, a human
+answer, cancellation, steering/reconnect, turn-limit handoff, skill loading and
+provider authentication/rate-limit failures. Use `--cases`
+to select cases. It checks usage, verification, Git results and token cleanup.
+The scripted classifier approves results; inspection rejection, redaction and
+viewer-release regressions belong in the runtime's native graph/ACP tests.
+These checks do not establish live classifier accuracy or cluster qualification.
 
 ---
 
