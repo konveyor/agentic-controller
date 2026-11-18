@@ -19,6 +19,7 @@ style: |
   section.demo { font-size: 25px; }
   section.demo h1 { font-size: 46px; }
 
+
 ---
 
 <!-- _class: lead -->
@@ -42,20 +43,24 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 -->
 
 
+
 ---
 
 # What we will show
 
 - Konveyor with Goose, then the Lightspeed prototype
-- Runtime changes, coverage and accepted limits
+- UI, harness and runtime changes, coverage and accepted limits
 - **Run 1:** normal Coolstore planning with human guidance
 - **Run 2:** controlled rejection with the same Agent and image
-- Questions, followed by the separate operator discussion
+- What to do with the runtime
+- Lightspeed AgenticRun controller adoption feasibility
 
 <!--
 20 seconds. Presenter cues for the two separate runs:
 
-First explain the existing setup and the runtime swap. Show the current changes
+First explain the existing setup, the runtime swap, and the UI/harness/runtime
+architecture. Say what changed in the UI and harness as well as the runtime.
+Show the current changes
 and accepted limits. Then introduce Run 1 as normal planning: review a tool call,
 answer the database question, steer the work, inspect the plan and show the
 actual verification/pushed result only when that successful take exists.
@@ -80,6 +85,7 @@ Open the conversation after the prototype scope and demonstrations. No ownership
 split is proposed. The operator material remains a separate discussion.
 -->
 
+
 ---
 
 <!-- _class: diagram -->
@@ -102,6 +108,7 @@ Sources: domain glossary and accepted ADR 0021
 https://github.com/konveyor/agentic-controller/blob/369070c659a71cecf50d57c376cb13d09d332701/CONTEXT.md#infrastructure
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
+
 
 
 ---
@@ -137,11 +144,90 @@ Current implementation:
 -->
 
 
+
+---
+
+<!-- _class: diagram -->
+
+# UI, harness and runtime
+
+![w:1135](lightspeed-ui-harness-runtime.svg)
+
+The UI creates AgentRuns through Hub. The controller creates and watches Sandbox resources.
+
+<!--
+60 seconds. This is the actual current prototype, not a proposed ownership split.
+
+The UI displays the interaction and sends the person's responses. Run creation
+goes through Hub to the Kubernetes API. Viewer ACP traffic reaches the harness's
+relay through Hub; the Kubernetes controller never joins that live conversation.
+The Go harness and runtime are processes in the Agent Sandbox workload. The
+harness starts/configures Lightspeed and relays viewer traffic; the runtime keeps
+the conversation, calls the model/tools, inspects output and implements controls.
+The harness continues to resolve Hub application context, prepare Git, protect
+push credentials, verify, push, revoke the scoped Hub token and report the outcome.
+
+The separate arrows distinguish the viewer WebSocket path from the harness's
+loopback WebSocket connection to the runtime at 127.0.0.1:4001. The harness
+exposes the viewer relay on port 4000 and launches lightspeed_agentic.acp with
+--host 127.0.0.1 --port 4001. This prototype does not use ACP over stdio.
+They carry the same interaction, not a second application execution. The following slide says what changed on the
+Konveyor side before the detailed runtime walkthrough.
+Sources:
+https://github.com/konveyor/agentic-controller/pull/345
+https://github.com/konveyor/tackle2-ui/pull/3738
+https://github.com/djzager/agentic-controller/blob/4c036c931666de10dd7c1620928c2e34f8ae17ae/docs/lightspeed-runtime-prototype.md
+-->
+
 ---
 
 <!-- _class: technical -->
 
-# Current prototype changes
+# UI and harness changes
+
+**UI:** show tool arguments before approval and display reported tokens. The reconnect fix preserves early question and approval cards. It is deployed from PR CI; live validation is in progress.
+
+**Why:** people need to see the action, answer the agent and keep supervising the same run.
+
+**Harness:** select and configure Lightspeed, relay viewer interaction, read usage and request a same-session handoff. Keep Hub/Git preparation, verification, credential isolation, push and cleanup.
+
+**Why:** changing the runtime must preserve how a Konveyor run starts, is supervised and finishes.
+
+<!--
+75 seconds. Explain actual changes and retained responsibilities separately.
+
+UI PR 3738 accepts the Lightspeed usage channel, keeps absent token measurements
+unknown, and renders tool arguments on tools and permission cards as text.
+Follow-up commit 3a83a095 addresses a demonstrated connection race: clearing
+items after initialize erased questions/permission requests already replayed by
+the harness. PR 3738 is fully green, including its end-to-end checks. The PR CI
+image was mirrored without changing its bytes and deployed through
+Tackle.spec.ui_image_fqin; the Ready Pod has the expected digest. Live validation
+is in progress. The inspection video records UI ed11b648 before that follow-up.
+A successful current-runtime normal-planning recording remains pending.
+
+Controller PR 345 adds the Lightspeed launch/configuration path in the Go harness
+and packages it in the agent-base/language images. The harness adapts controls,
+usage and primary-prompt completion to its existing handoff/finalization flow.
+A handoff is another prompt in the same retained runtime session. It keeps the
+Hub context and Git preparation/finalization responsibilities shown in the
+architecture diagram. Push credentials remain with the harness; the runtime
+commits locally. The controller reconciles resources and watches status only.
+
+This is not a new location proposal for the runtime fork's code. First show
+what exists and why, then discuss contribution scope with Lightspeed.
+Sources:
+https://github.com/konveyor/tackle2-ui/pull/3738
+https://github.com/konveyor/agentic-controller/pull/345
+https://github.com/djzager/agentic-controller/blob/4c036c931666de10dd7c1620928c2e34f8ae17ae/harness/internal/runtime/lightspeed.go
+https://github.com/djzager/agentic-controller/blob/4c036c931666de10dd7c1620928c2e34f8ae17ae/docs/lightspeed-runtime-prototype.md
+-->
+
+---
+
+<!-- _class: technical -->
+
+# Runtime changes in the prototype
 
 - Retain the conversation and model clients across prompts.
 - Connect the prepared runtime to official `AgentServerACP`.
@@ -172,15 +258,16 @@ ownership split is part of this meeting.
 
 Runtime and recorded-inspection revisions:
 Runtime 451818c50d6c93a8ab7085cf0c70b15510b6ca75
-Controller PR345: 4c036c931666de10dd7c1620928c2e34f8ae17ae
+Recorded controller/harness source: 4c036c931666de10dd7c1620928c2e34f8ae17ae
 Recorded inspection UI: ed11b648799322f566b84db309f371c138713cdd
-UI PR 3738: 3a83a095 reconnect fix is committed; CI building, not deployed/live-tested.
+UI PR 3738: 3a83a095 passed full CI and is deployed from its PR CI image; live validation is in progress.
 Current integration guide: ../lightspeed-runtime-prototype.md
 The existing video at 4039163 records the earlier custom ACP adapter and cannot
 validate these later changes. The current 451818c inspection recording supplies
 separate controlled rejection evidence; successful current-runtime planning
 remains pending.
 -->
+
 
 ---
 
@@ -230,6 +317,7 @@ https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab708
 https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/deepagents.py
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
+
 
 
 ---
@@ -304,6 +392,7 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 -->
 
 
+
 ---
 
 <!-- _class: technical -->
@@ -355,6 +444,7 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 -->
 
 
+
 ---
 
 <!-- _class: technical -->
@@ -402,6 +492,7 @@ https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab708
 https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
+
 
 
 ---
@@ -464,6 +555,7 @@ https://github.com/djzager/lightspeed-agentic-sandbox/tree/451818c50d6c93a8ab708
 -->
 
 
+
 ---
 
 <!-- _class: technical -->
@@ -519,6 +611,7 @@ https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab708
 -->
 
 
+
 ---
 
 <!-- _class: technical -->
@@ -562,6 +655,7 @@ https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab708
 -->
 
 
+
 ---
 
 <!-- _class: technical -->
@@ -602,6 +696,7 @@ Output cutoff boundary and retained session result handling:
 https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/providers/deepagents.py
 https://github.com/djzager/lightspeed-agentic-sandbox/blob/451818c50d6c93a8ab7085cf0c70b15510b6ca75/src/lightspeed_agentic/session.py
 -->
+
 
 
 ---
@@ -648,6 +743,7 @@ Current decision: ../adr/0021-shared-runtime-and-conditional-lightspeed-executio
 Evidence and recording plan: lightspeed-2026-11-11-demo.md
 -->
 
+
 ---
 
 <!-- _class: demo -->
@@ -685,8 +781,9 @@ module hashes matched 451818c. A reconnect cleared pending permission/elicitatio
 cards because ChatPanel calls setItems([]) after initialization. The harness
 correctly replayed those requests. This is a confirmed UI issue, not evidence
 that the runtime failed to replay. UI reconnect fix 3a83a095 is committed in
-PR 3738 and CI is building. It has not been deployed or tested live; do not claim
-that planning has passed. This approved UI-only exception leaves the frozen
+PR 3738, has passed full CI including end-to-end checks, and is deployed from
+its PR CI image. Live validation is in progress; do not claim that planning has
+passed. This approved UI-only exception leaves the frozen
 runtime/controller implementation unchanged.
 
 Do not claim this rehearsal recorded a successful question/answer, verified
@@ -710,6 +807,7 @@ https://github.com/djzager/coolstore/blob/9e97db02b641dc2608fcc399503bbc1a0ed3b8
 Current walkthrough:
 lightspeed-2026-11-11-demo.md
 -->
+
 
 ---
 
@@ -749,9 +847,9 @@ initial loading and trailing idle are omitted. Pointer/clicks are not recreated.
 The walkthrough discloses a final capture-wait timeout after the real Failed
 state was visible and preserves the full source and exact edit decisions.
 
-The recording predates UI reconnect fix 3a83a095, now committed in PR 3738 with
-CI building, but not deployed or live-tested. Successful current-runtime planning
-remains pending. The 4039163 normal-planning video remains historical.
+The recording predates UI reconnect fix 3a83a095, now deployed from PR 3738 CI
+after all checks passed. Live validation is in progress. Successful
+current-runtime planning remains pending. The 4039163 normal-planning video remains historical.
 
 The MP4 is silent for live narration and linked to immutable asset commit
 ca578232b434e21a4c96f57c62629c0e04ee7631. Cancellation, handoff and reconnect
@@ -760,36 +858,45 @@ Current walkthrough: lightspeed-2026-11-11-demo.md
 
 -->
 
+
 ---
 
 <!-- _class: lead -->
 
-# Questions
+# What should we do with this runtime?
 
-What do you think of the current changes and scope?
+What fits upstream, and what is Konveyor-specific?
 
-Where should this work belong?
+How should we review the complete prototype together?
 
 <!--
-Open the conversation after demonstrating the current prototype and its scope.
-There is no proposed ownership split or request to approve one. Contribution
-boundaries, API choices, code location and next steps remain open for discussion.
-The later operator material is a separate topic if useful to this group.
+This ends the runtime section after the positive-demo status and the recorded
+intentional failure. Invite an open discussion of the complete current scope:
+runtime session changes, official ACP integration, viewer publication/replay,
+controls, provider fixes, UI and Go-harness integration. The fork's current
+location does not decide where the code belongs. No ownership split or approved
+upstream API is proposed. Ask what is useful and how to review it together.
+
+The next slide starts a distinct feasibility discussion: could Lightspeed's
+AgenticRun controller replace our direct execution backend while preserving the
+Konveyor workload and user experience? It is separate from runtime reuse.
 -->
 
 ---
 
 <!-- _class: technical -->
 
-# Lightspeed as the execution backend
+# Lightspeed AgenticRun controller adoption
 
-**Today:** Konveyor's `AgentRun` reconciler creates a Sandbox directly. Our Go harness owns preparation, agent execution and finalization.
+**Feasibility discussion:** could Lightspeed’s controller run the workload while Konveyor keeps its UI and harness?
 
-**Candidate integration:** delegate execution to a Lightspeed `AgenticRun`; its operator owns the SandboxClaim and workload lifecycle.
+**Today:** our AgentRun reconciler creates Agent Sandbox resources directly.
 
-**Adoption bar:** per-run image/startup control, complete access to inputs and credentials, and preservation of harness finalization and outcomes.
+**Option to qualify:** map execution to a Lightspeed `AgenticRun` and its SandboxClaim lifecycle.
 
-Agent Sandbox remains underneath Lightspeed's SandboxClaim path. [ADR 0021](https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md) separates this qualification from runtime reuse.
+**Must preserve:** image/startup choice, access to inputs and credentials, harness finalization and clear outcomes.
+
+[ADR 0021](https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md) separates this backend decision from runtime reuse and later resource migration.
 
 <!--
 35 seconds.
@@ -809,12 +916,23 @@ The following slides describe requirements and candidate ways to meet them.
 
 Accepted boundaries:
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
-Historical source review: November 11, 2026, operator 9973d000. No new
-operator-backed cluster qualification is claimed.
+Source review refreshed November 18 against main fcc1dc78f6af67311381329e19567f47ead3e005
+(November 16 commit), 13 commits after the cited 9973d000 baseline. Agent,
+AgenticRun, LLMProvider, SandboxManager, resolution, Pod completion and cancellation
+source paths are unchanged. The checked image/startup, placement/credentials,
+Result completion and cancellation gaps remain. Relevant changes are default-on
+redaction configuration and token-usage specification updates; planned optional
+usage fields are not new API implementation. Existing pinned line references
+remain valid for these observations. This was a read-only source check, not
+operator-backed cluster qualification. PR 588 remains open; OpenShell timing
+remains a question.
+Current comparison:
+https://github.com/openshift/lightspeed-agentic-operator/compare/9973d0002c78d843ec838ee64fd3f5221a094faa...fcc1dc78f6af67311381329e19567f47ead3e005
 Current operator mode dispatch and Sandbox resources:
 https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/controller/agenticrun/sandbox_manager.go#L197-L276
 https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/controller/agenticrun/sandbox_manager.go#L601-L723
 -->
+
 
 
 ---
@@ -829,7 +947,7 @@ https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec
 - A future Go Migrator needs the Go toolchain.
 - Both images must be usable in concurrent runs.
 
-**Required:** select the image per invocation and start its Konveyor harness.
+**Required:** select the image per run and honor its Konveyor harness entrypoint.
 
 Possible contract: a per-run image override or template selection, honoring the image's entrypoint. [ADR 0021](https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md) makes image/startup control a firm requirement.
 
@@ -848,9 +966,9 @@ select different images without changing shared configuration.
 
 One possible solution is an AgenticRun image override, potentially with an Agent
 default; another is per-run template selection with equivalent image and startup
-control. These are discussion candidates, not selected API fields. Respecting
-the chosen image's ENTRYPOINT may satisfy startup. The ADR does not require a
-separate command override if the existing entrypoint contract is sufficient.
+control. These are discussion candidates, not selected API fields. The selected image must start its harness through the agreed entrypoint. A
+new command-override field is unnecessary if respecting the image ENTRYPOINT
+already provides that behavior.
 
 Current API/configuration/builder:
 https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/api/v1alpha1/agent_types.go#L99-L154
@@ -861,6 +979,7 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 -->
 
 
+
 ---
 
 <!-- _class: technical -->
@@ -869,7 +988,7 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 
 **Reviewed operator:** Lightspeed watches runs across namespaces but creates workloads in its operator namespace. Agent/LLMProvider are cluster-scoped; Secrets are namespaced.
 
-**Problem:** the workload needs Hub's run-scoped inputs/token, model credentials and a reachable ACP endpoint for Konveyor's UI.
+**Qualify together:** workload placement, Hub/Git/model/MCP reachability, provider and Secret binding, and the UI's connection to the workload.
 
 **Options to qualify:** run near Hub and bind provider credentials there, or run centrally and deliver Hub inputs/token with the required network access.
 
@@ -907,6 +1026,7 @@ https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec
 https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/api/v1alpha1/tools_types.go#L87-L147
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
+
 
 
 ---
@@ -960,6 +1080,7 @@ https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec
 Accepted common workload/outcome contract:
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
 -->
+
 
 
 ---
@@ -1018,6 +1139,47 @@ https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1
 -->
 
 
+
+---
+
+<!-- _class: technical -->
+
+# Templates and resource overlap
+
+**Konveyor:** Agents define reusable capabilities; AgentWorkflows compose ordered stages with Git handoffs. AgentRuns invoke Agents; AgentWorkflowRuns invoke workflows.
+
+**Reviewed Lightspeed APIs:** Agents, inline run steps and Sandbox templates cover different parts of that setup.
+
+**Ask:** which behaviors map today, and which would be lost or need changes?
+
+Qualify execution first. Decide template and resource migration when the required behavior is covered.
+
+<!--
+50 seconds. Keep this distinct from both runtime reuse and controller adoption.
+
+Use Agent precisely: Konveyor's Agent is a template, and AgentRun is an
+invocation. AgentWorkflow is a separate reusable template of sequential Agent
+stages; AgentWorkflowRun invokes it.
+
+Konveyor templates select skills/collections, allowed Gateways, instructions,
+workload image and execution limits. Workflows carry an independent guide and
+ordered reusable stages, with committed handoff files between fresh sessions.
+The reviewed Lightspeed Agent/AgenticRun APIs have model/prompt configuration
+and inline step behavior. Compare reuse, parameter/model selection, image
+selection, workflow composition, handoff semantics and lifecycle/status before
+assuming equivalence. SandboxTemplate describes workload setup, not all of
+those domain-template behaviors.
+
+ADR 0021 permits later migration when equivalent resources cover the use cases;
+it does not require resource renaming or deprecation just to evaluate execution
+through the operator. Ask for the intended direction and a small mapping test,
+without choosing an ownership split or inventing new APIs in this presentation.
+Sources and historical review (November 11, operator 9973d000):
+https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/api/v1alpha1/agent_types.go
+https://github.com/openshift/lightspeed-agentic-operator/blob/9973d0002c78d843ec838ee64fd3f5221a094faa/api/v1alpha1/agenticrun_types.go
+https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
+-->
+
 ---
 
 <!-- _class: technical -->
@@ -1063,11 +1225,16 @@ a stable boundary across their potential backend changes.
 Accepted decisions and research:
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0016-gateway-crd-as-interim-execution-interface.md
 https://github.com/konveyor/agentic-controller/blob/ec36e644cdc8983d82263edba3a1172355da3ddc/docs/adr/0021-shared-runtime-and-conditional-lightspeed-execution.md
-Source review date: November 11, 2026. Operator 9973d000, runtime a23005e8.
-These are historical source observations, not a new cluster qualification.
+Original source review: November 11, 2026. Operator 9973d000, runtime a23005e8.
+The November 18 bounded operator-main check at fcc1dc78 found no OpenShell path
+or mention in the checked README/execution/API files. It establishes no adoption
+timeline and does not rule out work elsewhere. No new OpenShell or operator
+cluster qualification is claimed.
+https://github.com/openshift/lightspeed-agentic-operator/tree/fcc1dc78f6af67311381329e19567f47ead3e005
 https://github.com/NVIDIA/OpenShell/blob/7d9303690f7de689bddb487efde77365c02f8555/crates/openshell-driver-kubernetes/README.md#L18-L108
 https://github.com/NVIDIA/OpenShell/blob/7d9303690f7de689bddb487efde77365c02f8555/crates/openshell-driver-kubernetes/README.md#L355-L375
 -->
+
 
 
 ---
@@ -1075,3 +1242,16 @@ https://github.com/NVIDIA/OpenShell/blob/7d9303690f7de689bddb487efde77365c02f855
 <!-- _class: lead -->
 
 # Questions
+
+Which feasibility checks should we try together?
+
+How does your roadmap affect that work?
+
+<!--
+Overall discussion after the separate AgenticRun-controller section. Candidate
+experiments include two concurrent workload images with correct harness startup,
+whole-path Hub/model/Secret/ACP access, normal completion and cancellation with
+finalization, Result-publication failure, and template/resource mapping. Ask how
+the OpenShell roadmap changes the timing or required integration behavior.
+No delivery commitment or selected ownership split is assumed.
+-->

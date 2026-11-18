@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1135" height="350" viewBox="0 0 1135 350">
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" fill="#b09454"/></marker></defs>
+<g font-family="Arial, sans-serif" text-anchor="middle">
+<rect x="397" y="17" width="735" height="309" rx="7" fill="#16213e" stroke="#686879"/>
+<text x="765" y="49" fill="#ffffff" font-size="24">Inside Agent Sandbox</text>
+<rect x="10" y="85" width="285" height="220" rx="5" fill="#1a1a2e" stroke="#a0a0a0"/>
+<rect x="420" y="85" width="290" height="220" rx="5" fill="#1a1a2e" stroke="#a0a0a0"/>
+<rect x="825" y="85" width="295" height="220" rx="5" fill="#343983" stroke="#b09454"/>
+<g fill="#ffffff" font-size="28" font-weight="700">
+<text x="152" y="127">Konveyor UI</text><text x="565" y="127">Go harness</text><text x="972" y="127">Lightspeed runtime</text></g>
+<g stroke="#686879"><path d="M28 147 H277"/><path d="M438 147 H692"/><path d="M843 147 H1102"/></g>
+<g fill="#e0e0e0" font-size="22">
+<text x="152" y="182">Start and watch runs</text><text x="152" y="222">Questions and approvals</text><text x="152" y="262">Guidance and usage</text>
+<text x="565" y="182">Hub context and Git</text><text x="565" y="222">Viewer relay and controls</text><text x="565" y="262">Verify, push and clean up</text>
+<text x="972" y="182">Conversation and models</text><text x="972" y="222">Tools and inspection</text><text x="972" y="262">Turns and token usage</text></g>
+<g stroke="#b09454" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"><path d="M302 196 H412"/><path d="M718 196 H817"/></g>
+<g fill="#c4aa6e" font-size="20"><text x="357" y="157">ACP</text><text x="357" y="180">via Hub</text><text x="768" y="157">ACP</text><text x="768" y="180" font-size="17">loopback WS</text></g>
+</g></svg>
