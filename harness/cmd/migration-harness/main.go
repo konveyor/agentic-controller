@@ -644,6 +644,14 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			logAgentClosingMessage(handoffResult, red)
 		}
 	}
+	// A ceiling goose gave no cost to compare against did nothing. Say so
+	// here for whoever is watching; the termination blob below carries it
+	// onto the AgentRun's CostCeilingEnforced condition.
+	costCeiling := costCeilingStatus(cfg.MaxCost, primaryResult, handoffResult)
+	if costCeiling == costCeilingUnenforced {
+		logging.Warn("maxCost is configured but goose reported no cost for this run — the ceiling could not be enforced")
+		emitNotice("maxCost could not be enforced: the runtime reported no cost for this run, usually because it has no price for the model")
+	}
 	emitPlan("completed", "completed", "in_progress")
 
 	// 10. Check goose health — a crash overrides any outcome above.
@@ -760,6 +768,7 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 			StopReason:    red.redact(primaryResult.StopReason),
 			Usage:         &u,
 			Verification:  verified,
+			CostCeiling:   costCeiling,
 		}
 		switch {
 		case enforceVerify:

@@ -79,6 +79,18 @@ const (
 	// terminationData.verification, which the controller does not
 	// interpret beyond the status and commit keys above.
 	AgentRunConditionVerified = "Verified"
+
+	// AgentRunConditionCostCeilingEnforced reports whether the run's
+	// maxCost could take effect. The harness can only compare the ceiling
+	// against a cost the agent runtime reports, and the runtime reports
+	// none for a model it has no price for; such a run is not limited by
+	// maxCost at all. Set once the run terminates, and only when the
+	// harness reports on a ceiling, so a run with no maxCost carries no
+	// such condition. It does not affect Phase or Succeeded.
+	//
+	//	True  + CostReported     the runtime reported cost; the ceiling was live
+	//	False + CostNotReported  the runtime reported no cost; the ceiling did nothing
+	AgentRunConditionCostCeilingEnforced = "CostCeilingEnforced"
 )
 
 // AgentRun reasons on the Succeeded condition. Terminal reasons pair
@@ -165,6 +177,18 @@ const (
 	// a future harness invents lands here, so a new harness status never
 	// reads as a pass on an older controller.
 	AgentRunReasonVerificationNotReported = "VerificationNotReported"
+)
+
+// AgentRun reasons on the CostCeilingEnforced condition.
+const (
+	// AgentRunReasonCostReported — the agent runtime reported the run's
+	// cost, so maxCost was compared against real spend. Pairs with
+	// CostCeilingEnforced=True.
+	AgentRunReasonCostReported = "CostReported"
+	// AgentRunReasonCostNotReported — maxCost was configured but the agent
+	// runtime never reported a cost, so the ceiling could not stop the
+	// run. Pairs with CostCeilingEnforced=False.
+	AgentRunReasonCostNotReported = "CostNotReported"
 )
 
 // ParamValue supplies a value for a declared Agent parameter.
@@ -381,6 +405,8 @@ type AgentRunStatus struct {
 	// pushed tree was independently measured against the plan's own
 	// verification commands (see AgentRunConditionVerified); it is set
 	// once the run terminates and is orthogonal to Succeeded.
+	// CostCeilingEnforced reports whether a configured maxCost could take
+	// effect (see AgentRunConditionCostCeilingEnforced).
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -390,11 +416,12 @@ type AgentRunStatus struct {
 	// termination message (/dev/termination-log) on exit — typically a
 	// usage/cost report, plus the independent verification record (#300).
 	// The controller copies it verbatim; platform-specific UIs read the
-	// harness's schema (ADR 0011/0018). The one key the controller reads
-	// is verification.status (plus verification.commit, named in that
-	// condition's message), to derive the Verified condition (#302);
-	// everything else, including the per-command verification evidence,
-	// stays uninterpreted. Absent if the harness wrote nothing parseable.
+	// harness's schema (ADR 0011/0018). The keys the controller reads are
+	// verification.status (plus verification.commit, named in that
+	// condition's message), to derive the Verified condition (#302), and
+	// costCeiling, to derive the CostCeilingEnforced condition; everything
+	// else, including the per-command verification evidence, stays
+	// uninterpreted. Absent if the harness wrote nothing parseable.
 	// +optional
 	TerminationData *runtime.RawExtension `json:"terminationData,omitempty"`
 }

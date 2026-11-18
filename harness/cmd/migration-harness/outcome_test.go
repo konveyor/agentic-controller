@@ -666,3 +666,55 @@ func TestPromptFailureDetailBoundsAnEnormousGooseLine(t *testing.T) {
 		t.Errorf("promptFailureDetail is %d runes, want it cut near %d", n, providerErrorSummaryLen)
 	}
 }
+
+func TestCostCeilingStatus(t *testing.T) {
+	reported := &acp.PromptResult{CostReported: true}
+	silent := &acp.PromptResult{}
+	tests := []struct {
+		name    string
+		maxCost float64
+		primary *acp.PromptResult
+		handoff *acp.PromptResult
+		want    string
+	}{
+		{name: "no ceiling configured", maxCost: 0, primary: silent, want: ""},
+		{name: "no prompt result to judge by", maxCost: 1, primary: nil, want: ""},
+		{name: "cost reported on the primary prompt", maxCost: 1, primary: reported, want: costCeilingEnforced},
+		{name: "cost reported only on the handoff", maxCost: 1, primary: silent, handoff: reported, want: costCeilingEnforced},
+		{name: "no cost on the primary prompt", maxCost: 1, primary: silent, want: costCeilingUnenforced},
+		{name: "no cost on either prompt", maxCost: 1, primary: silent, handoff: silent, want: costCeilingUnenforced},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := costCeilingStatus(tc.maxCost, tc.primary, tc.handoff); got != tc.want {
+				t.Errorf("costCeilingStatus = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// An unenforced ceiling must survive the last-resort trim: losing it would
+// put the run back to saying nothing about a ceiling that did nothing.
+func TestWriteTerminationLogKeepsCostCeilingWhenTrimming(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "termination-log")
+	writeTerminationLog(path, terminationBlob{
+		ExitCode:          0,
+		Outcome:           "succeeded",
+		MavenProxyWarning: strings.Repeat("x", maxTerminationLogBytes+500),
+		CostCeiling:       costCeilingUnenforced,
+	})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > maxTerminationLogBytes {
+		t.Fatalf("termination data exceeds kubelet limit: %d", len(data))
+	}
+	var got terminationBlob
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.CostCeiling != costCeilingUnenforced {
+		t.Errorf("CostCeiling = %q, want %q", got.CostCeiling, costCeilingUnenforced)
+	}
+}

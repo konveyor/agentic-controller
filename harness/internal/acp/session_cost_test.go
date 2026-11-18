@@ -7,15 +7,29 @@ import (
 	"time"
 )
 
-// usageUpdateFrame builds a goose-custom usage_update notification.
-// costJSON is inlined as-is (empty string omits the cost field
-// entirely, exercising the "provider never reports cost" path).
+// usageUpdateFrame builds goose's custom usage_update notification, in the
+// shape goose v1.55.0 serializes (SessionUsageUpdate in goose-sdk-types).
+// costJSON is inlined as-is (empty string omits the cost field entirely,
+// which is what goose does for a model it has no price for).
 func usageUpdateFrame(sessionID string, used, size int, costJSON string) string {
+	cost := ""
+	if costJSON != "" {
+		cost = `,"accumulatedCost":` + costJSON
+	}
+	return `{"jsonrpc":"2.0","method":"_goose/unstable/session/update","params":{` +
+		`"sessionId":"` + sessionID + `","update":{"sessionUpdate":"usage_update",` +
+		`"used":` + itoa(used) + `,"contextLimit":` + itoa(size) +
+		`,"accumulatedInputTokens":1000,"accumulatedOutputTokens":100` + cost + `}}}`
+}
+
+// standardUsageUpdateFrame builds the standard ACP usage_update goose sends
+// alongside its custom one for the same usage event.
+func standardUsageUpdateFrame(sessionID string, used, size int, costJSON string) string {
 	cost := ""
 	if costJSON != "" {
 		cost = `,"cost":{"amount":` + costJSON + `,"currency":"USD"}`
 	}
-	return `{"jsonrpc":"2.0","method":"_goose/unstable/session/update","params":{` +
+	return `{"jsonrpc":"2.0","method":"session/update","params":{` +
 		`"sessionId":"` + sessionID + `","update":{"sessionUpdate":"usage_update",` +
 		`"used":` + itoa(used) + `,"size":` + itoa(size) + cost + `}}}`
 }
@@ -143,6 +157,134 @@ func TestSendPromptCancelsOnceWhenCostLimitReached(t *testing.T) {
 	}
 }
 
+// TestSendPromptEnforcesCostFromEitherUsageFrame proves the ceiling acts on
+// each of the two frames goose sends for one usage event, read on its own.
+// The custom frame's accumulatedCost is the one the harness used to miss,
+// which left maxCost with no effect on any run.
+func TestSendPromptEnforcesCostFromEitherUsageFrame(t *testing.T) {
+	frames := map[string]func(sessionID string, used, size int, costJSON string) string{
+		"custom accumulatedCost":   usageUpdateFrame,
+		"standard ACP cost.amount": standardUsageUpdateFrame,
+	}
+	for name, frame := range frames {
+		t.Run(name, func(t *testing.T) {
+			s := newDemuxServer(t)
+			c := s.dial(t)
+			sc := NewSessionClient(c)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			done := make(chan struct{})
+			var result *PromptResult
+			var sendErr error
+			go func() {
+				result, sendErr = sc.SendPrompt(ctx, "s1", []ContentBlock{{Type: "text", Text: "go"}}, 0.85)
+				close(done)
+			}()
+
+			promptReq := s.next()
+			promptID := int64(promptReq["id"].(float64))
+
+			s.push(frame("s1", 50000, 200000, "0.90"))
+			if m := s.next(); m["method"] != "session/cancel" {
+				t.Fatalf("expected session/cancel, got %v", m)
+			}
+
+			s.push(`{"jsonrpc":"2.0","id":` + jsonInt(promptID) + `,"result":{"stopReason":"cancelled"}}`)
+			<-done
+			if sendErr != nil {
+				t.Fatalf("SendPrompt: %v", sendErr)
+			}
+			if !result.CostLimitReached || !result.CostReported || result.Cost != 0.90 {
+				t.Errorf("result = %+v, want CostLimitReached, CostReported and Cost=0.90", result)
+			}
+			if result.ContextUsed != 50000 || result.ContextSize != 200000 {
+				t.Errorf("context = (%d, %d), want (50000, 200000)", result.ContextUsed, result.ContextSize)
+			}
+		})
+	}
+}
+
+// TestSendPromptCancelsOnceForPairedUsageFrames proves the pair goose sends
+// for a single usage event produces one cancel, not one per frame.
+func TestSendPromptCancelsOnceForPairedUsageFrames(t *testing.T) {
+	s := newDemuxServer(t)
+	c := s.dial(t)
+	sc := NewSessionClient(c)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = sc.SendPrompt(ctx, "s1", []ContentBlock{{Type: "text", Text: "go"}}, 0.85)
+		close(done)
+	}()
+
+	promptReq := s.next()
+	promptID := int64(promptReq["id"].(float64))
+
+	s.push(usageUpdateFrame("s1", 50000, 200000, "0.90"))
+	s.push(standardUsageUpdateFrame("s1", 50000, 200000, "0.90"))
+	if m := s.next(); m["method"] != "session/cancel" {
+		t.Fatalf("expected session/cancel, got %v", m)
+	}
+	select {
+	case m := <-s.inbound:
+		t.Fatalf("expected exactly one cancel, got a second client frame: %v", m)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	s.push(`{"jsonrpc":"2.0","id":` + jsonInt(promptID) + `,"result":{"stopReason":"cancelled"}}`)
+	<-done
+}
+
+// TestSendPromptCostReported proves CostReported separates a run goose
+// priced, even at zero, from one it could not price.
+func TestSendPromptCostReported(t *testing.T) {
+	tests := []struct {
+		name string
+		cost string
+		want bool
+	}{
+		{name: "priced model", cost: "0.25", want: true},
+		{name: "reported zero is still reported", cost: "0", want: true},
+		{name: "unpriced model omits cost", cost: "", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newDemuxServer(t)
+			c := s.dial(t)
+			sc := NewSessionClient(c)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			done := make(chan struct{})
+			var result *PromptResult
+			go func() {
+				result, _ = sc.SendPrompt(ctx, "s1", []ContentBlock{{Type: "text", Text: "go"}}, 5.0)
+				close(done)
+			}()
+
+			promptReq := s.next()
+			promptID := int64(promptReq["id"].(float64))
+
+			s.push(usageUpdateFrame("s1", 1000, 200000, tc.cost))
+			s.push(standardUsageUpdateFrame("s1", 1000, 200000, tc.cost))
+			s.push(`{"jsonrpc":"2.0","id":` + jsonInt(promptID) + `,"result":{"stopReason":"end_turn"}}`)
+			<-done
+			if result == nil {
+				t.Fatal("SendPrompt returned no result")
+			}
+			if result.CostReported != tc.want {
+				t.Errorf("CostReported = %v, want %v", result.CostReported, tc.want)
+			}
+		})
+	}
+}
+
 // TestSendPromptCostLimitZeroDisablesMonitoring proves costLimit == 0
 // never triggers a cancel regardless of reported cost.
 func TestSendPromptCostLimitZeroDisablesMonitoring(t *testing.T) {
@@ -254,10 +396,9 @@ func TestSendPromptMissingCostLeavesValueUnchanged(t *testing.T) {
 	}
 }
 
-// TestSendPromptAcceptsContextLimitFieldName proves trackUsage also
-// recognizes "contextLimit" (the field name this repo's own tee test
-// fixture uses) in addition to ADR 0011's documented "size" — the real
-// field name goose sends is unverified in this environment.
+// TestSendPromptAcceptsContextLimitFieldName proves trackUsage reads
+// "contextLimit", the field name on goose's custom usage_update; the
+// standard ACP frame calls the same thing "size".
 func TestSendPromptAcceptsContextLimitFieldName(t *testing.T) {
 	s := newDemuxServer(t)
 	c := s.dial(t)

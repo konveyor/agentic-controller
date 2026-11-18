@@ -329,10 +329,14 @@ type PromptResult struct {
 	Chunks     []string `json:"-"`
 
 	CostLimitReached bool `json:"-"`
-	// Cost is the last cost.amount observed during THIS call via
-	// usage_update (0 if the provider never reported one — ACP 0011
-	// documents cost as optional).
+	// Cost is the last session-cumulative cost observed during THIS call
+	// via usage_update (0 if none was reported — see CostReported).
 	Cost float64 `json:"-"`
+	// CostReported says at least one usage_update during THIS call carried
+	// a cost, which is what separates "spent nothing" from "cannot tell".
+	// goose omits cost when it has no price for the model, and a ceiling
+	// has nothing to compare against for as long as this stays false.
+	CostReported bool `json:"-"`
 	// TurnsUsed counts tool_call notifications observed during THIS
 	// call. Reporting only — nothing reads this to decide when to stop;
 	// the runtime enforces turn limits natively now (ADR 0011).
@@ -441,9 +445,9 @@ func ProviderErrorText(text string) string {
 }
 
 // SendPrompt sends a prompt to a session and collects the streaming
-// response. costLimit is the cumulative usage_update cost.amount
-// threshold above which the harness sends its own session/cancel; 0
-// disables cost monitoring. Turn limits are enforced natively by the
+// response. costLimit is the cumulative usage_update cost threshold
+// above which the harness sends its own session/cancel; 0 disables cost
+// monitoring. Turn limits are enforced natively by the
 // runtime (GOOSE_MAX_TURNS) — SendPrompt does not count turns to decide
 // when to stop; TurnsUsed on the result is for reporting only (ADR
 // 0011).
@@ -463,7 +467,6 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 	}
 
 	result := &PromptResult{}
-	sawCost := false
 	cancelSent := false
 
 	process := func(n *RPCResponse) {
@@ -472,7 +475,7 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 			c.turnAdvanced(result.TurnsUsed)
 		}
 		handlePromptNotification(n, result)
-		trackUsage(n, result, &sawCost)
+		trackUsage(n, result)
 	}
 
 	maybeCancelForCost := func() {
@@ -532,9 +535,6 @@ func (c *SessionClient) SendPrompt(ctx context.Context, sessionID string, conten
 			}
 			if err := json.Unmarshal(msg.Result, result); err != nil {
 				return nil, fmt.Errorf("parse prompt result: %w", err)
-			}
-			if costLimit > 0 && !sawCost {
-				logging.Warn("maxCost is configured but no usage_update reported cost — cost enforcement had no effect on this prompt")
 			}
 			return result, nil
 		}
@@ -718,28 +718,29 @@ func isToolCall(msg *RPCResponse) bool {
 const gooseUpdateMethod = "_goose/unstable/session/update"
 
 // trackUsage extracts cost/context data from a usage_update frame
-// (ADR 0011) into result. A frame with no cost field leaves
-// result.Cost unchanged rather than resetting it to zero — cost is
-// documented as optional (ADR 0011: "optional cost data"); sawCost
-// distinguishes "never reported" from "reported and zero" so the
-// caller can warn when cost enforcement never got any data at all.
+// (ADR 0011) into result. goose v1.55.0 sends each usage event twice, in
+// two shapes (crates/goose/src/acp/server.rs, build_usage_updates):
 //
-// Context occupancy's field name is unconfirmed against real goose:
-// ADR 0011's example JSON uses "size", but this repo's own tee test
-// fixture (internal/tee/tee_test.go) uses "contextLimit" for the same
-// concept. Both are accepted defensively; "size" wins if a frame
-// somehow carries both.
-func trackUsage(msg *RPCResponse, result *PromptResult, sawCost *bool) {
-	if msg.Method != gooseUpdateMethod {
+//	_goose/unstable/session/update  {used, contextLimit, accumulatedCost}
+//	session/update                  {used, size, cost: {amount, currency}}
+//
+// Both carry the same session-cumulative USD figure, and both are read so
+// that the ceiling does not hang on one spelling of it. goose leaves the
+// cost out of both when it has no price for the model, so a frame without
+// one leaves result.Cost unchanged rather than resetting it to zero;
+// CostReported distinguishes "never reported" from "reported and zero".
+func trackUsage(msg *RPCResponse, result *PromptResult) {
+	if msg.Method != gooseUpdateMethod && msg.Method != "session/update" {
 		return
 	}
 	var params struct {
 		Update struct {
-			SessionUpdate string `json:"sessionUpdate"`
-			Used          int    `json:"used"`
-			Size          int    `json:"size"`
-			ContextLimit  int    `json:"contextLimit"`
-			Cost          *struct {
+			SessionUpdate   string   `json:"sessionUpdate"`
+			Used            int      `json:"used"`
+			Size            int      `json:"size"`
+			ContextLimit    int      `json:"contextLimit"`
+			AccumulatedCost *float64 `json:"accumulatedCost"`
+			Cost            *struct {
 				Amount float64 `json:"amount"`
 			} `json:"cost"`
 		} `json:"update"`
@@ -750,9 +751,13 @@ func trackUsage(msg *RPCResponse, result *PromptResult, sawCost *bool) {
 	if params.Update.SessionUpdate != "usage_update" {
 		return
 	}
-	if params.Update.Cost != nil {
+	switch {
+	case params.Update.AccumulatedCost != nil:
+		result.Cost = *params.Update.AccumulatedCost
+		result.CostReported = true
+	case params.Update.Cost != nil:
 		result.Cost = params.Update.Cost.Amount
-		*sawCost = true
+		result.CostReported = true
 	}
 	size := params.Update.Size
 	if size == 0 {

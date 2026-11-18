@@ -1604,6 +1604,10 @@ func (r *AgentRunReconciler) updatePhaseFromSandbox(
 			// than silently indistinguishable from a verified pass.
 			setRunVerified(run, run.Status.TerminationData)
 
+			// Likewise the costCeiling key: a maxCost the runtime gave the
+			// harness no cost to enforce against is reported, not silent.
+			setRunCostCeiling(run, run.Status.TerminationData)
+
 			// The harness may also write a human-readable failure message to
 			// the termination log (e.g. a non-git source, #143); surface it
 			// on the failure outcome, preferring it over the generic reason.

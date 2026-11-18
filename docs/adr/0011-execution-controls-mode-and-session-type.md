@@ -4,7 +4,7 @@ title: "Execution Controls and Mode on CRDs"
 description: "Defines runtime-agnostic execution limits and supervision mode on CRDs, with enforcement and translation in the harness."
 status: proposed
 date: "2026-08-05"
-last_updated: "2026-11-04"
+last_updated: "2026-11-18"
 authors:
   - "David Zager"
 last_reviewed: "2026-08-31"
@@ -33,6 +33,16 @@ covers. The statements below that the controller "does not interpret"
 the blob remain as decision history — they still hold for everything
 else in it, the per-command verification evidence included, which stays
 opaque and is served to platform-specific UIs verbatim.
+
+**Update (2026-11-18):** `maxCost` had no effect on any run: the harness
+read `cost.amount` from goose's custom `usage_update`, which spells that
+field `accumulatedCost`. It now reads both of the frames goose v1.55.0
+sends, so the `usage_update.cost.amount` statements below describe the
+standard ACP frame only. Goose prices the usage itself from its bundled
+model catalog, so the harness keeps no price table of its own. Goose omits
+cost for a model it cannot price; the ceiling cannot act on such a run,
+and the harness reports that through `terminationData.costCeiling`, which
+ADR 0018 maps onto the `CostCeilingEnforced` condition.
 
 ## Context
 

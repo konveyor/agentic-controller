@@ -1,0 +1,6 @@
+kind: bugfix
+description: >
+  `maxCost` now stops runs: the harness reads the cost goose actually reports,
+  so a run that reaches its ceiling winds down with a handoff instead of
+  continuing. When goose reports no cost, typically for a model it has no price
+  for, the AgentRun's new `CostCeilingEnforced` condition is `False`.

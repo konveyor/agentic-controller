@@ -96,6 +96,31 @@ const (
 	limitMaxCost  limitKind = "maxCost"
 )
 
+// Values of the termination blob's costCeiling key, which the controller
+// maps onto the CostCeilingEnforced condition. The key is absent when the
+// run had no maxCost to enforce.
+const (
+	// costCeilingEnforced: goose reported the run's cost, so maxCost was
+	// being compared against real spend.
+	costCeilingEnforced = "enforced"
+	// costCeilingUnenforced: maxCost was configured but goose never
+	// reported a cost, so nothing could have stopped the run on it.
+	costCeilingUnenforced = "unenforced"
+)
+
+// costCeilingStatus says whether a configured maxCost had any effect on
+// the run. handoff is nil when no handoff prompt ran. It returns "" when
+// there is nothing to report: no ceiling, or no prompt result to judge by.
+func costCeilingStatus(maxCost float64, primary, handoff *acp.PromptResult) string {
+	if maxCost <= 0 || primary == nil {
+		return ""
+	}
+	if primary.CostReported || (handoff != nil && handoff.CostReported) {
+		return costCeilingEnforced
+	}
+	return costCeilingUnenforced
+}
+
 // stopReasonMaxTurns is the ACP spec's documented stopReason for a
 // runtime-native turn limit. Kept as a fallback in case a future goose
 // version reports it gracefully, but empirically (live-tested against
@@ -301,6 +326,9 @@ type terminationBlob struct {
 	// the agent's account of the same work; this is the measurement, and
 	// the two disagreeing is the case the field exists for.
 	Verification *verification `json:"verification,omitempty"`
+	// CostCeiling says whether a configured maxCost could be enforced:
+	// costCeilingEnforced or costCeilingUnenforced, absent with no maxCost.
+	CostCeiling string `json:"costCeiling,omitempty"`
 }
 
 // executeErrorTerminationBlob builds the termination-log blob for an error
@@ -365,13 +393,16 @@ func writeTerminationLog(path string, term terminationBlob) {
 			// Fall back to minimal valid JSON preserving exitCode, outcome,
 			// limitReached — and the verification verdict, which is the one
 			// field whose absence is read as a pass (#300). Retain the Maven
-			// setup warning too, since it explains missing proxy configuration.
+			// setup warning too, since it explains missing proxy configuration,
+			// and the cost ceiling's status, without which a ceiling that did
+			// nothing goes unreported.
 			term = terminationBlob{
 				ExitCode:          term.ExitCode,
 				Outcome:           term.Outcome,
 				LimitReached:      term.LimitReached,
 				Verification:      term.Verification.verdictOnly(),
 				MavenProxyWarning: truncateRuneSafe(term.MavenProxyWarning, 200),
+				CostCeiling:       term.CostCeiling,
 			}
 			data, err = json.Marshal(term)
 			if err != nil || len(data) > maxTerminationLogBytes {

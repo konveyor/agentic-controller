@@ -5,12 +5,12 @@ description: "Defines execution-field placement, workflow-stage stamping, and th
 status: proposed
 status_note: "Amends ADRs 0011 and 0009 and supersedes their conflicting field-placement, exit-code, and guide-substitution details."
 date: "2026-08-19"
-last_updated: "2026-11-02"
+last_updated: "2026-11-18"
 authors:
   - "David Zager"
 last_reviewed: "2026-11-02"
 implementation_status: in-sync
-review_note: "Execution fields on AgentRun, workflow-stage stamping, Succeeded terminal condition, guide scoping, the Refused outcome (exit 3), and the Verified condition (#302) are implemented. The ADR remains proposed pending formal acceptance."
+review_note: "Execution fields on AgentRun, workflow-stage stamping, Succeeded terminal condition, guide scoping, the Refused outcome (exit 3), the Verified condition (#302), and the CostCeilingEnforced condition are implemented. The ADR remains proposed pending formal acceptance."
 ---
 
 # ADR 0018: Execution Fields on AgentRun, and a `Succeeded` Terminal Condition
@@ -37,6 +37,14 @@ then carries exactly two orthogonal condition facts" (now three), and
 condition* below. Neither the exit-code contract nor the `Succeeded`
 reason set changes, and verification does not affect phase or workflow
 sequencing.
+
+**Update (2026-11-18):** AgentRun gains a fourth condition,
+`CostCeilingEnforced`, and the controller reads one more key of
+`terminationData`: `costCeiling`. `enforced` maps to `True` with reason
+`CostReported`, and `unenforced` to `False` with reason `CostNotReported`.
+With the key absent or unrecognised, as on a run with no `maxCost`, the
+condition is not set. It affects neither phase, `Succeeded`, nor workflow
+sequencing: a run the ceiling could not limit may still have done its work.
 
 ## Context
 
@@ -308,6 +316,9 @@ Amended 2026-11-02 (#302): all of it stays uninterpreted but for the
 `Verified` condition above, and `verification.commit`, which that
 condition's message names. Nothing else in the blob is read, and nothing
 is re-shaped onto the API.
+
+Amended 2026-11-18: `costCeiling` is also read, to derive the
+`CostCeilingEnforced` condition.
 
 ## Consequences
 
