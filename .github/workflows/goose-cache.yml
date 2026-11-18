@@ -1,0 +1,41 @@
+name: Warm goose cache
+
+# PR and merge-group caches belong to their own refs. Populate the default
+# branch so both can restore a trusted image instead of compiling goose again.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# Let a cold compile finish and save its cache even when more commits land.
+# GitHub keeps at most one pending run, which then warms the latest main ref.
+concurrency:
+  group: goose-cache-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    # A manual dispatch against a feature ref would only warm that ref's cache.
+    if: github.ref == 'refs/heads/main'
+    name: Warm goose cache (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Populate the shared goose cache
+        uses: ./.github/actions/goose-image
