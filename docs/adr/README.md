@@ -25,7 +25,7 @@ generated block by hand.
 | [0011](./0011-execution-controls-mode-and-session-type.md) | Execution Controls and Mode on CRDs | proposed | amended | 2026-08-31 |
 | [0012](./0012-client-contract-and-transports.md) | Verified client contract and layered transports for AgentRun UIs | proposed | in-sync | 2026-08-31 |
 | [0013](./0013-platform-resolved-params.md) | Platform-resolved agent params (param sources) | proposed | deferred | 2026-08-31 |
-| [0014](./0014-skill-loading-and-prompt-assembly.md) | Skill Loading and Prompt Assembly | proposed | amended | 2026-08-31 |
+| [0014](./0014-skill-loading-and-prompt-assembly.md) | Skill Loading and Prompt Assembly | proposed | amended | 2026-11-18 |
 | [0015](./0015-skill-packaging-and-delivery.md) | Skill Packaging and Delivery | proposed | amended | 2026-08-31 |
 | [0016](./0016-gateway-crd-as-interim-execution-interface.md) | Gateway CRD as Interim Execution Interface | accepted | amended | 2026-10-20 |
 | [0017](./0017-ask-user-tool-and-elicitation.md) | In-turn human questions via the ask_user tool and ACP elicitation | proposed | in-sync | 2026-08-31 |
@@ -34,7 +34,7 @@ generated block by hand.
 | [0020](./0020-run-outcome-model.md) | Run Outcome Model | proposed | deferred | 2026-10-09 |
 | [0021](./0021-shared-runtime-and-conditional-lightspeed-execution.md) | Shared Runtime and Conditional Lightspeed Execution | accepted | deferred | 2026-11-11 |
 | [0023](./0023-interrogation-stage.md) | Interrogation Stage: ask the human about the application before planning | proposed | deferred | 2026-10-23 |
-| [0024](./0024-agent-learnings.md) | AgentLearning: Immutable Shared Knowledge for Agent Invocations | proposed | deferred | 2026-11-11 |
+| [0024](./0024-agent-learnings.md) | AgentLearning: Immutable Shared Knowledge for Agent Invocations | proposed | deferred | 2026-11-18 |
 <!-- END ADR INDEX -->
 
 ## Metadata

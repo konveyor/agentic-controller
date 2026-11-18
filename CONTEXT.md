@@ -109,12 +109,14 @@ Succeeded, Failed).
 It can be adopted for existing runs and workflows independently of sessions.
 
 **AgentLearning** — A reviewable, reusable lesson whose content and applicability
-are immutable; accepted revisions can inform independent invocations.
+are immutable; accepted revisions can inform independent invocations across
+applications and Agent templates. It is the proposed contract for approved
+shared knowledge, distinct from an Agent's writable Memory Service.
 _Avoid_: treating working notes or a conversation summary as automatically
 accepted shared knowledge.
 
 **Learning Snapshot** — The fixed set of learning revisions selected for a
-consumer, such as one run or an entire workflow invocation.
+consumer at invocation creation, such as one run or an entire workflow invocation.
 
 ## Personas
 
@@ -224,12 +226,11 @@ _Avoid_: putting execution control in skills — skills contain
 knowledge and judgment; the harness controls how long, how much, and
 in what mode the agent runs.
 
-**Memory Service** — A persistent, queryable knowledge base owned by
-an Agent, accessible via MCP. The agent reads from it at session
-start and writes discoveries at session end. Accumulates domain
-knowledge (patterns, pitfalls, API mappings) across executions,
-enabling organizational learning. Each Agent has its own memory
-service instance.
+**Memory Service** — The deferred per-Agent, MCP-accessible knowledge base for
+writable discoveries accumulated across executions. Proposed
+[AgentLearning](docs/adr/0024-agent-learnings.md) would replace this assumption
+for approved shared knowledge; other writable or queryable memory remains a
+separate concern.
 
 ## Execution Concepts
 

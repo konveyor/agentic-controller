@@ -5,12 +5,12 @@ description: "Proposes reviewed, immutable learnings selected at invocation crea
 status: proposed
 status_note: "Independent proposal for existing AgentRuns and AgentWorkflowRuns; AgentSession is an optional future consumer."
 date: "2026-11-11"
-last_updated: null
+last_updated: "2026-11-18"
 authors:
   - "David Zager"
-last_reviewed: "2026-11-11"
+last_reviewed: "2026-11-18"
 implementation_status: deferred
-review_note: "Learning acceptance, invocation snapshots, consumer accounting, and file delivery are unimplemented. The learning spike is independent of event routing and durable sessions."
+review_note: "Clarifies Hub authorization, Kubernetes RBAC and immutability, cross-application selectors, and required learning-authoring guidance with proposal-only run identities. These mechanisms, invocation snapshots, consumer accounting, and file delivery remain unimplemented."
 relates_to:
   - "0001"
   - "0007"
@@ -18,7 +18,13 @@ relates_to:
   - "0021"
 ---
 
-# ADR 0024: AgentLearning — Immutable Shared Knowledge for Agent Invocations
+# ADR 0024: AgentLearning: Immutable Shared Knowledge for Agent Invocations
+
+**Update (2026-11-18):** Clarifies approval through existing Hub user permissions
+and Kubernetes RBAC, API-enforced content immutability, label-based applicability
+across applications, and a required learning-authoring skill with proposal-only
+run credentials. These refine the proposal; no learning API or runtime support
+is implemented by this ADR.
 
 This proposal covers shared knowledge for existing finite invocations.
 It is proposed and unimplemented; continuing sessions are a separate design.
@@ -47,7 +53,7 @@ applicability/provenance. Their delivery can reuse the same runtime mechanisms.
 
 ## Proposed decision
 
-### Immutable content and applicability; explicit review
+### Enforce immutable content and applicability in the Kubernetes API
 
 Introduce a namespaced AgentLearning resource with a concise title/summary,
 relevance description, full lesson, evidence references, and generic
@@ -55,12 +61,70 @@ applicability selector. The exact schema is a spike output. Content and
 applicability are immutable together. A change to either creates a new proposal;
 acceptance, rejection, replacement, and revocation are lifecycle state.
 
-When policy requires human approval, record the authenticated human's decision
-on the exact content and scope, whether submitted through an API or ACP. An
-agent can propose a lesson or replacement; it cannot claim human approval for
-itself. Rejected proposals remain history and are excluded from active guidance.
-Background reflection can generate candidates but cannot rewrite accepted
-shared knowledge. Writable scratch notes remain separate.
+Use CRD CEL transition validation (`self == oldSelf`) on the immutable proposal
+fields to reject updates in the API server. Inline content is compatible with
+this mechanism; it already protects AgentRun and AgentWorkflowRun specs in this
+repository. The immutable portion includes the title, summary, relevance description,
+lesson, evidence references, and applicability selector. Lifecycle state uses
+a separately authorized write path. Reconciliation is not the immutability
+enforcement boundary. See [Kubernetes CRD immutability](https://kubernetes.io/blog/2022/09/29/enforce-immutability-using-cel/).
+
+A new proposal has a new immutable identity. Learning Snapshots retain the
+resource UID and content digest, so deleting and recreating a resource under
+the same name cannot replace the pinned revision. Externally stored lesson
+content must also be retained and digest-verified; validating an unchanged URL
+alone does not make the referenced bytes immutable.
+
+### Authorize approval through Hub identities and Kubernetes RBAC
+
+In Konveyor, approval uses Hub's existing user accounts and authorization,
+regardless of the configured authentication provider. Hub checks that the
+authenticated user may approve the proposed applicability scope, then submits
+the decision through the Kubernetes API using Hub's service account. Record
+the Hub user's identity and exact immutable proposal with the decision: the
+Kubernetes caller is Hub, which is responsible for authenticating and
+authorizing the person behind that call. ACP may carry a review interaction,
+but a viewer response alone is not authorization to approve a learning.
+
+Direct Kubernetes clients are governed by Kubernetes RBAC. Ordinary users and
+agent service accounts receive no approval write permission. Separate proposal
+creation from the protected approval operation; a create request must never be
+able to supply effective approval or a trusted reviewer identity. The spike
+must select and test a separately protected status write or approval resource,
+including who may record decisions and who applies lifecycle transitions.
+RBAC authorizes resources, subresources, and verbs, not arbitrary fields inside
+a create request; content-level restrictions require validation. See
+[Kubernetes RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/).
+
+Only accepted proposals are eligible for selection. Rejected proposals remain
+history. Background reflection may generate candidates for the same review
+path; writable scratch notes remain separate from accepted shared knowledge.
+
+### Require learning-authoring guidance and proposal-only run identities
+
+An Agent that proposes learnings must receive a learning-authoring skill through
+the existing SkillCard mechanism. The skill defines when an observation is
+reusable and how to provide its summary, full lesson, evidence, relevance,
+originating run, and suggested applicability. Discovering a lesson and proposing
+its scope require agent judgment; the skill neither grants approval authority
+nor manages Kubernetes credentials or RoleBindings.
+
+Automatically provision a ServiceAccount and RoleBinding for each proposing
+AgentRun, granting creation of AgentLearning proposals in its namespace without
+approval, lifecycle-update, or deletion permission. The submission integration
+uses that identity and binds trusted provenance to the originating run; Hub
+retains ownership of application semantics. Kubernetes RBAC alone cannot
+restrict created objects by their supplied application labels or selectors.
+Admission or a trusted submission API must validate any claimed run/application
+association against the authenticated identity. The exact submission interface
+and credential delivery are spike outputs, alongside the skill content.
+
+Run credential cleanup must not delete shared learnings when the originating
+AgentRun is pruned. Preserve its identity as provenance without using that
+ephemeral run as a cascading owner of the learning. An agent may propose a
+replacement, but acceptance always follows the protected review path.
+
+### Match learning selectors to Hub-supplied invocation labels
 
 Hub or another consumer supplies domain labels on workloads. Generic selector
 matching can cover multiple applications, for example
@@ -70,15 +134,69 @@ authorization determine eligibility; labels do not grant access. Initial
 resolution is namespace-scoped. Descriptive provenance belongs in annotations
 or content, not in an implicit delivery/ownership rule.
 
+For example, a run for application 42 discovers a useful lesson. Its proposal
+records that run as evidence and suggests an applicability scope. A reviewer
+can accept the exact proposal, or request a new proposal with revised content
+or scope before accepting it. An accepted proposal selecting applications 42
+and 87 becomes eligible for later invocations of either application. The
+originating application does not limit reuse; accepted applicability does.
+
+Hub stamps the relevant application metadata onto each AgentRun or
+AgentWorkflowRun when it creates the invocation, following the existing
+application-label contract in [ADR 0006](0006-hub-addon-pattern-for-agent-resources.md).
+These are illustrative fragments, not an implemented AgentLearning schema:
+
+```yaml
+# Hub-supplied metadata on an AgentRun or AgentWorkflowRun
+metadata:
+  labels:
+    konveyor.io/application: "42"
+    konveyor.io/archetype: java-ee
+```
+
+```yaml
+# AgentLearning applicability: either application 42 or application 87
+matchExpressions:
+  - key: konveyor.io/application
+    operator: In
+    values: ["42", "87"]
+```
+
+A different learning can select an archetype shared by many applications:
+
+```yaml
+matchLabels:
+  konveyor.io/archetype: java-ee
+```
+
+The archetype label is an illustrative Hub projection, not an existing label
+contract. Hub decides which metadata to project, including how to represent
+multiple archetypes or other multi-valued attributes. Application IDs in one
+`In` expression are alternatives; requirements within a single Kubernetes
+LabelSelector are ANDed. The two learning selectors above are separate examples,
+not an implicit application-or-archetype expression. See
+[Kubernetes label selectors](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#label-selectors).
+
+At invocation creation, generic admission matches accepted learning selectors
+against these labels, applies authorization, and pins the resulting Learning
+Snapshot. A workflow's later stage AgentRuns inherit that Learning Snapshot
+instead of selecting again. The harness materializes the pinned revisions;
+it does not query Hub or re-evaluate applicability for learning selection.
+Unaccepted or unauthorized matches are excluded, and later label changes do
+not alter an existing invocation's selection.
+
 ### Select at invocation creation
+
+A **Learning Snapshot** is the fixed set of immutable learning revisions selected
+at invocation creation for one run or an entire workflow invocation.
 
 A standalone AgentRun pins its selected learning revisions when created, before
 any queueing delay. An AgentWorkflowRun pins one set at creation for every stage,
 including stage AgentRuns created later. Workload-label changes and accepted
 replacements do not alter an existing snapshot.
 
-The snapshot retains immutable identities and content digests with retained
-content or durable artifact references. A selector, mutable name, or pointer to
+The Learning Snapshot retains immutable identities and content digests with
+retained content or durable artifact references. A selector, mutable name, or pointer to
 "latest" is insufficient. Binding the snapshot and registering the consumer
 must be part of durable invocation admission; an eventual lookup at first pod
 startup is too late. The transaction mechanism is an experiment to prove,
@@ -110,8 +228,8 @@ distinct from permitting future selection.
 
 ### Deliver organized read-only memory files
 
-The harness materializes a consumer's snapshot; the runtime handles context and
-selective reads. Illustrative paths are:
+The harness materializes a consumer's Learning Snapshot; the runtime handles
+context and selective reads. Illustrative paths are:
 
 ```text
 memory/index.md                       approved summaries and paths
@@ -177,7 +295,8 @@ cannot preserve the agreed approval scope and snapshot lifecycle. See the
 [primary-source research](../research/2026-11-11-durable-agent-learning-delivery.md).
 
 The cost is admission/consumer coordination, retained artifacts, review workflow,
-and runtime instrumentation. The independent spike must establish these costs
+learning-authoring guidance, run-scoped proposal credentials, and runtime
+instrumentation. The independent spike must establish these costs
 and guarantees before public fields or a storage backend are selected.
 
 ## Proposed next step
@@ -185,5 +304,7 @@ and guarantees before public fields or a storage backend are selected.
 Run the [learning-delivery spike](../spikes/agent-learning-delivery.md) against
 one standalone run and a two-stage workflow. Prove creation-time snapshots,
 replacement, refusal of revocation during use, and read-only selective delivery.
+Demonstrate the authoring skill and proposal-only identity, protected approval,
+API-enforced immutability, and both application-ID and archetype selectors.
 Compare context policies using the same model/tasks/corpus. Session behavior
 and provider event delivery are explicitly outside this experiment.

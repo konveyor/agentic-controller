@@ -12,6 +12,11 @@ The proposed contract and next experiment are captured in
 below are research evidence, not implemented guarantees. Continuing sessions
 and their event-ingress contract are outside the learning-delivery proposal.
 
+Update (2026-11-18): ADR 0024 now specifies the proposed Hub/Kubernetes authority
+split, API-enforced immutability, application-label examples, and required
+authoring guidance with proposal-only run identities. These are project design
+clarifications, not capabilities established by the vendor research below.
+
 ## Finding
 
 The strongest direction for this project is a **pinned approved learning set
@@ -258,7 +263,9 @@ boundaries when bringing retrieved evidence into the model or viewer.
 The controller should continue to reconcile generic resources and references;
 it need not interpret lessons, connect over ACP, or run semantic search. The
 existing glossary's per-Agent Memory Service is a separate concept that will
-need explicit reconciliation if we adopt shared, approved AgentLearnings.
+remain relevant for other mutable/queryable memory; the glossary now identifies
+AgentLearning as the proposed replacement for that deferred assumption only for
+approved shared knowledge.
 
 ### Preserve context decisions across recovery
 
@@ -274,7 +281,10 @@ Keep three observable records distinct:
   identities and relevant prompt/runtime/retriever versions.
 - **Outcome:** model/tool results and subsequent verification evidence.
 
-An access log proves delivery, not that the model understood or obeyed a lesson.
+An access log proves access, not delivery to a model call. Delivery evidence must
+observe the identified content or excerpt after filtering and truncation at the
+model-input boundary, as required by ADR 0024. Even that evidence does not prove
+that the model understood or obeyed a lesson.
 Search must be limited to the pinned set. Record returned content before
 subsequent reasoning depends on it so recovery can reuse the result rather than
 search today's corpus again. Membership pinning alone does not freeze ranking,
