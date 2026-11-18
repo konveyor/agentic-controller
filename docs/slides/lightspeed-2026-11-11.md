@@ -171,55 +171,10 @@ The separate arrows distinguish the viewer WebSocket path from the harness's
 loopback WebSocket connection to the runtime at 127.0.0.1:4001. The harness
 exposes the viewer relay on port 4000 and launches lightspeed_agentic.acp with
 --host 127.0.0.1 --port 4001. This prototype does not use ACP over stdio.
-They carry the same interaction, not a second application execution. The following slide says what changed on the
-Konveyor side before the detailed runtime walkthrough.
+They carry the same interaction, not a second application execution. The following slides walk through the runtime changes in detail.
 Sources:
 https://github.com/konveyor/agentic-controller/pull/345
 https://github.com/konveyor/tackle2-ui/pull/3738
-https://github.com/djzager/agentic-controller/blob/4c036c931666de10dd7c1620928c2e34f8ae17ae/docs/lightspeed-runtime-prototype.md
--->
-
----
-
-<!-- _class: technical -->
-
-# UI and harness changes
-
-**UI:** show tool arguments before approval and display reported tokens. The reconnect fix preserves early question and approval cards. It is deployed from PR CI; live validation is in progress.
-
-**Why:** people need to see the action, answer the agent and keep supervising the same run.
-
-**Harness:** select and configure Lightspeed, relay viewer interaction, read usage and request a same-session handoff. Keep Hub/Git preparation, verification, credential isolation, push and cleanup.
-
-**Why:** changing the runtime must preserve how a Konveyor run starts, is supervised and finishes.
-
-<!--
-75 seconds. Explain actual changes and retained responsibilities separately.
-
-UI PR 3738 accepts the Lightspeed usage channel, keeps absent token measurements
-unknown, and renders tool arguments on tools and permission cards as text.
-Follow-up commit 3a83a095 addresses a demonstrated connection race: clearing
-items after initialize erased questions/permission requests already replayed by
-the harness. PR 3738 is fully green, including its end-to-end checks. The PR CI
-image was mirrored without changing its bytes and deployed through
-Tackle.spec.ui_image_fqin; the Ready Pod has the expected digest. Live validation
-is in progress. The inspection video records UI ed11b648 before that follow-up.
-A successful current-runtime normal-planning recording remains pending.
-
-Controller PR 345 adds the Lightspeed launch/configuration path in the Go harness
-and packages it in the agent-base/language images. The harness adapts controls,
-usage and primary-prompt completion to its existing handoff/finalization flow.
-A handoff is another prompt in the same retained runtime session. It keeps the
-Hub context and Git preparation/finalization responsibilities shown in the
-architecture diagram. Push credentials remain with the harness; the runtime
-commits locally. The controller reconciles resources and watches status only.
-
-This is not a new location proposal for the runtime fork's code. First show
-what exists and why, then discuss contribution scope with Lightspeed.
-Sources:
-https://github.com/konveyor/tackle2-ui/pull/3738
-https://github.com/konveyor/agentic-controller/pull/345
-https://github.com/djzager/agentic-controller/blob/4c036c931666de10dd7c1620928c2e34f8ae17ae/harness/internal/runtime/lightspeed.go
 https://github.com/djzager/agentic-controller/blob/4c036c931666de10dd7c1620928c2e34f8ae17ae/docs/lightspeed-runtime-prototype.md
 -->
 
@@ -758,9 +713,6 @@ Evidence and recording plan: lightspeed-2026-11-11-demo.md
 
 **Final recording pending.**
 
-[Walkthrough and evidence](https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-2026-11-11/docs/slides/lightspeed-2026-11-11-demo.md) · [Historical video (2:44)](https://github.com/djzager/agentic-controller/blob/c43abc5e5509fff9ea982a1a170e7bf51ae1aafe/docs/slides/lightspeed-2026-11-11-demo.mp4)
-
-Historical video uses `4039163` and does not validate today’s prototype.
 
 <!--
 Two separate recorded runs are planned for the November 18 discussion. This
@@ -823,7 +775,7 @@ Read `pom.xml`, then hostile notes on a separate branch. **Automatic mode; quest
 - See the hostile notes result rejected.
 - Check that no later main-model call or viewer receives the result.
 
-[Inspection recording (2:34)](https://github.com/djzager/agentic-controller/blob/ca578232b434e21a4c96f57c62629c0e04ee7631/docs/slides/lightspeed-2026-11-18-inspection.mp4) · [Walkthrough and evidence](https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-2026-11-11/docs/slides/lightspeed-2026-11-11-demo.md)
+**Recording available as a separate MP4 (2:34).**
 
 <!--
 Play the 154-second inspection recording and narrate it live. Take 03 records
@@ -851,7 +803,7 @@ The recording predates UI reconnect fix 3a83a095, now deployed from PR 3738 CI
 after all checks passed. Live validation is in progress. Successful
 current-runtime planning remains pending. The 4039163 normal-planning video remains historical.
 
-The MP4 is silent for live narration and linked to immutable asset commit
+The MP4 is silent for live narration and stored in immutable asset commit
 ca578232b434e21a4c96f57c62629c0e04ee7631. Cancellation, handoff and reconnect
 remain supported by separate regression evidence.
 Current walkthrough: lightspeed-2026-11-11-demo.md
