@@ -7,6 +7,11 @@
 # shared target branch (docs/plan.md, .konveyor/handoff.md). The UI lists this
 # workflow so a user can run the whole plan → execute → verify sequence.
 #
+# No stage here asks a human anything, so this is the workflow for a run nobody
+# will watch: plan decides for itself whatever the prompt, target, and source
+# leave unclear. java-ee-to-quarkus-attended is the same sequence with an
+# interrogate stage in front, which asks a human those decisions first.
+#
 # Prerequisites (the SkillCards and Agents ship here in config/defaults/ and are
 # installed alongside this workflow):
 #   - SkillCards plan, execute, verify (skillcard_plan/execute/verify.yaml)
@@ -38,8 +43,8 @@ spec:
       instructions: >-
         Load the execute skill and follow its SKILL.md exactly. Execute each
         step in docs/plan.md to migrate the code from Java EE to Quarkus.
-        Create .konveyor/handoff.md and write your results as an ## Execute
-        section in it, as defined in SKILL.md.
+        Write your results as an ## Execute section in .konveyor/handoff.md,
+        as defined in SKILL.md.
     - name: verify
       agentRef: migration-verify-agent
       instructions: >-

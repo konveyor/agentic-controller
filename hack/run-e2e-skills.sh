@@ -31,6 +31,12 @@ NS="${NS:-skill-e2e-$$}"
 PASS=0
 FAIL=0
 
+# How many skills the bundle holds: one directory with a SKILL.md each, which
+# is what catalog/Containerfile copies into the image setup-e2e.sh builds.
+# Counted rather than written down, so adding a skill does not fail this test.
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BUNDLE_SKILLS="$(find "${REPO_ROOT}/catalog/skills" -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l | tr -d ' ')"
+
 pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 kc() { kubectl -n "${NS}" "$@"; }
@@ -96,10 +102,10 @@ kind: SkillCollection
 metadata: {name: e2e-bundle}
 spec: {image: quay.io/konveyor/skills:e2e, type: skill}
 EOF
-if await card_count_is e2e-bundle 4; then
-    pass "bundle enumerated into 4 SkillCards"
+if await card_count_is e2e-bundle "${BUNDLE_SKILLS}"; then
+    pass "bundle enumerated into ${BUNDLE_SKILLS} SkillCards"
 else
-    fail "expected 4 generated cards, got: $(cards e2e-bundle | tr '\n' ' ')"
+    fail "expected ${BUNDLE_SKILLS} generated cards, got: $(cards e2e-bundle | tr '\n' ' ')"
 fi
 if [ "$(kc get skillcard e2e-bundle-plan -o jsonpath='{.spec.subPath}' 2>/dev/null)" = "plan" ]; then
     pass "subPath resolved from the image, not typed by hand"
@@ -126,7 +132,7 @@ fi
 echo "--- 4. A hand-written card duplicating a generated one fails the pod ---"
 kc patch skillcollection e2e-bundle --type=merge \
     -p '{"spec":{"image":"quay.io/konveyor/skills:e2e"}}' >/dev/null
-await card_count_is e2e-bundle 4 || fail "collection did not re-enumerate"
+await card_count_is e2e-bundle "${BUNDLE_SKILLS}" || fail "collection did not re-enumerate"
 kc apply -f - >/dev/null <<EOF
 apiVersion: konveyor.io/v1alpha1
 kind: SkillCard

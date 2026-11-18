@@ -353,7 +353,8 @@ it belongs in the harness.
 **Default** — Curated content the platform ships and installs on enable so
 it is usable and the UI is populated day one: the stage SkillCards and
 SkillCollection, the migration-stage Agents, and the java-ee-to-quarkus
-AgentWorkflow. Lives in `config/defaults/`. Defaults carry no namePrefix,
+AgentWorkflow with its attended variant, which runs an Interrogation
+first. Lives in `config/defaults/`. Defaults carry no namePrefix,
 no namespace, and no Gateway references — they resolve by plain name and
 install Ready without customer-specific credentials, so they are safe to
 apply on every cluster. The push-sync-to-operator workflow copies this

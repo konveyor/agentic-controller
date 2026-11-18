@@ -115,7 +115,7 @@ spec:
       instructions: "Load the plan skill and follow its SKILL.md exactly. Build the migration plan from the Kantra analysis results in .konveyor/analysis.json, reading the build manifest, layout, and source for context. Use the output structure defined in SKILL.md as the exact structure for docs/plan.md — reproduce every required section and field. Do not invent your own document structure."
     - name: execute
       agentRef: migration-execute-agent
-      instructions: "Load the execute skill and follow its SKILL.md exactly. Execute each step in docs/plan.md to migrate the code from Java EE to Quarkus. Create .konveyor/handoff.md and write your results as an ## Execute section in it, as defined in SKILL.md."
+      instructions: "Load the execute skill and follow its SKILL.md exactly. Execute each step in docs/plan.md to migrate the code from Java EE to Quarkus. Write your results as an ## Execute section in .konveyor/handoff.md, as defined in SKILL.md."
     - name: verify
       agentRef: migration-verify-agent
       instructions: "Load the verify skill and follow its SKILL.md exactly. Run the build from docs/plan.md, fix build errors until it compiles, then run tests and runtime verification — grounded in .konveyor/analysis.json and the ## Execute section of .konveyor/handoff.md. Append your results as a ## Verify section in .konveyor/handoff.md as defined in SKILL.md."

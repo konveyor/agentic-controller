@@ -17,22 +17,28 @@
 # real credentials) and no gateway references on the Agents.
 #
 # SkillCards (the skill catalog):
-#   plan, execute, verify, and javaee-to-quarkus all come out of one image
-#   (quay.io/konveyor/skills), each selected with subPath; house-rules is
-#   inline and needs no image at all.
+#   interrogate, plan, execute, verify, and javaee-to-quarkus all come out of
+#   one image (quay.io/konveyor/skills), each selected with subPath;
+#   house-rules is inline and needs no image at all.
 #
-# Agents + AgentWorkflow (what the UI runs):
+# Agents + AgentWorkflows (what the UI runs):
 #   migration-plan/execute/verify-agent are the stages of the
-#   java-ee-to-quarkus AgentWorkflow. They omit gateways so they install and go
-#   Ready without a customer-specific Gateway; the gateway is named at run time.
+#   java-ee-to-quarkus AgentWorkflow, which asks a human nothing.
+#   java-ee-to-quarkus-attended puts migration-interrogate-agent in front of
+#   the same three, to ask a human about the application before planning
+#   (ADR 0023). The Agents omit gateways so they install and go Ready without
+#   a customer-specific Gateway; the gateway is named at run time.
 resources:
+  - skillcard_interrogate.yaml
   - skillcard_plan.yaml
   - skillcard_execute.yaml
   - skillcard_verify.yaml
   - skillcard_javaee_to_quarkus.yaml
   - skillcard_inline_house_rules.yaml
   - skillcollection_java_migration.yaml
+  - agent_migration_interrogate.yaml
   - agent_migration_plan.yaml
   - agent_migration_execute.yaml
   - agent_migration_verify.yaml
   - agentworkflow_javaee_to_quarkus.yaml
+  - agentworkflow_javaee_to_quarkus_attended.yaml

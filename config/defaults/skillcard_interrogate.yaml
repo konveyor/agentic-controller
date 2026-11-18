@@ -1,0 +1,32 @@
+# The interrogate stage skill, selected from the shared skill bundle with
+# subPath like plan, execute, and verify (ADR 0023).
+#
+# type: rule, not an on-demand skill. This card drives a workflow stage, and a
+# stage's driver has to be in context for the whole stage — under progressive
+# disclosure an on-demand skill may never be read (ADR 0014). The cost is only
+# paid where the card is referenced, which is the interrogate Agent.
+#
+# The skill knows no framework. Which decisions a migration forces comes from
+# the domain skill's decision catalog (javaee-to-quarkus:
+# references/decisions.md), whose path the stage instructions give.
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  annotations:
+    konveyor.io/related-image: RELATED_IMAGE_AGENT_SKILLS
+  name: interrogate
+  labels:
+    app.kubernetes.io/managed-by: agentic-controller-defaults
+spec:
+  image: quay.io/konveyor/skills:latest
+  subPath: interrogate
+  displayName: Migration Interrogation
+  version: "1.0.0"
+  description: >
+    Asks a human the decisions about the application that the code, the
+    parameters, and the grounding cannot settle, one at a time with a
+    recommendation, and records the answers for the plan stage.
+  type: rule
+  tags:
+    - migration
+    - interrogation

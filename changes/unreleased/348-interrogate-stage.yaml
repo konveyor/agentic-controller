@@ -1,0 +1,15 @@
+kind: feature
+description: >
+  Ask a human about the application before planning. The new default
+  AgentWorkflow `java-ee-to-quarkus-attended` puts an `interrogate` stage in
+  front of plan, execute, and verify: the agent reads the application, settles
+  what the code and the run's parameters already answer, and asks the viewer
+  attached to the run the rest — production database, messaging broker, view
+  layer, authentication — one question at a time, each with a recommendation.
+  The answers are committed to `.konveyor/interrogation.md` on the target
+  branch, and the plan lists every one with its source. The stage needs
+  somebody watching: with no viewer attached the run fails at its first
+  question, with the open decisions already on the branch.
+  `java-ee-to-quarkus` is unchanged and asks nothing. Ships the `interrogate`
+  SkillCard, the `migration-interrogate-agent` Agent, and a decision catalog in
+  the `javaee-to-quarkus` skill (ADR 0023).

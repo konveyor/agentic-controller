@@ -33,7 +33,7 @@ generated block by hand.
 | [0019](./0019-skill-catalog-repository-layout.md) | Skill Catalog Repository Layout | proposed | in-sync | 2026-08-31 |
 | [0020](./0020-run-outcome-model.md) | Run Outcome Model | proposed | deferred | 2026-10-09 |
 | [0021](./0021-shared-runtime-and-conditional-lightspeed-execution.md) | Shared Runtime and Conditional Lightspeed Execution | accepted | deferred | 2026-11-04 |
-| [0023](./0023-interrogation-stage.md) | Interrogation Stage: ask the human about the application before planning | proposed | deferred | 2026-10-23 |
+| [0023](./0023-interrogation-stage.md) | Interrogation Stage: ask the human about the application before planning | proposed | amended | 2026-11-12 |
 <!-- END ADR INDEX -->
 
 ## Metadata
