@@ -80,7 +80,16 @@ func TestVerificationJobImage(t *testing.T) {
 			r := &GatewayReconciler{Client: c, Scheme: scheme, VerificationImage: tt.configured}
 
 			const jobName = "gw-verify-test"
-			if err := r.createVerificationJob(context.Background(), gateway, jobName); err != nil {
+			// An OpenAI-compatible provider probes its own spec.endpoint;
+			// only aws-bedrock derives the address from the credential
+			// Secret's AWS_REGION. This test is about the image, so the
+			// endpoint is just the one Reconcile would pass here.
+			// The zero bedrockProbeRequest: only the Bedrock probe is signed
+			// by the controller, and this gateway is OpenAI-compatible.
+			if err := r.createVerificationJob(
+				context.Background(), gateway, jobName, gateway.Spec.Endpoint,
+				bedrockProbeRequest{},
+			); err != nil {
 				t.Fatalf("createVerificationJob: %v", err)
 			}
 

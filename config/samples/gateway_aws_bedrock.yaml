@@ -8,6 +8,12 @@
 #
 # The credential Secret uses envFrom (no key field) because Bedrock
 # requires multiple AWS env vars.
+#
+# AWS_REGION is the only thing that decides where requests go: the harness
+# lets the AWS SDK derive the endpoint from it, and the controller's
+# verification probe addresses bedrock-runtime from it too. The endpoint
+# below is required by the CRD and is not resolved by either, so change
+# AWS_REGION rather than this line when you move regions.
 apiVersion: konveyor.io/v1alpha1
 kind: Gateway
 metadata:

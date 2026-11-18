@@ -64,4 +64,8 @@ const (
 	// jobConditionSuccessCriteriaMet is the K8s 1.36+ condition required
 	// alongside JobComplete for valid Job status updates.
 	jobConditionSuccessCriteriaMet = "SuccessCriteriaMet"
+
+	// jobConditionFailureTarget is its counterpart on the failure side,
+	// required alongside JobFailed.
+	jobConditionFailureTarget = "FailureTarget"
 )

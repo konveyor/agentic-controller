@@ -55,9 +55,11 @@ const (
 	testAWSRegion        = "us-east-1"
 	stageAName           = "stage-a"
 	stageBName           = "stage-b"
-	// testProviderBedrock is spelled as a user writes it (hyphenated), so
-	// tests exercise normalizeProvider rather than the normalized form.
+	// testProviderBedrock and testProviderVertex are spelled as a user
+	// writes them (hyphenated), so tests exercise normalizeProvider rather
+	// than the normalized form.
 	testProviderBedrock = "aws-bedrock"
+	testProviderVertex  = "gcp-vertex-ai"
 )
 
 var (
