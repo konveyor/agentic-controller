@@ -64,9 +64,11 @@ from a separate branch, in automatic mode with questions off. Run 1 uses
 approval mode with questions on. Show the real classifier rejection and the
 model/viewer withholding evidence.
 
-Both final recordings are pending. The controlled rejection has a successful
-rehearsal; the normal planning rehearsal failed without producing a plan.
-Keep the historical 4039163 video separate from current-runtime evidence.
+The current-runtime inspection recording is ready: an ordinary POM read passes,
+then hostile notes are rejected. Play the 2:34 recording on the inspection slide.
+The normal planning recording is still pending; its rehearsal failed without
+producing a plan. Keep the historical 4039163 planning video separate from the
+current 451818c inspection evidence.
 
 For recording, capture the actual mouse pointer and actual clicks. Pause on the
 target before clicking, then leave time to read the resulting card. Cut long
@@ -164,16 +166,20 @@ inspection. The complete prototype also includes integration code around graph
 lifetime, runtime controls, ACP hosting, inspected publication and replay.
 Our Go harness continues to own Hub/Git preparation, verification and push.
 Show what exists and open a conversation about its scope and where code belongs.
-Implementation is frozen for the November 18 discussion. No redesign or chosen
+The runtime/controller implementation is frozen for the November 18 discussion.
+The approved focused UI reconnect correction is separate. No redesign or chosen
 ownership split is part of this meeting.
 
-Current frozen revisions:
+Runtime and recorded-inspection revisions:
 Runtime 451818c50d6c93a8ab7085cf0c70b15510b6ca75
 Controller PR345: 4c036c931666de10dd7c1620928c2e34f8ae17ae
-UI PR3738: ed11b648799322f566b84db309f371c138713cdd
+Recorded inspection UI: ed11b648799322f566b84db309f371c138713cdd
+UI PR 3738: 3a83a095 reconnect fix is committed; CI building, not deployed/live-tested.
 Current integration guide: ../lightspeed-runtime-prototype.md
 The existing video at 4039163 records the earlier custom ACP adapter and cannot
-validate these later changes. New-runtime recording remains pending.
+validate these later changes. The current 451818c inspection recording supplies
+separate controlled rejection evidence; successful current-runtime planning
+remains pending.
 -->
 
 ---
@@ -273,8 +279,11 @@ and max-turn handoff. November 17 verification at451818c also passed 79 focused
 session/native/transport tests and 2,176 full-suite tests, with 13 skipped and seven
 subtests. Native cases include child/parent inspection and upstream redaction.
 These use scripted model/classifier inputs and do not establish live classifier
-accuracy. A new live-provider recording of 451818c remains pending; the older
-4039163 recording covers its earlier custom adapter only.
+accuracy. The 154-second inspection recording now exercises 451818c with a real
+benign read followed by an actual classifier rejection. Its captured interval
+supports withholding from the next model call and attached viewer. Successful
+current-runtime planning remains pending. The older 4039163 planning recording
+covers its earlier custom adapter only.
 
 ACP remains an optional dependency and entrypoint. Our controller creates and
 watches Kubernetes resources. It does not connect to ACP. Our Go harness tee
@@ -616,8 +625,10 @@ The prototype covers Konveyor's runtime use cases except monetary budget
 enforcement. This is an implementation/qualification statement, not a claim that
 all controls appear in one new video. The planned normal run shows questions,
 approvals, steering, conversation continuity and observed usage. A separate
-controlled rejection run must show a real classifier rejection before the
-hostile result reaches the next model call or viewers.
+recorded controlled rejection run shows a benign POM read passing inspection,
+then hostile notes rejected before another model call or viewer result release.
+This is evidence for the captured controlled attempt, not general classifier
+accuracy or a successful normal planning run.
 
 Cancellation, same-session max-turn handoff and steering/reconnect have identified
 regression evidence: hack/lightspeed-runtime/verify.py cases cancel, max-turns
@@ -625,7 +636,8 @@ and steer-reconnect, plus tests/test_sessions.py and tests/test_acp_native.py in
 runtime 451818c. November 17 verification passed all six harness cases, 79 focused
 tests, 2,176 full-suite tests, 13 skips and seven subtests. Those checks use
 scripted model/classifier and Hub inputs. They do not establish live classifier
-quality, restart recovery, production hardening or a new cluster recording.
+quality, restart recovery or production hardening. The separate inspection
+recording supplies live evidence for its specific controlled input and interval.
 
 Token observations exclude isolated inspection-classifier calls and do not
 constitute full billing. No monetary cost estimator or budget enforcement is
@@ -661,18 +673,21 @@ It should show the application, selected Agent/model, question and answer,
 approved tool calls, guidance uptake, preserved decisions, observed usage,
 reviewed file, harness verification and pushed Git result.
 
-Final recordings remain pending. The credential was refreshed on November 17.
-Both Gateways are Ready with HTTP 200 and live model calls work. Frozen 451818c
-Java runtime and 4c036c9 controller images are installed and smoke-checked;
-the UI remains ed11b648. Capture actual deployed/source provenance for each take.
+The successful current-runtime planning recording remains pending. The separate
+inspection recording is ready. Both Gateways verify with HTTP 200 after the
+November 17 credential refresh. Runtime 451818c and controller 4c036c9 are unchanged.
+The inspection take used UI ed11b648 before the reconnect correction. Capture
+actual deployed/source provenance for the next planning take.
 
 Normal rehearsal ui-8p5rg failed without producing a plan. Approved reads passed
 inspection, steering was consumed, usage was captured, and the live process and
 module hashes matched 451818c. A reconnect cleared pending permission/elicitation
 cards because ChatPanel calls setItems([]) after initialization. The harness
 correctly replayed those requests. This is a confirmed UI issue, not evidence
-that the runtime failed to replay. The focused UI reconnect fix has not been
-deployed. The runtime implementation remains frozen.
+that the runtime failed to replay. UI reconnect fix 3a83a095 is committed in
+PR 3738 and CI is building. It has not been deployed or tested live; do not claim
+that planning has passed. This approved UI-only exception leaves the frozen
+runtime/controller implementation unchanged.
 
 Do not claim this rehearsal recorded a successful question/answer, verified
 plan or push. Those remain required shots for the successful normal take.
@@ -704,48 +719,43 @@ lightspeed-2026-11-11-demo.md
 
 **Run 2:** the same Agent, image and model as Run 1.
 
-Read hostile notes on a separate branch. **Automatic mode; questions off.**
+Read `pom.xml`, then hostile notes on a separate branch. **Automatic mode; questions off.**
 
-- Show the classifier’s actual rejection.
-- Confirm the result never enters the next model call.
-- Confirm viewers receive no release of the rejected result.
+- Watch the ordinary file read complete after inspection.
+- See the hostile notes result rejected.
+- Check that no later main-model call or viewer receives the result.
 
-**Final recording pending.**
-
-[Walkthrough and evidence](https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-2026-11-11/docs/slides/lightspeed-2026-11-11-demo.md)
+[Inspection recording (2:34)](https://github.com/djzager/agentic-controller/blob/ca578232b434e21a4c96f57c62629c0e04ee7631/docs/slides/lightspeed-2026-11-18-inspection.mp4) · [Walkthrough and evidence](https://github.com/djzager/agentic-controller/blob/docs/lightspeed-discussion-2026-11-11/docs/slides/lightspeed-2026-11-11-demo.md)
 
 <!--
-This uses the same Agent definition, Java image and model as normal planning.
-It reads a deliberately hostile notes file from a separate branch. Normal
-planning uses approve mode with askUser on. This controlled run uses auto mode
-with askUser off, avoiding permission/question waits that would obscure the
-expected classifier rejection. Inspection and redaction remain enabled.
+Play the 154-second inspection recording and narrate it live. Take 03 records
+AgentRun ui-pgsqx on demo/lightspeed-rejection-20261118-take-03, with runtime 451818c,
+controller 4c036c9 and UI ed11b648. This is the same Agent definition, Java image
+and model as normal planning. It reads pom.xml first, then the hostile notes
+from a separate branch. Normal planning uses approve mode with askUser on;
+this controlled run uses auto mode with askUser off. Inspection/redaction remain on.
 
-Controlled rehearsal ui-grxhq produced the expected malicious warning. Classifier
-requests returned HTTP 200, with no subsequent main-model call and no incoming
-viewer result containing the fixture content. Provenance matched the expected
-Java image. The fixture branch stayed unchanged at 89d0ac0. This establishes
-actual rehearsal evidence for rejection and withholding. It does not mean the
-AgentRun completed ordinary application work successfully.
+Point out the ordinary POM read completing, then the real malicious warning
+and expected Failed outcome. The viewer attached before both reads. The
+captured requests include two main-model and two classifier calls, all complete
+with HTTP 200, with no later main-model request. The captured viewer stream has
+no completed hostile result. Live runtime hashes match 451818c and the fixture
+branch remains 89d0ac0. This proof covers the recorded attempt and interval.
 
-The recording without a visible pointer is rehearsal footage only. Its review
-cut remains in ignored scratch storage; it is not the final presentation video.
-Both Gateways now verify with HTTP 200 after the November 17 credential fix.
-Final recording still needs the real pointer/clicks,
-readable pauses and calmer jump cuts requested for the presentation.
+The UI sequence is uninterrupted and normal speed from source seconds 8–114,
+with the actual mouse pointer and clicks. One clearly labeled six-second still
+repeats source frame 96 for reading. Title/evidence/reference cards are added;
+initial loading and trailing idle are omitted. Pointer/clicks are not recreated.
+The walkthrough discloses a final capture-wait timeout after the real Failed
+state was visible and preserves the full source and exact edit decisions.
 
-Presenter cues: explicitly show the same Agent/image/model selection as Run 1,
-then the different branch and read-only task. Point to the actual malicious
-classification and the lack of later main-model/viewer release. This should
-be a real classifier rejection through normal inspection, not a timeout,
-malformed envelope, missing credential or other technical failure. Keep
-inspection/redaction enabled and preserve the model configuration.
+The recording predates UI reconnect fix 3a83a095, now committed in PR 3738 with
+CI building, but not deployed or live-tested. Successful current-runtime planning
+remains pending. The 4039163 normal-planning video remains historical.
 
-Evidence must tie the run to frozen source and deployed image, classifier
-decision, no next main-model request receiving the rejected result, and no
-viewer result release. Keep credentials and raw hostile output out of shared
-artifacts. Regression cases for cancellation, handoff and reconnect remain
-separate from this recorded rejection demonstration.
+The MP4 is silent for live narration and linked to immutable asset commit
+ca578232b434e21a4c96f57c62629c0e04ee7631. Cancellation, handoff and reconnect
+remain supported by separate regression evidence.
 Current walkthrough: lightspeed-2026-11-11-demo.md
 
 -->
