@@ -195,9 +195,10 @@ reserves 15-20% of the turn budget for a handoff prompt when the
 runtime stops. On exit, the harness writes usage data and its own
 verification record to `/dev/termination-log` as opaque JSON; the
 controller copies the blob to `AgentRunStatus.terminationData`
-verbatim and reads exactly two keys of it — `verification.status`,
-which it maps onto the `Verified` condition, and `verification.commit`,
-which it names in that condition's message (see Verification).
+verbatim and reads exactly three keys of it — `verification.status`,
+which it maps onto the `Verified` condition, `verification.commit`,
+which it names in that condition's message (see Verification), and
+`costCeiling`, which it maps onto the `CostCeilingEnforced` condition.
 Everything else, the per-command evidence included, stays
 uninterpreted.
 In both modes, the harness launches the agent

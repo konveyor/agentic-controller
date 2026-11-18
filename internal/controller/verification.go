@@ -65,7 +65,8 @@ const verificationCommitRunes = 12
 const evidencePointer = "status.terminationData.verification.commands records each command and its exit code"
 
 // harnessTermination is the narrow view the controller takes of the
-// harness's termination blob. Everything else in it — usage, cost,
+// harness's termination blob for verification; costCeiling is read
+// separately (see setRunCostCeiling). Everything else in it — usage, cost,
 // stopReason, handoffStatus, the per-command verification evidence —
 // stays opaque and is served to clients verbatim from
 // status.terminationData.
@@ -89,7 +90,6 @@ type harnessVerification struct {
 // setRunVerified derives the AgentRun's Verified condition (#302) from the
 // single "verification.status" key of the harness termination blob.
 //
-// This is the whole of the controller's interpretation of terminationData.
 // It reads one closed enum and maps it onto the status vocabulary; the
 // evidence behind the verdict stays in the blob, uninterpreted. The
 // mapping is deliberately asymmetric — True is reachable only from an
