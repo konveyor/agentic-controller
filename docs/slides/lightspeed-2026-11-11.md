@@ -69,10 +69,8 @@ from a separate branch, in automatic mode with questions off. Run 1 uses
 automatic mode with questions on. Show the real classifier rejection and the
 model/viewer withholding evidence.
 
-Play the combined film once on the Coolstore demo slide. Immutable artifact:
-https://github.com/djzager/agentic-controller/blob/2de184aad945ddb30d85cdde8dfd3cfb500f2d0a/docs/slides/lightspeed-2026-11-18-demo.mp4
-The film
-first shows planning, then the controlled inspection attempt. Its opening lists
+Play lightspeed-2026-11-18-demo.mp4 once on the Coolstore demo slide.
+The film first shows planning, then the controlled inspection attempt. Its opening lists
 the behaviors to watch. Conversational captions sit in the bottom bar, and a
 visible speed indicator identifies accelerated waits. Decisions and clicks stay
 at normal speed. Source remains continuous within each selected take.
@@ -714,8 +712,7 @@ Evidence and recording instructions: Coolstore demo speaker notes below.
 - See a hostile tool result blocked in a controlled attempt.
 
 <!--
-Play the combined 4:16 film once:
-https://github.com/djzager/agentic-controller/blob/2de184aad945ddb30d85cdde8dfd3cfb500f2d0a/docs/slides/lightspeed-2026-11-18-demo.mp4
+Play the combined 4:16 film, lightspeed-2026-11-18-demo.mp4, once.
 Planning take 07 shows the database
 recommendation and submitted answer, then guidance consumed while the agent
 works and final text review. Auto mode has no per-file permission approvals.
