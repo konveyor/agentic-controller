@@ -2,7 +2,9 @@
 
 This document defines the change-management lifecycle for the **skills** the
 agentic controller ships: the `SKILL.md` instruction sets under
-[`catalog/skills/`](catalog/skills/) that agents load and execute at run time.
+[`catalog/skills/`](catalog/skills/) that agents load and execute at run time,
+and the shipped prompt manifests under [`config/defaults/`](config/defaults/)
+that carry stage instructions and SkillCard definitions.
 It is evidence for ISO/IEC 42001 **A.6.1.3 (Processes for responsible AI
 system design and development)**, whose guidance covers change control and
 approvals for AI systems: skills are the instruction set defining agent
@@ -17,10 +19,15 @@ enforcement also evidences A.3.2, and the CI validation A.6.2.4 and A.6.2.5.
   published as the skills image.
 - [`catalog/examples/`](catalog/examples/) - reference skills documenting the
   format; they shape what users copy.
+- [`config/defaults/`](config/defaults/) - the shipped default Agents,
+  workflows and SkillCards. The workflow YAML carries the stage instructions,
+  and `skillcard_inline_house_rules.yaml` embeds an inline, always-loaded
+  `SKILL.md`.
 
-The curated orchestration that selects which agents, workflows and skillcards
-ship (the operator's `roles/tackle/templates/agentic/defaults/`) is governed
-in konveyor/operator. The prompt content itself is governed here.
+`config/defaults/` is the source of truth for the shipped default Agents,
+workflows and SkillCards: the sync copies these manifests verbatim into the
+operator's `roles/tackle/templates/agentic/defaults/`, which is governed in
+konveyor/operator. The prompt content itself is governed here.
 
 `api/skill/` (frontmatter parsing, manifest, assembly) is regular source code
 and follows the repo's normal review flow, but changes to which frontmatter
@@ -28,8 +35,9 @@ fields are accepted are governance-relevant and worth calling out in a PR.
 
 ## Roles
 
-- **Skill owners** - required approvers for any change under `catalog/`,
-  assigned via [`.github/CODEOWNERS`](.github/CODEOWNERS):
+- **Skill owners** - required approvers for any change under `catalog/` or
+  `config/defaults/`, assigned via
+  [`.github/CODEOWNERS`](.github/CODEOWNERS):
   @djzager @fabianvf @ibolton336 @hhpatel14.
 
 ## Lifecycle of a skill change
