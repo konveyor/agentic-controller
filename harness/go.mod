@@ -12,6 +12,7 @@ require (
 	github.com/konveyor/tackle2-hub/shared v0.0.0-20260718010151-0438af807703
 	github.com/spf13/cobra v1.10.2
 	go.uber.org/zap v1.27.1
+	golang.org/x/crypto v0.56.0
 	golang.org/x/net v0.58.0
 )
 
@@ -41,7 +42,6 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.56.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
