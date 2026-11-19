@@ -50,3 +50,44 @@ func TestNilRedactorIsANoop(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+const testPEMKey = `-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACAVeryVpRdcxsA5cenmxM7D1vJvCN3GXPLDcHtVXfFBQw
+-----END OPENSSH PRIVATE KEY-----`
+
+// A private key never reaches a log line whole — anything that echoes
+// one prints it a line at a time — so registering only the whole blob
+// masks nothing that would actually leak.
+func TestRedactorMasksPrivateKeyLines(t *testing.T) {
+	r := newRedactor()
+	r.addSecrets(privateKeyFragments(testPEMKey)...)
+
+	lines := strings.Split(testPEMKey, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "-----") {
+			continue
+		}
+		got := r.redact("agent said: " + line)
+		if strings.Contains(got, line) {
+			t.Errorf("key line leaked unmasked: %q", got)
+		}
+	}
+
+	// The whole blob is still masked.
+	if strings.Contains(r.redact(testPEMKey), "b3BlbnNzaC1rZXktdjEA") {
+		t.Error("whole key leaked unmasked")
+	}
+}
+
+// The PEM markers are identical across every key of a type, so masking
+// them would redact ordinary prose while protecting nothing.
+func TestRedactorKeepsPEMMarkers(t *testing.T) {
+	r := newRedactor()
+	r.addSecrets(privateKeyFragments(testPEMKey)...)
+
+	msg := "the file must start with -----BEGIN OPENSSH PRIVATE KEY-----"
+	if got := r.redact(msg); got != msg {
+		t.Errorf("PEM marker was redacted: %q", got)
+	}
+}

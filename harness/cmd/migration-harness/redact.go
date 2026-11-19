@@ -70,3 +70,29 @@ func (r *redactor) redact(text string) string {
 	// replacement marker inserted for an earlier secret.
 	return strings.NewReplacer(replacements...).Replace(text)
 }
+
+// privateKeyFragments returns the values to mask for a PEM private key:
+// the whole blob, and each line of its body.
+//
+// The lines are the point. The redactor matches literals, and a key
+// never reaches a log line whole — anything that echoes one prints it a
+// line at a time — so registering only the blob masks nothing that
+// would actually leak.
+//
+// The PEM markers are excluded: they are identical in every key of that
+// type, so masking them would redact the word "-----BEGIN OPENSSH
+// PRIVATE KEY-----" out of unrelated text while protecting nothing.
+// Short lines (the final, partial base64 line can be a few characters)
+// are skipped for the same reason, on the same threshold the
+// environment heuristic uses.
+func privateKeyFragments(key string) []string {
+	fragments := []string{key}
+	for _, line := range strings.Split(key, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "-----") || len(line) < redaction.MinSecretLen {
+			continue
+		}
+		fragments = append(fragments, line)
+	}
+	return fragments
+}

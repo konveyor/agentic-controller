@@ -1,0 +1,7 @@
+kind: feature
+description: >
+  The harness can now clone and push source repositories over SSH. It builds
+  public-key authentication from the Hub identity's key (treating the
+  identity's password as the key passphrase) instead of handing the SSH
+  transport an HTTP Basic credential it rejects, and bounds the SSH dial so a
+  host that drops the connection fails the run promptly.

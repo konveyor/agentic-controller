@@ -77,3 +77,23 @@ func TestClearEnvRemovesAllHubVars(t *testing.T) {
 		}
 	}
 }
+
+// ValidateSourceRepository gates on Kind, not on the URL scheme, so SSH
+// remotes are accepted. That is now correct: the harness builds
+// public-key auth for them from the Hub identity's key (see
+// internal/git/credentials.go). It was not correct before that fix,
+// when an accepted SSH URL went on to die in the clone with "invalid
+// auth method".
+func TestValidateSourceRepositoryAcceptsSSHURLs(t *testing.T) {
+	for _, url := range []string{
+		"ssh://git@git-ssh.example.com:443/acme/app.git",
+		"git@git-ssh.example.com:acme/app.git",
+	} {
+		t.Run(url, func(t *testing.T) {
+			err := ValidateSourceRepository(&api.Repository{Kind: "git", URL: url})
+			if err != nil {
+				t.Fatalf("ValidateSourceRepository(%q) = %v; SSH remotes are supported", url, err)
+			}
+		})
+	}
+}

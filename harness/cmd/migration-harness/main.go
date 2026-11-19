@@ -187,6 +187,10 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// credentials goose can read must not be in it. Maven setup adds the
 	// secrets from the effective settings file before goose starts.
 	red = newRedactor(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
+	if creds.PrivateKey != "" {
+		red.addSecrets(creds.KeyPassphrase)
+		red.addSecrets(privateKeyFragments(creds.PrivateKey)...)
+	}
 
 	if cfg.TargetBranch == creds.Branch {
 		return 1, fmt.Errorf("TARGET_BRANCH %q must differ from source branch", cfg.TargetBranch)
@@ -1016,10 +1020,27 @@ func resolveFromHub(cfg *config.Config, hubClient *hub.Client) (*git.Credentials
 		creds.Username = identity.User
 		creds.Token = identity.Password
 		creds.IdentityName = identity.Name
-		if creds.Username == "" {
-			creds.Username = "x-access-token"
+		// An SSH remote authenticates with the identity's key, and its
+		// Password field is that key's passphrase rather than a token.
+		// The username travels in the URL (git@host), so the
+		// "x-access-token" default below — a GitHub HTTP convention —
+		// must not be applied to it.
+		if creds.IsSSH() {
+			creds.PrivateKey = identity.Key
+			creds.KeyPassphrase = identity.Password
+			logging.Ok("git identity: %s (ssh key)", identity.Name)
+		} else {
+			if creds.Username == "" {
+				creds.Username = "x-access-token"
+			}
+			logging.Ok("git identity: %s", identity.Name)
 		}
-		logging.Ok("git identity: %s", identity.Name)
+	} else if creds.IsSSH() {
+		// There is no anonymous SSH: without a key the clone cannot even
+		// start, so say so here rather than letting the transport report
+		// it as "invalid auth method" further down.
+		logging.Err("git identity: none (anonymous) - an SSH remote cannot be " +
+			"cloned without an identity carrying a private key")
 	} else {
 		// The anonymous case logged nothing at all, so a run that was
 		// never going to be able to push looked exactly like a
