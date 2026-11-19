@@ -59,7 +59,12 @@ func CheckWriteAccess(ctx context.Context, cred *Credentials) error {
 		return fmt.Errorf("%w: transport for %s: %w", ErrWriteAccessUnknown, cred.RepoURL, err)
 	}
 
-	session, err := tr.NewReceivePackSession(ep, cred.Auth())
+	auth, err := cred.Auth()
+	if err != nil {
+		return fmt.Errorf("%w: auth for %s: %w", ErrWriteAccessUnknown, cred.RepoURL, err)
+	}
+
+	session, err := tr.NewReceivePackSession(ep, auth)
 	if err != nil {
 		return classifyProbeError(cred.RepoURL, err)
 	}

@@ -38,9 +38,14 @@ func Clone(ctx context.Context, cred *Credentials, destDir string) (*gogit.Repos
 		}
 	}
 
+	auth, err := cred.Auth()
+	if err != nil {
+		return nil, fmt.Errorf("clone %s: %w", cred.RepoURL, err)
+	}
+
 	repo, err := gogit.PlainCloneContext(ctx, destDir, false, &gogit.CloneOptions{
 		URL:  cred.RepoURL,
-		Auth: cred.Auth(),
+		Auth: auth,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("clone %s: %w", cred.RepoURL, err)
@@ -375,8 +380,13 @@ func Push(ctx context.Context, cred *Credentials, repo *gogit.Repository, branch
 
 	refSpec := gogitcfg.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch))
 
-	err := repo.PushContext(ctx, &gogit.PushOptions{
-		Auth:       cred.Auth(),
+	auth, err := cred.Auth()
+	if err != nil {
+		return PushSkipped, fmt.Errorf("push %s: %w", branch, err)
+	}
+
+	err = repo.PushContext(ctx, &gogit.PushOptions{
+		Auth:       auth,
 		RemoteName: "origin",
 		RefSpecs:   []gogitcfg.RefSpec{refSpec},
 	})

@@ -142,7 +142,11 @@ func TestGitLifecycleThroughAuthenticatedProxy(t *testing.T) {
 			if err := CheckWriteAccess(ctx, cred); err != nil {
 				t.Fatal(err)
 			}
-			if err := repo.FetchContext(ctx, &gogit.FetchOptions{Auth: cred.Auth()}); err != nil && err != gogit.NoErrAlreadyUpToDate {
+			fetchAuth, err := cred.Auth()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.FetchContext(ctx, &gogit.FetchOptions{Auth: fetchAuth}); err != nil && err != gogit.NoErrAlreadyUpToDate {
 				t.Fatal(err)
 			}
 			if err := CheckoutBranch(repo, cred.Branch); err != nil {
