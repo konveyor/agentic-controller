@@ -5,15 +5,21 @@ description: "Defines native skill discovery, always-loaded rules, and how the l
 status: proposed
 status_note: "Refines ADR 0007's prompt-assembly step and supersedes ADR 0001's runtime-discovery claim; ADR 0007's other decisions stand."
 date: "2026-08-11"
-last_updated: "2026-08-31"
+last_updated: "2026-11-18"
 authors:
   - "Fabian von Feilitzsch"
-last_reviewed: "2026-08-31"
+last_reviewed: "2026-11-18"
 implementation_status: amended
-review_note: "Native skill discovery, always-loaded rules, and the loader metadata path are implemented; catalog relocation is recorded by ADR 0019."
+review_note: "Native skill discovery, always-loaded rules, and the loader metadata path are implemented; catalog relocation is recorded by ADR 0019. Scoped review: proposed ADR 0024 builds on this delivery pattern for shared learnings without changing current skill loading."
 ---
 
 # ADR 0014: Skill Loading and Prompt Assembly
+
+**Update (2026-11-18):** Proposed [ADR 0024](./0024-agent-learnings.md)
+builds on the always-loaded rule/on-demand skill delivery pattern for immutable
+shared learnings. AgentLearning remains distinct from SkillCard; its authoring
+skill, Learning Snapshot preparation, and runtime delivery are unimplemented.
+The proposal does not change the skill-loading behavior recorded here.
 
 **Update (2026-08-31):** Native runtime discovery, the linked
 `~/.agents/skills` root, loader-produced rule metadata, and rule prompt

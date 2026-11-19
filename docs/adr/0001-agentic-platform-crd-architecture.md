@@ -4,16 +4,23 @@ title: "Agentic Platform CRD Architecture"
 description: "Defines the platform's CRDs and the boundaries between the controller, Hub, Agent Sandbox, and harness."
 status: accepted
 date: "2026-06-01"
-last_updated: "2026-10-20"
+last_updated: "2026-11-11"
 authors:
   - "David Zager"
   - "Dylan Murray"
-last_reviewed: "2026-10-20"
+last_reviewed: "2026-11-11"
 implementation_status: amended
-review_note: "Core decisions remain useful with amendments in ADRs 0006, 0007, 0009, 0015, and 0016. OpenShell credential isolation survives managed-route removal; its integration and the separate harness push-credential boundary remain unvalidated."
+review_note: "Core decisions remain useful with amendments in ADRs 0006, 0007, 0009, 0015, and 0016. OpenShell credential isolation survives managed-route removal; its integration and the separate harness push-credential boundary remain unvalidated. Scoped review: ADR 0024 proposes shared learnings for finite invocations; current APIs are unchanged."
 ---
 
 # ADR 0001: Agentic Platform CRD Architecture
+
+**Update (2026-11-11):** Proposed [ADR 0024](./0024-agent-learnings.md)
+introduces reviewed, immutable shared learnings for AgentRuns and
+AgentWorkflowRuns. If accepted, it replaces only the deferred "Per-agent memory
+service (Phase 4)" assumption for approved knowledge. It does not implement a
+new resource or change generic controller boundaries, Agent Sandbox, or finite
+workflows' Git handoffs.
 
 **Update (2026-10-20):** [ADR 0021](./0021-shared-runtime-and-conditional-lightspeed-execution.md)
 records the shared DeepAgents runtime target and conditional Lightspeed execution

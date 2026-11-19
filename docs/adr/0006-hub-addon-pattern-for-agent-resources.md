@@ -5,15 +5,29 @@ description: "Defines Hub as a fire-and-forget CRUD and runtime data service tha
 status: proposed
 status_note: "Supersedes ADR 0003; Hub-specific integration remains external to this repository."
 date: "2026-07-23"
-last_updated: "2026-08-31"
+last_updated: "2026-11-18"
 authors:
   - "David Zager"
-last_reviewed: "2026-08-31"
+last_reviewed: "2026-11-18"
 implementation_status: amended
-review_note: "Remains proposed/external to this repository. The Hub addon pattern is still the intended integration boundary; the entry point now receives parameters through params.json, as recorded in the ADR amendment."
+review_note: "Remains proposed/external to this repository. Scoped Hub source review for ADR 0024 finds resource/method permissions and agentic endpoints, but no application-label projection in upstream run-create handlers; tokens now use Hub's agentic.harness service account. Learning permissions, review endpoints, and trusted label projection require Hub work."
 ---
 
 # ADR 0006: Hub follows the addon pattern for agent resources
+
+**Update (2026-11-18):** Proposed [ADR 0024](./0024-agent-learnings.md)
+requires Hub permission registration, review endpoints, and trusted projection
+of application metadata onto invocation labels before Learning Snapshot
+selection. This is a narrow create-time metadata projection; git URLs,
+credentials, and runtime grounding remain harness-owned lookups. A
+[pinned upstream source review](../research/2026-11-18-hub-agent-learning-permissions.md)
+finds that the application-label stamping/filtering described below is not in
+the reviewed upstream run handlers, so it remains integration work rather than
+an implemented guarantee. Upstream now mints HUB_TOKEN for Hub's internal
+`agentic.harness` service account (assigned the addon role), rather than using
+the former `AddonScopes` constant. That Hub API identity is distinct from
+ADR 0024's proposed per-run Kubernetes proposal identity. The reviewed REST
+routes are under `/hub/agentic/`; `/hub/agent/` below records the older proposal.
 
 Hub's integration with the agent platform follows the established addon
 pattern rather than introducing smart resolution endpoints. Hub creates
