@@ -19,6 +19,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	cryptossh "golang.org/x/crypto/ssh"
+	xproxy "golang.org/x/net/proxy"
 
 	"github.com/konveyor/migration-harness/internal/logging"
 )
@@ -72,8 +73,7 @@ func probeSSHSetup(ctx context.Context, cred *Credentials) error {
 	defer cancel()
 
 	addr := hostWithPort(ep)
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := dialSSH(ctx, ep, addr)
 	if err != nil {
 		return fmt.Errorf("connect %s: %w", addr, err)
 	}
@@ -97,6 +97,40 @@ func probeSSHSetup(ctx context.Context, cred *Credentials) error {
 		}
 	}()
 	return client.Close()
+}
+
+// dialSSH opens the probe's connection by the same route go-git's ssh
+// transport would take, so the probe cannot fail a clone that would
+// have succeeded.
+//
+// That route is not always a direct dial. go-git uses the endpoint's
+// explicit proxy when one is set, and otherwise x/net's proxy.Dial,
+// which reads ALL_PROXY and NO_PROXY from the environment. A
+// deployment that reaches its forge through a SOCKS proxy — the
+// environment this product is built for — would see a direct dial fail
+// while the clone behind it worked, which is the worst way for a
+// pre-flight to be wrong.
+func dialSSH(ctx context.Context, ep *transport.Endpoint, addr string) (net.Conn, error) {
+	if ep.Proxy.URL == "" {
+		return xproxy.Dial(ctx, "tcp", addr)
+	}
+
+	proxyURL, err := ep.Proxy.FullURL()
+	if err != nil {
+		return nil, fmt.Errorf("parse proxy: %w", err)
+	}
+	dialer, err := xproxy.FromURL(proxyURL, xproxy.Direct)
+	if err != nil {
+		return nil, fmt.Errorf("proxy %s: %w", proxyURL.Scheme, err)
+	}
+	ctxDialer, ok := dialer.(xproxy.ContextDialer)
+	if !ok {
+		// Same refusal go-git makes rather than dialling around the
+		// proxy: reaching the host by a route the clone will not use
+		// proves nothing.
+		return nil, fmt.Errorf("proxy dialer for %s does not support contexts", proxyURL.Scheme)
+	}
+	return ctxDialer.DialContext(ctx, "tcp", addr)
 }
 
 func Clone(ctx context.Context, cred *Credentials, destDir string) (*gogit.Repository, error) {

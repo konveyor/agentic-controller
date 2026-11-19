@@ -336,3 +336,68 @@ func writeKnownHosts(t *testing.T, hosts map[string]string) string {
 	}
 	return path
 }
+
+// closedPort returns a port with nothing listening on it.
+func closedPort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	return addr
+}
+
+// The probe must take the same route to the server that the clone will.
+// A deployment reaching its forge through a SOCKS proxy would otherwise
+// see the probe fail on a direct dial while the clone behind it worked
+// — a pre-flight rejecting a remote that is perfectly reachable.
+func TestProbeDialHonoursEndpointProxy(t *testing.T) {
+	// A live listener at the target address: a direct dial would
+	// succeed, so only consulting the proxy can make this fail.
+	target, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = target.Close() })
+
+	ep, err := transport.NewEndpoint("ssh://git@example.com:22/acme/app.git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep.Proxy.URL = "socks5://" + closedPort(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := dialSSH(ctx, ep, target.Addr().String())
+	if err == nil {
+		_ = conn.Close()
+		t.Fatal("dialSSH reached the target directly, bypassing the configured proxy")
+	}
+}
+
+// The ordinary case must keep working: with no proxy configured the
+// probe connects straight to the host.
+func TestProbeDialConnectsDirectlyWithoutProxy(t *testing.T) {
+	target, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = target.Close() })
+
+	ep, err := transport.NewEndpoint("ssh://git@example.com:22/acme/app.git")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := dialSSH(ctx, ep, target.Addr().String())
+	if err != nil {
+		t.Fatalf("dialSSH() error = %v, want a direct connection", err)
+	}
+	_ = conn.Close()
+}
