@@ -34,6 +34,7 @@ generated block by hand.
 | [0020](./0020-run-outcome-model.md) | Run Outcome Model | proposed | deferred | 2026-10-09 |
 | [0021](./0021-shared-runtime-and-conditional-lightspeed-execution.md) | Shared Runtime and Conditional Lightspeed Execution | accepted | deferred | 2026-11-04 |
 | [0023](./0023-interrogation-stage.md) | Interrogation Stage: ask the human about the application before planning | proposed | deferred | 2026-10-23 |
+| [0024](./0024-run-artifact-persistence.md) | Run Artifact Persistence: Recorded Transcripts and Logs | proposed | deferred | 2026-11-18 |
 <!-- END ADR INDEX -->
 
 ## Metadata
