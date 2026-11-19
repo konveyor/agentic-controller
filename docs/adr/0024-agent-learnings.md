@@ -38,8 +38,8 @@ by this ADR.
 This proposal covers shared knowledge for existing finite invocations.
 It is proposed and unimplemented; continuing sessions are a separate design.
 
-[Review slides](../slides/agent-learnings-2026-11-11.pdf) ·
-[Editable source and speaker notes](../slides/agent-learnings-2026-11-11.md) ·
+[Community call slides, November 19](../slides/agent-learnings-community-2026-11-19.pdf) ·
+[Editable source and speaker notes](../slides/agent-learnings-community-2026-11-19.md) ·
 [Proposed spike](../spikes/agent-learning-delivery.md)
 
 ## Use cases and value
