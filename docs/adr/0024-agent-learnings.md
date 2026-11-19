@@ -5,12 +5,12 @@ description: "Proposes reviewed, immutable learnings selected at invocation crea
 status: proposed
 status_note: "Independent proposal for existing AgentRuns and AgentWorkflowRuns; AgentSession is an optional future consumer."
 date: "2026-11-11"
-last_updated: "2026-11-18"
+last_updated: "2026-11-19"
 authors:
   - "David Zager"
-last_reviewed: "2026-11-18"
+last_reviewed: "2026-11-19"
 implementation_status: deferred
-review_note: "Clarifies Hub authorization and its implementation gaps, Kubernetes RBAC and immutability, cross-application selectors, and required learning-authoring guidance with proposal-only run identities. Hub permission registration, reviewer policy, trusted metadata projection, and learning endpoints require new work; the learning contract remains unimplemented."
+review_note: "Initial review authority is instance-wide in Hub's managed namespace, admin-only by default with explicit reviewer-role delegation. Hub permission registration, trusted metadata projection, learning endpoints, Kubernetes lifecycle protection, and runtime delivery remain unimplemented."
 relates_to:
   - "0001"
   - "0007"
@@ -19,6 +19,12 @@ relates_to:
 ---
 
 # ADR 0024: AgentLearning: Immutable Shared Knowledge for Agent Invocations
+
+**Update (2026-11-19):** Sets the initial reviewer policy to instance-wide
+authority within Hub's managed namespace, seeded admin-only by default with
+explicit delegation through a custom reviewer role. Application-specific
+reviewer authorization is deferred; learning applicability remains independent
+of reviewer authority. This clarifies the proposal, not its acceptance status.
 
 **Update (2026-11-18):** Clarifies approval through existing Hub user permissions
 and Kubernetes RBAC, API-enforced content immutability, label-based applicability
@@ -92,9 +98,13 @@ but a viewer response alone is not authorization to approve a learning.
 Hub currently authorizes a registered resource name plus HTTP method, not an
 application ID or applicability selector. Possessing learning-review permission
 therefore does not express "may approve only for application 42." The initial
-reviewer policy must explicitly choose instance-wide authority or introduce
-additional application-specific authorization. A reviewer's permission to act
-and a learning's applicability selector are separate concepts. See the
+policy is instance-wide learning review within Hub's managed namespace:
+seeded admin-only by default, with explicit delegation through a custom reviewer
+role containing the learning read/review scopes. Architect, migrator, and other
+built-in roles do not gain review permission through their existing run rights.
+Application-specific reviewer authorization is deferred as separate work.
+A reviewer's permission to act and a learning's applicability selector are
+separate concepts. See the
 [Hub source review](../research/2026-11-18-hub-agent-learning-permissions.md).
 
 Direct Kubernetes clients are governed by Kubernetes RBAC. Ordinary users and
@@ -129,8 +139,9 @@ implemented behavior and separates it from these proposed additions:
 - **Roles and identity mappings:** extend `internal/auth/seed/roles.yaml` and
   document custom-role assignments and external identity mappings for the new
   scopes. Existing run-creation rights do not imply review rights. Hub's seeded
-  admin wildcard includes newly registered resources; assigning the new scopes
-  to other built-in roles is an explicit policy decision. Verify when changed
+  admin wildcard includes newly registered resources; keep seeded review grants
+  admin-only and use explicit custom-role delegation. View/propose grants are
+  separate from review grants. Verify when changed
   assignments reach refreshed tokens rather than promising immediate revocation.
 - **Reviewer attribution:** derive the stable Hub subject, login, decision time,
   and exact revision from the authenticated request and server-side state.

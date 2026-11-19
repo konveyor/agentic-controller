@@ -6,13 +6,19 @@ the observed `main` revision. No Hub implementation changes or integration tests
 were performed. Recommendations below support proposed
 [ADR 0024](../adr/0024-agent-learnings.md), not implemented guarantees.
 
+Update (2026-11-19): the proposal now chooses instance-wide learning review
+within Hub's managed namespace, seeded admin-only by default and explicitly
+delegatable through a custom reviewer role. Application-specific reviewer
+authorization remains deferred. This is a project policy decision following
+the source inspection, not a capability newly implemented in Hub.
+
 ## Finding
 
 Hub already has the identity and resource-permission framework needed to add
 learning operations. It does **not** already have a learning approval permission
 or a generic per-application approval ACL. Reusing authentication is sufficient
 for identity; learning resource registration, grants, handlers, audit attribution,
-and an explicit authorization-scope decision remain work.
+and implementation of the chosen reviewer policy remain work.
 
 The key distinction is **applicability** versus **authority**: a learning selector
 describes which workloads can consume knowledge; Hub's current resource/method
@@ -115,14 +121,14 @@ new Hub role grant. [Current Hub Kubernetes Role](https://github.com/konveyor/ag
    neither ordinary POST creation nor arbitrary PUT/PATCH should accept it.
    Separate nouns let the existing middleware distinguish operations that all
    happen to use POST without changing Hub's method vocabulary.
-2. **Decide who receives the new grants.** One compatible initial policy is
-   instance-wide learning review, with seeded admin authorization and an
-   explicitly assigned custom reviewer role. Giving architect/migrator proposal
-   or review grants is a product-policy decision, not something implied by their
-   existing run permissions. Per-application/archetype reviewer authority would
+2. **Apply the chosen reviewer policy.** The initial policy is instance-wide
+   learning review within Hub's managed namespace, with seeded admin authorization
+   and an explicitly assigned custom reviewer role. Existing architect/migrator
+   run permissions do not grant review authority; keep seeded review grants
+   admin-only. Proposal grants are separate. Per-application/archetype reviewer authority would
    require an additional authorization model and handler checks, including the
-   meaning of selectors that match future applications. That scope decision
-   remains open; selectors themselves must not establish authority.
+   meaning of selectors that match future applications. That extension is
+   deferred; selectors themselves must not establish authority.
 3. **Build trusted approval attribution.** The request context already exposes
    authenticated `CurrentSubject` and `CurrentUser`. The handler should derive
    reviewer identity server-side and bind the decision to the learning UID/digest.
@@ -160,7 +166,7 @@ also needs an explicit no-auth policy: Hub's no-auth provider grants `*:*`, uses
 `admin.noauth`, and has no authenticated subject, so that mode cannot establish
 the promised reviewer identity. [No-auth implementation](https://github.com/konveyor/tackle2-hub/blob/fabeb1e3aa1fddaf394ee0857038a354b055f4df/internal/auth/noauth.go#L7-L40).
 
-The ADR should describe **new learning-specific Hub permissions**, and keep
-application/archetype authority open until its policy is chosen. The existing
+The ADR describes **new learning-specific Hub permissions**, with instance-wide
+review as the initial policy and application/archetype reviewer ACLs deferred. The existing
 accounts/authentication system is reusable; its current resource-level scope
 checks do not implement per-application approval authority.

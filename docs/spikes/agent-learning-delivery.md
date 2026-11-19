@@ -6,6 +6,9 @@ Status: proposed, 2026-11-11. Supports
 Updated 2026-11-18: includes learning-authoring guidance, proposal-only run
 identities, Hub/Kubernetes approval boundaries, and concrete selector fixtures.
 
+Updated 2026-11-19: initial review authority is instance-wide within Hub's
+managed namespace, admin-only by default with explicit reviewer-role delegation.
+
 This experiment requires neither AgentSession nor a webhook/event-routing system.
 
 ## Question
@@ -64,9 +67,11 @@ Only after they actually finish or stop may revocation succeed.
    content or applicability needs revision before acceptance.
 6. **Approval authority:** extend Hub's resource/method permissions with separate
    proposal, review, and revocation scopes before its service account writes a
-   decision through the Kubernetes API. State the initial reviewer policy:
-   instance-wide authority uses the existing model; application-specific
-   authority needs additional policy and enforcement. Record the actual Hub
+   decision through the Kubernetes API. Test instance-wide review authority
+   within Hub's managed namespace: seeded admin-only by default, plus explicitly
+   delegated custom reviewers. Existing architect/migrator run rights must not
+   authorize review. Application-specific reviewer authority is deferred.
+   Record the actual Hub
    reviewer subject, login, and exact proposal. Use a
    separately RBAC-protected status write or approval resource for direct API
    enforcement. Test unauthorized Hub users, direct unauthorized API writes,
@@ -116,9 +121,9 @@ Also provide the authoring skill, proposal identity/RBAC fixtures, label-selecto
 fixtures for both invocation kinds, and API failure tests establishing immutable
 content, protected approval, and trustworthy source attribution. Distinguish
 real Hub authorization evidence from simulated caller/permission fixtures.
-Include a concrete Hub change map and the reviewer-policy decision, with the
-current resource-wide permission model distinguished from any new object-level
-authorization.
+Include a concrete Hub change map and evidence for the initial reviewer policy,
+with instance-wide review distinguished from learning applicability and any
+future object-level authorization.
 
 Failures should identify the smallest missing runtime or admission capability;
 do not replace required guarantees with an eventually consistent counter or an
