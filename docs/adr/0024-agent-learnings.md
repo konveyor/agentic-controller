@@ -10,7 +10,7 @@ authors:
   - "David Zager"
 last_reviewed: "2026-11-18"
 implementation_status: deferred
-review_note: "Clarifies Hub authorization, Kubernetes RBAC and immutability, cross-application selectors, and required learning-authoring guidance with proposal-only run identities. These mechanisms, invocation snapshots, consumer accounting, and file delivery remain unimplemented."
+review_note: "Clarifies Hub authorization and its implementation gaps, Kubernetes RBAC and immutability, cross-application selectors, and required learning-authoring guidance with proposal-only run identities. Hub permission registration, reviewer policy, trusted metadata projection, and learning endpoints require new work; the learning contract remains unimplemented."
 relates_to:
   - "0001"
   - "0007"
@@ -23,8 +23,11 @@ relates_to:
 **Update (2026-11-18):** Clarifies approval through existing Hub user permissions
 and Kubernetes RBAC, API-enforced content immutability, label-based applicability
 across applications, and a required learning-authoring skill with proposal-only
-run credentials. These refine the proposal; no learning API or runtime support
-is implemented by this ADR.
+run credentials. A source review of Hub's permission model also identifies the
+required Hub endpoints, role/scope changes, and trusted metadata projection;
+application-specific approval authority is not an existing Hub capability.
+These refine the proposal; no learning API or runtime support is implemented
+by this ADR.
 
 This proposal covers shared knowledge for existing finite invocations.
 It is proposed and unimplemented; continuing sessions are a separate design.
@@ -78,13 +81,21 @@ alone does not make the referenced bytes immutable.
 ### Authorize approval through Hub identities and Kubernetes RBAC
 
 In Konveyor, approval uses Hub's existing user accounts and authorization,
-regardless of the configured authentication provider. Hub checks that the
-authenticated user may approve the proposed applicability scope, then submits
-the decision through the Kubernetes API using Hub's service account. Record
+regardless of the configured authentication provider. Extend that model with
+an explicit learning-review permission, checked before Hub submits the decision
+through the Kubernetes API using Hub's service account. Record
 the Hub user's identity and exact immutable proposal with the decision: the
 Kubernetes caller is Hub, which is responsible for authenticating and
 authorizing the person behind that call. ACP may carry a review interaction,
 but a viewer response alone is not authorization to approve a learning.
+
+Hub currently authorizes a registered resource name plus HTTP method, not an
+application ID or applicability selector. Possessing learning-review permission
+therefore does not express "may approve only for application 42." The initial
+reviewer policy must explicitly choose instance-wide authority or introduce
+additional application-specific authorization. A reviewer's permission to act
+and a learning's applicability selector are separate concepts. See the
+[Hub source review](../research/2026-11-18-hub-agent-learning-permissions.md).
 
 Direct Kubernetes clients are governed by Kubernetes RBAC. Ordinary users and
 agent service accounts receive no approval write permission. Separate proposal
@@ -99,6 +110,59 @@ a create request; content-level restrictions require validation. See
 Only accepted proposals are eligible for selection. Rejected proposals remain
 history. Background reflection may generate candidates for the same review
 path; writable scratch notes remain separate from accepted shared knowledge.
+
+### Implement the Hub integration alongside the learning contract
+
+The existing auth providers and role APIs can be reused, but support for
+learnings requires changes in Hub and its deployment. The
+[source review](../research/2026-11-18-hub-agent-learning-permissions.md) pins the
+implemented behavior and separates it from these proposed additions:
+
+- **Endpoints and permissions:** extend `internal/api/agentic.go` and
+  `shared/api` with learning list/get/propose, review, and revocation operations.
+  Register distinct `Required(...)` resources for proposal and review paths,
+  even when both use POST. For example, `agentic.learnings:get/post`,
+  `agentic.learnings.reviews:post`, and `agentic.learnings.revocations:post`
+  fit the current scope model. These are proposed permission names, not a
+  published endpoint/schema contract; approval is not a new HTTP-method verb.
+  An accepted replacement must also pass the review permission check.
+- **Roles and identity mappings:** extend `internal/auth/seed/roles.yaml` and
+  document custom-role assignments and external identity mappings for the new
+  scopes. Existing run-creation rights do not imply review rights. Hub's seeded
+  admin wildcard includes newly registered resources; assigning the new scopes
+  to other built-in roles is an explicit policy decision. Verify when changed
+  assignments reach refreshed tokens rather than promising immediate revocation.
+- **Reviewer attribution:** derive the stable Hub subject, login, decision time,
+  and exact revision from the authenticated request and server-side state.
+  Validate that a human-required approval is attributable to a user or external
+  user identity, not merely a service account or OAuth client with POST scope.
+  Unauthenticated/no-auth operation cannot supply authenticated human approval.
+  Permission checks alone do not establish who personally operated a credential.
+- **Trusted workload metadata:** extend both run-create handlers to validate
+  the application association and stamp reserved application/archetype labels
+  from Hub's own data before invocation admission. Define a representation for
+  multi-valued archetypes and keep labels consistent with runtime application
+  identity. Caller-supplied labels must not establish application membership.
+  This is the narrow create-time projection needed for selection; the harness
+  still resolves git URLs, credentials, and runtime grounding from Hub.
+- **Kubernetes access:** extend Hub's namespaced Role and the operator's
+  corresponding deployment RBAC for the learning resource and chosen protected
+  approval write path. Keep approval writes separate from ordinary proposal
+  creation. Hub's internal `agentic.harness` service account and HUB_TOKEN are
+  Hub API identities; the proposed per-AgentRun Kubernetes ServiceAccount is a
+  separate identity and receives no Hub review permission.
+- **Clients and review UI:** add shared bindings/OpenAPI definitions and a
+  review flow showing the immutable content, evidence, applicability, reviewer,
+  and replacement lineage. UI visibility follows the new scopes, while Hub
+  enforces every operation independently of whether a button is shown. Verify
+  that role management exposes the registered learning scopes.
+
+The upstream Hub source reviewed here has agentic resource permissions and
+run-create endpoints, but no learning endpoints or trusted application/archetype
+label projection. ADR 0006's application-label contract is a target to reconcile
+with the Hub version used by the spike, not evidence that this path is already
+implemented upstream. Keep the controller domain-agnostic: Hub owns this
+projection and its user-permission policy.
 
 ### Require learning-authoring guidance and proposal-only run identities
 
@@ -142,7 +206,7 @@ and 87 becomes eligible for later invocations of either application. The
 originating application does not limit reuse; accepted applicability does.
 
 Hub stamps the relevant application metadata onto each AgentRun or
-AgentWorkflowRun when it creates the invocation, following the existing
+AgentWorkflowRun when it creates the invocation, extending the intended
 application-label contract in [ADR 0006](0006-hub-addon-pattern-for-agent-resources.md).
 These are illustrative fragments, not an implemented AgentLearning schema:
 

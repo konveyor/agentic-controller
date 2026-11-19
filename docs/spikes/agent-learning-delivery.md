@@ -62,13 +62,19 @@ Only after they actually finish or stop may revocation succeed.
    explicit replacement lineage, conflict/overflow handling, and retention after
    consumers complete. Show how a reviewer requests a new immutable proposal when
    content or applicability needs revision before acceptance.
-6. **Approval authority:** exercise Hub's existing user authentication and scope
-   authorization before its service account writes the decision through the
-   Kubernetes API. Record the actual Hub reviewer and exact proposal. Use a
+6. **Approval authority:** extend Hub's resource/method permissions with separate
+   proposal, review, and revocation scopes before its service account writes a
+   decision through the Kubernetes API. State the initial reviewer policy:
+   instance-wide authority uses the existing model; application-specific
+   authority needs additional policy and enforcement. Record the actual Hub
+   reviewer subject, login, and exact proposal. Use a
    separately RBAC-protected status write or approval resource for direct API
    enforcement. Test unauthorized Hub users, direct unauthorized API writes,
    forged reviewer fields, and creating an already-approved learning. Label
    matching and ordinary proposal creation must never grant approval authority.
+   Cover local users, external user identities, and machine identities; a
+   human-required approval must not become valid just because a machine token
+   has a matching scope. Exercise permission changes/token refresh explicitly.
    State whether Hub checks are integration-tested or represented by fixtures.
 7. **API immutability:** use CRD CEL transition validation on immutable proposal
    fields, following AgentRun's existing `self == oldSelf` pattern. Verify that
@@ -87,6 +93,17 @@ Only after they actually finish or stop may revocation succeed.
    delete a learning. Clean up run credentials without cascading deletion of
    shared learnings when the source run is pruned. Keep Kubernetes credential
    and RBAC mechanics out of the skill content.
+9. **Hub integration:** use the
+   [pinned source review](../research/2026-11-18-hub-agent-learning-permissions.md)
+   to implement or fixture the new handlers/shared APIs, permission registration,
+   role seeds/mappings, immutable reviewer attribution, and both run-create label
+   projections. Reject or overwrite forged reserved labels and inconsistent
+   application identity. Show that proposal POST permission cannot authorize a
+   review POST and that accepting a replacement requires review authority.
+   Update Hub/operator Kubernetes RBAC for the selected approval path; verify
+   client bindings, API documentation, and review UI scope handling separately.
+   A fixture-only Hub cannot establish production integration: list the required
+   Hub/UI/operator changes and distinguish them from implemented spike evidence.
 
 ## Exit criteria
 
@@ -99,6 +116,9 @@ Also provide the authoring skill, proposal identity/RBAC fixtures, label-selecto
 fixtures for both invocation kinds, and API failure tests establishing immutable
 content, protected approval, and trustworthy source attribution. Distinguish
 real Hub authorization evidence from simulated caller/permission fixtures.
+Include a concrete Hub change map and the reviewer-policy decision, with the
+current resource-wide permission model distinguished from any new object-level
+authorization.
 
 Failures should identify the smallest missing runtime or admission capability;
 do not replace required guarantees with an eventually consistent counter or an

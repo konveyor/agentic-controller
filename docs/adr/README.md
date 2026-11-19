@@ -17,7 +17,7 @@ generated block by hand.
 | [0002](./0002-acp-transport-and-observability.md) | ACP Transport and Agent Observability | accepted | amended | 2026-08-31 |
 | [0003](./0003-hub-curated-api-for-agent-resources.md) | Hub Curated API for Agent Resources | superseded | superseded | 2026-08-31 |
 | [0004](./0004-openshell-as-execution-interface.md) | OpenShell as Execution Interface | accepted | deferred | 2026-11-04 |
-| [0006](./0006-hub-addon-pattern-for-agent-resources.md) | Hub follows the addon pattern for agent resources | proposed | amended | 2026-08-31 |
+| [0006](./0006-hub-addon-pattern-for-agent-resources.md) | Hub follows the addon pattern for agent resources | proposed | amended | 2026-11-18 |
 | [0007](./0007-harness-thin-runner-and-skillcard-skills.md) | Harness as Thin Single-Stage Runner with SkillCard-Based Skills | accepted | amended | 2026-11-11 |
 | [0008](./0008-harness-owns-pod-acp-port.md) | Harness Owns the Pod ACP Port (Tee Topology) | proposed | in-sync | 2026-08-31 |
 | [0009](./0009-parameter-delivery-via-params-json.md) | Parameter Delivery via params.json | proposed | amended | 2026-08-31 |
