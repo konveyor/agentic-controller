@@ -11,6 +11,9 @@ within Hub's managed namespace, seeded admin-only by default and explicitly
 delegatable through a custom reviewer role. Application-specific reviewer
 authorization remains deferred. This is a project policy decision following
 the source inspection, not a capability newly implemented in Hub.
+The proposal also includes user-authored lessons and a Remember this action on
+an `ask_user` response. Those use the authenticated user's proposal grant and
+the same protected review path; the Hub/UI capture flow remains new work.
 
 ## Finding
 
@@ -121,6 +124,10 @@ new Hub role grant. [Current Hub Kubernetes Role](https://github.com/konveyor/ag
    neither ordinary POST creation nor arbitrary PUT/PATCH should accept it.
    Separate nouns let the existing middleware distinguish operations that all
    happen to use POST without changing Hub's method vocabulary.
+   Users can submit directly or capture an `ask_user` answer through Remember
+   this using the proposal scope. Stream access and answering a question do not
+   supply that scope or review authority. The new UI/handler must retain trusted
+   source attribution without coupling proposal persistence to answer delivery.
 2. **Apply the chosen reviewer policy.** The initial policy is instance-wide
    learning review within Hub's managed namespace, with seeded admin authorization
    and an explicitly assigned custom reviewer role. Existing architect/migrator

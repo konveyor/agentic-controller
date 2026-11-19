@@ -8,6 +8,8 @@ identities, Hub/Kubernetes approval boundaries, and concrete selector fixtures.
 
 Updated 2026-11-19: initial review authority is instance-wide within Hub's
 managed namespace, admin-only by default with explicit reviewer-role delegation.
+Both agents and users can propose learnings, including a Remember this action
+on a user's `ask_user` response.
 
 This experiment requires neither AgentSession nor a webhook/event-routing system.
 
@@ -40,6 +42,12 @@ the same Learning Snapshot. Changing workload labels after creation does not
 change it. A newly created run selects the replacement. Attempt revocation
 while the original consumers are queued, running, between stages, and cancelling.
 Only after they actually finish or stop may revocation succeed.
+
+Also exercise a user-authored proposal without a source run, and a user who
+answers `ask_user` during the app-42 run and selects Remember this. Capture the
+source question/answer, authenticated proposer, and explicit applicability in
+an immutable candidate. After review, a future eligible invocation receives the
+learning while the source run and workflow retain their original snapshots.
 
 ## Work and evidence
 
@@ -109,6 +117,20 @@ Only after they actually finish or stop may revocation succeed.
    client bindings, API documentation, and review UI scope handling separately.
    A fixture-only Hub cannot establish production integration: list the required
    Hub/UI/operator changes and distinguish them from implemented spike evidence.
+10. **User proposals and remembered answers:** implement or fixture the direct
+    proposal form and Remember this draft flow. Enforce the user's proposal
+    permission independently of stream access or question-answer permission.
+    Capture trusted source attribution, durable question/response evidence,
+    and exact proposed wording/scope; require explicit applicability if no
+    current application is known. Test forged source/user fields, missing
+    proposal permission, a proposer without review rights, and a reviewer
+    explicitly accepting through the separate review operation. Saving or
+    retrying a proposal must not delay or duplicate answer delivery; a failed
+    save stays visible and must not fail an already-answered question. Retrying
+    a save should not create duplicate candidates. Keep the source invocation's
+    Learning Snapshot unchanged even when the new candidate is accepted before
+    a later workflow stage starts. Pruning the source run must preserve the
+    retained learning evidence.
 
 ## Exit criteria
 

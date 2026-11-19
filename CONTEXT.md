@@ -108,8 +108,8 @@ Succeeded, Failed).
 [ADR 0024](docs/adr/0024-agent-learnings.md) is proposed and unimplemented.
 It can be adopted for existing runs and workflows independently of sessions.
 
-**AgentLearning** — A reviewable, reusable lesson whose content and applicability
-are immutable; accepted revisions can inform independent invocations across
+**AgentLearning** — A reviewable, reusable lesson proposed by an agent or a user,
+whose content and applicability are immutable; accepted revisions can inform independent invocations across
 applications and Agent templates. It is the proposed contract for approved
 shared knowledge, distinct from an Agent's writable Memory Service.
 _Avoid_: treating working notes or a conversation summary as automatically

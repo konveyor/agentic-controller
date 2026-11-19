@@ -10,11 +10,12 @@ authors:
   - "David Zager"
 last_reviewed: "2026-11-19"
 implementation_status: deferred
-review_note: "Initial review authority is instance-wide in Hub's managed namespace, admin-only by default with explicit reviewer-role delegation. Hub permission registration, trusted metadata projection, learning endpoints, Kubernetes lifecycle protection, and runtime delivery remain unimplemented."
+review_note: "Agents and users may propose learnings, including a Remember this action on an ask_user response. Initial review authority is instance-wide, admin-only by default with explicit delegation. Hub/UI proposal capture, permissions, trusted metadata, Kubernetes lifecycle protection, and runtime delivery remain unimplemented."
 relates_to:
   - "0001"
   - "0007"
   - "0014"
+  - "0017"
   - "0021"
 ---
 
@@ -24,7 +25,9 @@ relates_to:
 authority within Hub's managed namespace, seeded admin-only by default with
 explicit delegation through a custom reviewer role. Application-specific
 reviewer authorization is deferred; learning applicability remains independent
-of reviewer authority. This clarifies the proposal, not its acceptance status.
+of reviewer authority. Also adds user-authored proposals, including a Remember
+this action on an ask_user response, through the same protected review path.
+This clarifies the proposal, not its acceptance status.
 
 **Update (2026-11-18):** Clarifies approval through existing Hub user permissions
 and Kubernetes RBAC, API-enforced content immutability, label-based applicability
@@ -50,6 +53,12 @@ lesson without rediscovering the failure. A review run and an implementation
 run can use the same accepted convention despite using different Agent
 templates. A validated procedure can apply to several applications selected
 by Hub-owned metadata.
+
+A user can also contribute a lesson directly. For example, an agent asks which
+verification suite an application requires. The user answers and chooses
+**Remember this** to propose that guidance for future invocations, retaining the
+question and answer as evidence. A user can write a proposal without a source
+run as well.
 
 These use cases already exist with finite AgentRuns and AgentWorkflowRuns.
 They do not require a continuing session, event router, webhook receiver, or
@@ -121,6 +130,41 @@ Only accepted proposals are eligible for selection. Rejected proposals remain
 history. Background reflection may generate candidates for the same review
 path; writable scratch notes remain separate from accepted shared knowledge.
 
+### Allow users to propose learnings, including remembered answers
+
+AgentLearning has both agent and user proposal paths. A user with Hub's learning
+proposal permission can author a lesson directly or select **Remember this** on
+their `ask_user` response. The UI opens a draft containing the proposed lesson,
+its source question/answer, and suggested applicability. For a response tied to
+an application, prefill that application's scope from trusted Hub metadata and
+let the user explicitly propose a broader scope. When no application is known,
+require an explicit applicability choice rather than defaulting to every
+workload. The saved proposal fixes the exact wording and scope for review.
+
+Hub checks proposal permission on submission and derives the proposer's identity
+from the authenticated request. Retain the source run UID, question/response
+identity, and relevant source excerpt when capturing an answer. The spike must
+establish durable evidence for this association; a transient ACP request ID or
+an agent-supplied claim about who answered is insufficient by itself. A manual
+proposal records its user and supplied evidence without requiring a source run.
+
+Remember this creates a candidate. It does not grant review permission, accept
+the candidate, or expand the initial reviewer's authority. A user who also has
+review rights may separately accept the exact revision through the protected
+review operation. User-authored and agent-authored proposals share the same
+immutable content/applicability and acceptance lifecycle. Agent authoring skills
+and per-run Kubernetes proposal identities apply only to the agent path; a
+person submits through Hub using their existing identity and proposal grant.
+
+Answering the question continues through [ADR 0017](0017-ask-user-tool-and-elicitation.md)
+independently of remembering it. Saving a proposal must not delay a valid answer
+or turn a proposal-save failure into a failed question. The answer already
+guides the current agent turn as ordinary input. Even immediate acceptance of
+its learning affects only future invocation selections: the current AgentRun
+or AgentWorkflowRun keeps its existing Learning Snapshot, including later
+workflow stages. No new controller access to ACP or interpretation of answer
+text is introduced.
+
 ### Implement the Hub integration alongside the learning contract
 
 The existing auth providers and role APIs can be reused, but support for
@@ -136,6 +180,8 @@ implemented behavior and separates it from these proposed additions:
   fit the current scope model. These are proposed permission names, not a
   published endpoint/schema contract; approval is not a new HTTP-method verb.
   An accepted replacement must also pass the review permission check.
+  The same proposal endpoint accepts authenticated users' submissions, including
+  remembered answers, without requiring an agent run or Kubernetes run identity.
 - **Roles and identity mappings:** extend `internal/auth/seed/roles.yaml` and
   document custom-role assignments and external identity mappings for the new
   scopes. Existing run-creation rights do not imply review rights. Hub's seeded
@@ -163,8 +209,9 @@ implemented behavior and separates it from these proposed additions:
   Hub API identities; the proposed per-AgentRun Kubernetes ServiceAccount is a
   separate identity and receives no Hub review permission.
 - **Clients and review UI:** add shared bindings/OpenAPI definitions and a
-  review flow showing the immutable content, evidence, applicability, reviewer,
-  and replacement lineage. UI visibility follows the new scopes, while Hub
+  manual proposal form and Remember this action on `ask_user` responses, plus
+  a review flow showing immutable content, source evidence, applicability,
+  proposer/reviewer identities, and replacement lineage. UI visibility follows the new scopes, while Hub
   enforces every operation independently of whether a button is shown. Verify
   that role management exposes the registered learning scopes.
 
@@ -381,5 +428,7 @@ one standalone run and a two-stage workflow. Prove creation-time snapshots,
 replacement, refusal of revocation during use, and read-only selective delivery.
 Demonstrate the authoring skill and proposal-only identity, protected approval,
 API-enforced immutability, and both application-ID and archetype selectors.
+Include a direct user proposal and an ask_user response captured with Remember
+this, with answer delivery independent of proposal persistence.
 Compare context policies using the same model/tasks/corpus. Session behavior
 and provider event delivery are explicitly outside this experiment.

@@ -68,7 +68,7 @@ during earlier work. The key contract is reviewed, immutable knowledge with a
 fixed selection for each invocation. Today is a proposal discussion. Neither
 the resource nor its Hub and runtime integration is implemented by this PR.
 
-Source: https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee90646193e5a41bff52684664/docs/adr/0024-agent-learnings.md
+Source: ../adr/0024-agent-learnings.md
 Logo: existing docs/slides/konveyor-logo.svg repository asset, unchanged.
 -->
 
@@ -76,28 +76,29 @@ Logo: existing docs/slides/konveyor-logo.svg repository asset, unchanged.
 
 # A lesson later runs can reuse
 
-An application run discovers that its default test target skips a required
-integration suite.
+A developer answers an agent's question about required tests, then selects
+**Remember this**.
 
-**AgentLearning** records the lesson, its evidence, and where it applies.
+**AgentLearning** captures a reusable lesson with evidence and applicability.
 
-A reviewer accepts the exact content and applicability before later runs use it.
+A reviewer accepts the exact proposal before later invocations receive it.
 
-<p class="small">Illustrative scenario. Existing AgentRuns and AgentWorkflowRuns are the consumers.</p>
+<p class="small">Users can also write lessons directly. Agents can propose discoveries from their work.</p>
 
 <!--
 40 seconds.
 
-The example is a migration that looks successful until someone notices that
-the usual test target omitted an integration suite. The agent can propose a
-reusable lesson with evidence. A reviewer checks the wording and applicability.
+An agent asks which verification suite an application requires. The developer
+answers and chooses Remember this. That opens a proposal with the response as
+evidence and an explicit scope. Users can also author lessons directly, and
+agents can propose discoveries. A reviewer checks the wording and applicability.
 A later review run or implementation run can receive that accepted lesson,
 even when it uses a different Agent template. A SkillCard remains an authored
 capability or behavioral rule. AgentLearning adds the reviewed lesson and its
 provenance. Finite runs already benefit, without requiring continuing sessions.
 
 Sources: ADR 0024, Use cases and value and Immutable content sections.
-https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee90646193e5a41bff52684664/CONTEXT.md#proposed-shared-knowledge
+../../CONTEXT.md#proposed-shared-knowledge
 -->
 
 ---
@@ -127,7 +128,7 @@ application IDs or understand archetypes. The upstream Hub handlers still need
 the trusted-label projection. It is planned integration work. Changing the
 lesson's scope creates a new proposal and review.
 
-Source: https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee90646193e5a41bff52684664/docs/adr/0024-agent-learnings.md#match-learning-selectors-to-hub-supplied-invocation-labels
+Source: ../adr/0024-agent-learnings.md#match-learning-selectors-to-hub-supplied-invocation-labels
 -->
 
 ---
@@ -136,9 +137,10 @@ Source: https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee9064
 
 <div class="columns">
 <div>
-<h2>The agent proposes</h2>
-<p>A learning-authoring skill guides the lesson and evidence.</p>
-<p>Each run's Kubernetes identity creates proposals only.</p>
+<h2>Users and agents propose</h2>
+<p>A user marks an <code>ask_user</code> answer <strong>Remember this</strong> or writes a lesson.</p>
+<p>An authoring skill helps agents submit candidates with evidence.</p>
+<p>Both paths create proposals only.</p>
 </div>
 <div>
 <h2>A reviewer accepts</h2>
@@ -152,18 +154,20 @@ Source: https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee9064
 <!--
 55 seconds.
 
-The agent needs both guidance and a submission identity, with creation rights
-and no approval rights. The integration must also validate the originating-run
-association. Hub can reuse its local and federated identities, but we need new
-learning-specific permissions and handlers. The initial reviewer policy is
+The user submits through Hub with their own proposal permission. Remember this
+opens a candidate with explicit wording and applicability, without approving it.
+The agent path uses an authoring skill and a run identity with proposal rights
+only. Both paths need trusted provenance. Hub needs new learning-specific
+permissions and handlers. The initial reviewer policy is
 instance-wide within Hub's managed namespace, admin-only by default with
 explicit delegation through a custom role. Existing run permissions do not
 grant review authority. Application-specific reviewer ACLs are deferred.
 Hub records the authenticated reviewer and exact revision, then writes through
-the Kubernetes API. A create request cannot make a learning accepted.
+the Kubernetes API. Remembering does not gate the original answer or change the
+current invocation's Learning Snapshot. Accepted learnings inform future runs.
 
 Sources: ADR 0024, Approval and Authoring sections.
-https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee90646193e5a41bff52684664/docs/research/2026-11-18-hub-agent-learning-permissions.md
+../research/2026-11-18-hub-agent-learning-permissions.md
 -->
 
 ---
@@ -193,7 +197,7 @@ still references the learning. Cancellation must actually stop work and release
 the reference. The spike must prove admission and revocation coordinate safely.
 Content digests and retained content make the exact revision reproducible.
 
-Source: https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee90646193e5a41bff52684664/docs/adr/0024-agent-learnings.md#select-at-invocation-creation
+Source: ../adr/0024-agent-learnings.md#select-at-invocation-creation
 -->
 
 ---
@@ -204,7 +208,7 @@ Source: https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee9064
 
 | Owner | Proposed work |
 | --- | --- |
-| Hub and UI | Learning APIs, permissions, review flow, trusted labels |
+| Hub and UI | User/agent proposals, Remember this, review, trusted labels |
 | Controller and admission | Generic selection, snapshots, lifecycle protection |
 | Harness | Read-only learning files and delivery attribution |
 | Agent runtime | Startup guidance, selective reads, context management |
@@ -215,7 +219,8 @@ Source: https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee9064
 50 seconds.
 
 This crosses repository boundaries. Hub needs registered resource/method scopes,
-role grants and identity mappings, review APIs, and trusted label projection on
+  role grants and identity mappings, user proposals and remembered answers,
+  review APIs, and trusted label projection on
 both invocation types. The UI needs the corresponding review flow and the
 operator needs deployment RBAC. The controller remains a generic reconciler.
 The harness prepares the pinned files, and runtime integration handles context,
@@ -224,7 +229,7 @@ essential guidance enter startup context, while longer lessons remain readable
 on demand. File access alone does not establish delivery to a model call.
 
 Sources: ADR 0024, Hub integration, Delivery and Attribution sections.
-https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee90646193e5a41bff52684664/docs/adr/0024-agent-learnings.md#implement-the-hub-integration-alongside-the-learning-contract
+../adr/0024-agent-learnings.md#implement-the-hub-integration-alongside-the-learning-contract
 -->
 
 ---
@@ -233,7 +238,7 @@ https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee90646193e5a4
 
 One standalone run and a two-stage workflow will test:
 
-- Proposal creation and protected human review
+- User and agent proposals with protected review
 - Snapshot stability and safe replacement/revocation
 - Actual runtime delivery and task outcomes
 
@@ -255,7 +260,7 @@ We want representative lessons and reviewers for the lifecycle and Hub boundary.
 The proposal stays unaccepted and unimplemented until that work establishes the
 required guarantees. The backup slides support technical questions.
 
-Source: https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee90646193e5a41bff52684664/docs/spikes/agent-learning-delivery.md
+Source: ../spikes/agent-learning-delivery.md
 -->
 
 ---
@@ -334,7 +339,7 @@ reviewer fields, role changes, token freshness, and direct Kubernetes access.
 Human-required approval needs an authenticated user identity. No-auth mode
 cannot establish it. Proposed scopes and endpoints remain unimplemented.
 
-Source: https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee90646193e5a41bff52684664/docs/research/2026-11-18-hub-agent-learning-permissions.md
+Source: ../research/2026-11-18-hub-agent-learning-permissions.md
 -->
 
 ---
@@ -371,6 +376,6 @@ access may require additional runtime coverage. Delivery does not prove
 understanding or compliance. Machine-checkable verification remains independent.
 
 Sources: ADR 0024, API immutability and Attribution sections.
-https://github.com/konveyor/agentic-controller/blob/f565c0c0c7d9daee90646193e5a41bff52684664/docs/adr/0024-agent-learnings.md
+../adr/0024-agent-learnings.md
 https://kubernetes.io/blog/2022/09/29/enforce-immutability-using-cel/
 -->

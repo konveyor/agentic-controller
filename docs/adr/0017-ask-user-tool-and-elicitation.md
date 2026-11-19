@@ -4,11 +4,11 @@ title: "In-turn human questions via the ask_user tool and ACP elicitation"
 description: "Defines the ask_user MCP tool and ACP elicitation path for interactive human questions during an AgentRun."
 status: proposed
 date: "2026-08-20"
-last_updated: "2026-11-02"
+last_updated: "2026-11-19"
 authors: []
-last_reviewed: "2026-08-31"
+last_reviewed: "2026-11-19"
 implementation_status: in-sync
-review_note: "ask_user MCP, ACP elicitation forwarding, fail-closed behavior, and resolution frames are implemented in the entry point. The ADR remains proposed pending formal acceptance."
+review_note: "ask_user MCP, ACP elicitation forwarding, fail-closed behavior, and resolution frames are implemented in the entry point. Scoped update: ADR 0024 proposes optional user capture of an answer as a learning candidate, independently of answer delivery; that Hub/UI integration is unimplemented."
 relates_to:
   - "ADR 0002 (ACP transport and observability)"
   - "ADR 0008 (harness owns the pod ACP port)"
@@ -19,6 +19,15 @@ relates_to:
 ---
 
 # ADR 0017: In-turn human questions via the ask_user tool and ACP elicitation
+
+**Update (2026-11-19):** Proposed [ADR 0024](./0024-agent-learnings.md)
+adds an optional Hub/UI Remember this action on a user's `ask_user` response.
+It creates a learning proposal through the authenticated user's proposal
+permission, with source evidence and explicit applicability. Remembering is
+separate from answering and from approving shared knowledge. Saving a proposal
+must not gate answer delivery or change this tool's opt-in, timeout, or
+fail-closed behavior. The current invocation retains its Learning Snapshot;
+an accepted learning informs future selections. This integration is unimplemented.
 
 **Update (2026-08-31):** The reference entry point implements the
 `ask_user` stdio MCP server, ACP elicitation forwarding, pending-question
