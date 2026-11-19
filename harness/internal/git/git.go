@@ -4,16 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 	gogitcfg "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport"
+	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	cryptossh "golang.org/x/crypto/ssh"
 
 	"github.com/konveyor/migration-harness/internal/logging"
 )
@@ -23,7 +28,86 @@ func isChildOf(path, root string) bool {
 	return err == nil && rel != "." && !strings.HasPrefix(rel, "..")
 }
 
+// sshSetupTimeout bounds SSH connection setup: the TCP dial and the
+// handshake that follows it. A var, not a const, so a test can shorten
+// it.
+var sshSetupTimeout = 30 * time.Second
+
+// probeSSHSetup proves an SSH remote completes connection setup within
+// a bound, on its own short-lived connection.
+//
+// go-git applies ssh.ClientConfig.Timeout to the TCP dial alone —
+// x/crypto documents it as "the maximum amount of time for the TCP
+// connection to establish" — and then hands the connection to
+// ssh.NewClientConn, which sets no deadline of its own. A server that
+// accepts TCP and never sends an SSH identification string, such as a
+// misconfigured load balancer or a route expecting TLS, therefore
+// stalls the handshake with nothing to interrupt it.
+//
+// Wrapping the clone itself in a timeout is not the answer: that would
+// cap the transfer too, and a large repository is legitimately slow. So
+// setup alone is proved here, on a connection closed as soon as it
+// succeeds, before the real operation starts. It also means a rejected
+// key is reported as such instead of as a clone failure.
+func probeSSHSetup(ctx context.Context, cred *Credentials) error {
+	ep, err := transport.NewEndpoint(cred.RepoURL)
+	if err != nil {
+		return fmt.Errorf("parse repository URL %q: %w", cred.RepoURL, err)
+	}
+	auth, err := cred.Auth()
+	if err != nil {
+		return err
+	}
+	sshAuth, ok := auth.(gitssh.AuthMethod)
+	if !ok {
+		// Not an SSH remote after all; nothing to prove.
+		return nil
+	}
+	cfg, err := sshAuth.ClientConfig()
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, sshSetupTimeout)
+	defer cancel()
+
+	addr := hostWithPort(ep)
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("connect %s: %w", addr, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	// The deadline, not the context, is what bounds the handshake:
+	// NewClientConn does not take a context and will not observe
+	// cancellation.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+
+	client, chans, reqs, err := cryptossh.NewClientConn(conn, addr, cfg)
+	if err != nil {
+		return fmt.Errorf("ssh handshake with %s: %w", addr, err)
+	}
+	go cryptossh.DiscardRequests(reqs)
+	go func() {
+		for ch := range chans {
+			_ = ch.Reject(cryptossh.Prohibited, "")
+		}
+	}()
+	return client.Close()
+}
+
 func Clone(ctx context.Context, cred *Credentials, destDir string) (*gogit.Repository, error) {
+	// Before the destination is cleared: an unreachable remote should
+	// not cost the caller the directory it asked to clone into.
+	if cred.IsSSH() {
+		if err := probeSSHSetup(ctx, cred); err != nil {
+			return nil, fmt.Errorf("clone %s: %w", cred.RepoURL, err)
+		}
+	}
+
 	destDir, err := filepath.Abs(destDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve destination: %w", err)

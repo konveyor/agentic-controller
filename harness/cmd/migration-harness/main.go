@@ -187,11 +187,9 @@ func runStage(cmd *cobra.Command, args []string) (code int, err error) {
 	// credentials goose can read must not be in it. Maven setup adds the
 	// secrets from the effective settings file before goose starts.
 	red = newRedactor(cfg.APIKey, cfg.HubToken, cfg.ACPSecretKey, creds.Token)
-	// The private key is multi-line and never appears whole in a log
-	// line, but its passphrase and any fragment that does leak must
-	// still be masked.
 	if creds.PrivateKey != "" {
-		red.addSecrets(creds.PrivateKey, creds.KeyPassphrase)
+		red.addSecrets(creds.KeyPassphrase)
+		red.addSecrets(privateKeyFragments(creds.PrivateKey)...)
 	}
 
 	if cfg.TargetBranch == creds.Branch {

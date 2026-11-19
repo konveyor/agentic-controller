@@ -3,7 +3,10 @@ package git
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,7 +14,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
 	cryptossh "golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/knownhosts"
 
 	"github.com/konveyor/migration-harness/internal/logging"
 )
@@ -24,29 +26,28 @@ import (
 // naming neither SSH nor the identity.
 var ErrSSHKeyRequired = errors.New("ssh remote requires an identity with a private key")
 
-// sshDialTimeout bounds the TCP connect and SSH handshake. go-git
-// leaves ssh.ClientConfig.Timeout at zero and dials on
-// context.Background(), so the context passed to Clone cannot interrupt
-// it: a host that drops the SYN — an egress policy with no outbound
-// port 22, which is the common case in a cluster — hangs the run
-// forever instead of failing. A var, not a const, so a test can shorten
-// it.
-var sshDialTimeout = 30 * time.Second
-
-// knownHostsEnv points at a known_hosts file to verify the server
-// against. When it is unset and no default known_hosts exists, host key
-// verification is skipped with a warning — the sandbox is a fresh
-// container with no known_hosts, so requiring one would mean no SSH
-// remote could ever be cloned.
+// knownHostsEnv names the known_hosts file(s) to verify servers against,
+// as an OS-separated list. When it is set, its files are authoritative:
+// a path that does not exist is an error, because an operator who
+// configured verification must not silently get none.
+//
+// When it is unset the locations OpenSSH reads are used if they exist,
+// and verification is skipped with a warning if they do not. The agent
+// sandbox is a fresh container that ships no known_hosts, so requiring
+// one there would mean no SSH remote could ever be cloned.
 const knownHostsEnv = "HARNESS_GIT_SSH_KNOWN_HOSTS"
 
-// defaultKnownHosts are the locations OpenSSH reads, checked when
-// knownHostsEnv is unset so an image that ships known_hosts gets strict
-// verification without further configuration.
-var defaultKnownHosts = []string{
-	os.ExpandEnv("$HOME/.ssh/known_hosts"),
-	"/etc/ssh/ssh_known_hosts",
-}
+// sshDialTimeout bounds the TCP connect. go-git leaves
+// ssh.ClientConfig.Timeout at zero and dials on context.Background(), so
+// the context passed to Clone cannot interrupt it: a host that drops the
+// SYN is otherwise bounded only by the kernel's SYN-retry limit. A var,
+// not a const, so a test can shorten it.
+//
+// This covers the dial only. x/crypto documents Timeout as "the maximum
+// amount of time for the TCP connection to establish" and go-git hands
+// the connection to ssh.NewClientConn without a deadline, so the
+// handshake is bounded separately — see probeSSHSetup.
+var sshDialTimeout = 30 * time.Second
 
 type Credentials struct {
 	Username string
@@ -134,59 +135,126 @@ func (c *Credentials) sshAuth(ep *transport.Endpoint) (transport.AuthMethod, err
 		return nil, fmt.Errorf("parse private key from identity %q: %w", c.IdentityName, err)
 	}
 
-	cb, err := hostKeyCallback()
+	cb, algos, err := hostKeyPolicy(hostWithPort(ep))
 	if err != nil {
 		return nil, err
 	}
 	keys.HostKeyCallback = cb
-	return &timeoutAuth{AuthMethod: keys, timeout: sshDialTimeout}, nil
+	return &sshAuthMethod{AuthMethod: keys, timeout: sshDialTimeout, hostKeyAlgorithms: algos}, nil
 }
 
-// timeoutAuth is an ssh AuthMethod that bounds the dial. go-git reads
-// the deadline off the ClientConfig the auth method hands it, which is
-// the only hook it offers: the transport's own config would be applied
-// through overrideConfig, which copies every field and would therefore
-// wipe the user, signer and host key callback set above.
-type timeoutAuth struct {
+// sshAuthMethod carries the settings go-git will not derive for itself
+// once a host key callback is set. It is the only hook available: the
+// transport's own ClientConfig is applied through overrideConfig, which
+// copies every field and would wipe the user, signer and callback.
+type sshAuthMethod struct {
 	gitssh.AuthMethod
 	timeout time.Duration
+	// hostKeyAlgorithms pins the signature algorithms to the key types
+	// known_hosts actually holds for this host. go-git derives these
+	// itself only when it installs its own callback; with ours it
+	// explicitly leaves them to the caller, and an empty list means
+	// x/crypto offers its default preference order instead. A server
+	// offering several key types would then be matched on whichever
+	// x/crypto ranks first, which a known_hosts pinning only one of the
+	// others rejects as an unknown key.
+	hostKeyAlgorithms []string
 }
 
-func (a *timeoutAuth) ClientConfig() (*cryptossh.ClientConfig, error) {
+func (a *sshAuthMethod) ClientConfig() (*cryptossh.ClientConfig, error) {
 	cfg, err := a.AuthMethod.ClientConfig()
 	if err != nil {
 		return nil, err
 	}
 	cfg.Timeout = a.timeout
+	if len(a.hostKeyAlgorithms) > 0 {
+		cfg.HostKeyAlgorithms = a.hostKeyAlgorithms
+	}
 	return cfg, nil
 }
 
-// hostKeyCallback picks the host key policy. A known_hosts file named by
-// HARNESS_GIT_SSH_KNOWN_HOSTS, or found where OpenSSH would look, is
-// verified strictly. With neither, verification is skipped and the run
-// logs that it did: the agent sandbox is a fresh container that ships no
-// known_hosts, so the alternative is that SSH remotes never clone.
-func hostKeyCallback() (cryptossh.HostKeyCallback, error) {
-	if path := strings.TrimSpace(os.Getenv(knownHostsEnv)); path != "" {
-		cb, err := knownhosts.New(path)
-		if err != nil {
-			return nil, fmt.Errorf("read %s=%s: %w", knownHostsEnv, path, err)
-		}
-		logging.Info("ssh host key verification against %s", path)
-		return cb, nil
+// hostWithPort is the address known_hosts is keyed by, and the one
+// go-git dials. An omitted port is SSH's default.
+func hostWithPort(ep *transport.Endpoint) string {
+	port := ep.Port
+	if port <= 0 {
+		port = 22
 	}
-	for _, path := range defaultKnownHosts {
-		if _, err := os.Stat(path); err != nil {
+	return net.JoinHostPort(ep.Host, strconv.Itoa(port))
+}
+
+// hostKeyPolicy returns the host key callback and the signature
+// algorithms to advertise for hostWithPort.
+//
+// Parsing is delegated to go-git's NewKnownHostsDb, which reads every
+// file given rather than only the first, so a host trusted in the system
+// file is still trusted when the user file exists too.
+func hostKeyPolicy(hostWithPort string) (cryptossh.HostKeyCallback, []string, error) {
+	files, err := knownHostsFiles()
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(files) == 0 {
+		logging.Warn("no known_hosts found - skipping SSH host key verification; "+
+			"set %s to a known_hosts file to verify the server", knownHostsEnv)
+		return cryptossh.InsecureIgnoreHostKey(), nil, nil
+	}
+
+	db, err := gitssh.NewKnownHostsDb(files...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read known_hosts (%s): %w", strings.Join(files, ", "), err)
+	}
+	logging.Info("ssh host key verification against %s", strings.Join(files, ", "))
+	return db.HostKeyCallback(), db.HostKeyAlgorithms(hostWithPort), nil
+}
+
+// knownHostsFiles returns the trust files that exist.
+//
+// A file that exists but cannot be read is an error, not an absence:
+// treating a permission failure as "no known_hosts" would drop the run
+// to no verification at all, which is the opposite of what a deployment
+// that provisioned the file asked for.
+func knownHostsFiles() ([]string, error) {
+	configured := strings.TrimSpace(os.Getenv(knownHostsEnv))
+	candidates := defaultKnownHosts()
+	if configured != "" {
+		candidates = filepath.SplitList(configured)
+	}
+
+	var files []string
+	for _, path := range candidates {
+		if path == "" {
 			continue
 		}
-		cb, err := knownhosts.New(path)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", path, err)
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("read known_hosts %s: %w", path, err)
 		}
-		logging.Info("ssh host key verification against %s", path)
-		return cb, nil
+		files = append(files, path)
 	}
-	logging.Warn("no known_hosts found - skipping SSH host key verification; "+
-		"set %s to a known_hosts file to verify the server", knownHostsEnv)
-	return cryptossh.InsecureIgnoreHostKey(), nil
+
+	// An explicitly configured path that is not there is a
+	// misconfiguration. Falling back to the unverified path would hand
+	// the operator the one outcome they ruled out by setting it.
+	if configured != "" && len(files) == 0 {
+		return nil, fmt.Errorf("%s=%s: no such file", knownHostsEnv, configured)
+	}
+	return files, nil
+}
+
+// defaultKnownHosts are the locations OpenSSH reads, used when
+// knownHostsEnv is unset so an image that ships known_hosts gets strict
+// verification without further configuration. Resolved per call rather
+// than at init so HOME is read when it matters.
+func defaultKnownHosts() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return []string{"/etc/ssh/ssh_known_hosts"}
+	}
+	return []string{
+		filepath.Join(home, ".ssh", "known_hosts"),
+		"/etc/ssh/ssh_known_hosts",
+	}
 }

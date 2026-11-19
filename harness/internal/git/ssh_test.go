@@ -2,12 +2,19 @@ package git
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
+	"net"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
+	gitssh "github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	cryptossh "golang.org/x/crypto/ssh"
 )
 
 // SSH remotes reach go-git's ssh transport, which accepts only its own
@@ -131,9 +138,9 @@ func TestCheckWriteAccessSSHWithoutKeyIsInconclusive(t *testing.T) {
 // and not routed, so the connection attempt is dropped rather than
 // refused.
 func TestCloneSSHURLTimesOutOnBlackholedHost(t *testing.T) {
-	old := sshDialTimeout
-	sshDialTimeout = 2 * time.Second
-	t.Cleanup(func() { sshDialTimeout = old })
+	oldDial, oldSetup := sshDialTimeout, sshSetupTimeout
+	sshDialTimeout, sshSetupTimeout = 2*time.Second, 2*time.Second
+	t.Cleanup(func() { sshDialTimeout, sshSetupTimeout = oldDial, oldSetup })
 
 	cred := &Credentials{
 		RepoURL:      "ssh://git@203.0.113.1:22/acme/app.git",
@@ -159,4 +166,173 @@ func TestCloneSSHURLTimesOutOnBlackholedHost(t *testing.T) {
 	case <-time.After(25 * time.Second):
 		t.Fatal("Clone hung: the SSH dial timeout is not being applied")
 	}
+}
+
+// A server that accepts TCP and then says nothing must not stall the
+// run. go-git's ssh.ClientConfig.Timeout covers the dial only, and it
+// calls ssh.NewClientConn without a deadline, so nothing below the
+// harness bounds the handshake.
+func TestCloneSSHURLBoundsStalledHandshake(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	// Accept and hold the connection open without ever sending the SSH
+	// identification string.
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { _ = conn.Close() })
+		}
+	}()
+
+	oldSetup := sshSetupTimeout
+	sshSetupTimeout = 2 * time.Second
+	t.Cleanup(func() { sshSetupTimeout = oldSetup })
+
+	cred := &Credentials{
+		RepoURL:      "ssh://git@" + ln.Addr().String() + "/acme/app.git",
+		PrivateKey:   testPrivateKey(t),
+		IdentityName: "ssh",
+	}
+
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		_, err := Clone(context.Background(), cred, filepath.Join(t.TempDir(), "repo"))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Clone against a silent server should fail")
+		}
+		if elapsed := time.Since(start); elapsed > 20*time.Second {
+			t.Errorf("Clone took %s; the handshake was not bounded", elapsed)
+		}
+	case <-time.After(25 * time.Second):
+		t.Fatal("Clone hung: the SSH handshake is not bounded")
+	}
+}
+
+// known_hosts pins a key type per host. go-git derives the matching
+// signature algorithms only when it installs its own callback; with
+// ours it leaves HostKeyAlgorithms empty, and x/crypto's default order
+// would then negotiate whichever type it ranks first. A host pinned
+// with any other type is rejected as unknown.
+func TestAuthPinsHostKeyAlgorithmsFromKnownHosts(t *testing.T) {
+	kh := writeKnownHosts(t, map[string]string{"github.com:22": "ssh-ed25519"})
+	t.Setenv(knownHostsEnv, kh)
+
+	cred := &Credentials{
+		RepoURL:      "git@github.com:acme/app.git",
+		PrivateKey:   testPrivateKey(t),
+		IdentityName: "ssh",
+	}
+	auth, err := cred.Auth()
+	if err != nil {
+		t.Fatalf("Auth() error = %v", err)
+	}
+	cfg, err := auth.(gitssh.AuthMethod).ClientConfig()
+	if err != nil {
+		t.Fatalf("ClientConfig() error = %v", err)
+	}
+	if len(cfg.HostKeyAlgorithms) == 0 {
+		t.Fatal("HostKeyAlgorithms is empty; a pinned non-default key type would be rejected")
+	}
+	for _, a := range cfg.HostKeyAlgorithms {
+		if strings.Contains(a, "ed25519") {
+			return
+		}
+	}
+	t.Errorf("HostKeyAlgorithms = %v, want the pinned ed25519 type", cfg.HostKeyAlgorithms)
+}
+
+// Every trust file is read, not just the first that exists: a host
+// trusted only in the second file must still verify.
+func TestKnownHostsReadsEveryConfiguredFile(t *testing.T) {
+	first := writeKnownHosts(t, map[string]string{"hosta.example.com:22": "ssh-ed25519"})
+	second := writeKnownHosts(t, map[string]string{"hostb.example.com:22": "ssh-ed25519"})
+	t.Setenv(knownHostsEnv, first+string(filepath.ListSeparator)+second)
+
+	_, algos, err := hostKeyPolicy("hostb.example.com:22")
+	if err != nil {
+		t.Fatalf("hostKeyPolicy() error = %v", err)
+	}
+	if len(algos) == 0 {
+		t.Error("host from the second trust file is not trusted; only the first file was read")
+	}
+}
+
+// A trust file that exists but cannot be read is a misconfiguration.
+// Treating the error as absence would silently drop the run to no host
+// key verification at all.
+func TestKnownHostsUnreadableFileIsAnErrorNotAbsence(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits are not enforced")
+	}
+	dir := t.TempDir()
+	locked := filepath.Join(dir, "locked")
+	if err := os.Mkdir(locked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(locked, "known_hosts")
+	if err := os.WriteFile(path, []byte("# empty\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+
+	t.Setenv(knownHostsEnv, path)
+	if _, err := knownHostsFiles(); err == nil {
+		t.Fatal("an unreadable known_hosts must be an error, not treated as absent")
+	}
+}
+
+// An explicitly configured path that does not exist must fail rather
+// than fall back: the operator who set it ruled that outcome out.
+func TestKnownHostsConfiguredButMissingIsAnError(t *testing.T) {
+	t.Setenv(knownHostsEnv, filepath.Join(t.TempDir(), "absent"))
+	if _, err := knownHostsFiles(); err == nil {
+		t.Fatal("a configured but missing known_hosts must be an error")
+	}
+}
+
+// writeKnownHosts creates a known_hosts file pinning a freshly
+// generated key of the named type for each host.
+func writeKnownHosts(t *testing.T, hosts map[string]string) string {
+	t.Helper()
+	var b strings.Builder
+	for hostPort := range hosts {
+		pub, _, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sshPub, err := cryptossh.NewPublicKey(pub)
+		if err != nil {
+			t.Fatal(err)
+		}
+		host, port, err := net.SplitHostPort(hostPort)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pattern := host
+		if port != "22" {
+			pattern = "[" + host + "]:" + port
+		}
+		b.WriteString(pattern + " " + string(cryptossh.MarshalAuthorizedKey(sshPub)))
+	}
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
