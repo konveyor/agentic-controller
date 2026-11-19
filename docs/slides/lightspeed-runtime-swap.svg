@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="440" viewBox="0 0 1160 440" role="img" aria-labelledby="title desc">
+  <title id="title">Replacing Goose with Lightspeed inside the same Konveyor setup</title>
+  <desc id="desc">Today, the Konveyor controller creates an Agent Sandbox workload whose harness launches Goose. In the prototype, the same setup launches Lightspeed's DeepAgents runtime instead. The harness still prepares the workspace, verifies work and pushes to Git.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#b7bfd4"/></marker>
+    <style>
+      text { font-family: 'Red Hat Display', Helvetica, Arial, sans-serif; fill: #ffffff; text-anchor: middle; }
+      .label { font-size: 25px; font-weight: 600; }
+      .small { font-size: 22px; fill: #d5d9e3; }
+      .outline { fill: none; stroke: #8893ae; stroke-width: 2; }
+    </style>
+  </defs>
+  <text x="270" y="29" class="label">Today</text>
+  <text x="890" y="29" class="label" style="fill:#c4aa6e">Prototype</text>
+  <g id="today">
+    <rect x="70" y="49" width="400" height="58" rx="5" class="outline"/>
+    <text x="270" y="86" class="label">Konveyor controller</text>
+    <line x1="270" y1="108" x2="270" y2="156" stroke="#b7bfd4" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="335" y="139" class="small">creates</text>
+    <rect x="25" y="166" width="490" height="236" rx="7" class="outline"/>
+    <text x="270" y="202" class="label">Agent Sandbox workload</text>
+    <rect x="55" y="225" width="430" height="150" rx="5" class="outline"/>
+    <text x="270" y="262" class="label">Konveyor harness</text>
+    <text x="270" y="292" class="small">launches the runtime</text>
+    <rect x="95" y="311" width="350" height="44" rx="4" fill="#343983" stroke="#8893ae"/>
+    <text x="270" y="341" class="label">Goose</text>
+  </g>
+  <g id="prototype">
+    <rect x="690" y="49" width="400" height="58" rx="5" class="outline"/>
+    <text x="890" y="86" class="label">Konveyor controller</text>
+    <line x1="890" y1="108" x2="890" y2="156" stroke="#b7bfd4" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="955" y="139" class="small">creates</text>
+    <rect x="645" y="166" width="490" height="236" rx="7" class="outline"/>
+    <text x="890" y="202" class="label">Agent Sandbox workload</text>
+    <rect x="675" y="225" width="430" height="150" rx="5" class="outline"/>
+    <text x="890" y="262" class="label">Konveyor harness</text>
+    <text x="890" y="292" class="small">launches the runtime</text>
+    <rect x="715" y="311" width="350" height="44" rx="4" fill="#c4aa6e"/>
+    <text x="890" y="341" class="label" style="fill:#1a1a2e">Lightspeed DeepAgents</text>
+  </g>
+  <path d="M455 333H704" fill="none" stroke="#c4aa6e" stroke-width="2" stroke-dasharray="6 5"/>
+  <text x="580" y="320" class="small" style="fill:#c4aa6e">replace</text>
+</svg>
