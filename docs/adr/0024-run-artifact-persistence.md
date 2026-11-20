@@ -147,6 +147,28 @@ The harness records three streams:
   Kubernetes log API, no `pods/log` RBAC, and identical behaviour on every
   sink.
 
+  If the init container itself fails, the harness never starts and the
+  shared file is never uploaded — and on the Hub sink there is no
+  controller write path to recover it. A run that dies in startup keeps
+  its diagnostic through AgentRun status and events (bounded,
+  operational), and the full init log remains readable while the Sandbox
+  exists. This is the startup twin of §2's hard-killed-harness case, and
+  it is a documented gap rather than a solved one.
+
+**The capture contract is loss-aware.** Fan-out on the run connection is
+best-effort today: `WSClient.fanOutNotification` drops a notification
+when a subscriber's queue is full, and the tee's broadcast path does not
+carry the sequence numbers that would reveal the drop
+(`harness/internal/acp/wsclient.go`). A recorder that persists
+everything it receives can therefore still have missed frames. Recording
+changes that: the recorder subscribes at the raw level, where each
+notification carries a sequence number, and at `Finalize` it reconciles
+its highest recorded sequence against the run connection's terminal
+sequence. Any shortfall — an upstream drop, a full recorder queue, or a
+dropped final suffix — becomes a trailing gap marker and an `incomplete`
+verdict. A clean write path over a lossy subscription is reported as
+what it is: incomplete.
+
 **Recording must never fail a run.** An unreachable sink degrades the run
 to an `incomplete` recording; it does not degrade the run.
 
@@ -156,6 +178,14 @@ A harness that is OOM-killed, evicted, or hard-terminated loses whatever
 it had not flushed and never writes its final state. When a run reaches a
 terminal phase without a `complete` recording, the controller marks the
 recording `incomplete` and records a gap covering the unrecorded interval.
+
+The backstop applies only to runs whose recording actually started. A
+`skipped` run — gated (§3) or opted out (§4) — stays `skipped`: it never
+reports completion because there is nothing to complete, and it is
+excluded from salvage. Persisting the unredacted pod log of a run the
+user explicitly chose not to record would be the opposite of the
+feature. The controller can tell the cases apart without the harness,
+because skip status derives from the gate it evaluated itself.
 
 Where the controller can also *write* to the sink (§7), it additionally
 makes one best-effort salvage pass against the pod log through the
@@ -217,12 +247,22 @@ type Sink interface {
 }
 
 type StreamWriter interface {
-    // Append durably adds one chunk and returns the logical offset
-    // immediately after it: bytes for logs, lines for the transcript.
-    Append(ctx context.Context, chunk []byte) (offset int64, err error)
+    // Append durably adds one chunk at the caller's expected current
+    // offset and returns the offset immediately after it: bytes for
+    // logs, lines for the transcript.
+    Append(ctx context.Context, at int64, chunk []byte) (offset int64, err error)
     Close() error
 }
 ```
+
+**`Append` is idempotent.** An append can be durable yet lose its
+response, leaving the caller unsure whether a retry will write the chunk
+twice — and a duplicated ACP text delta corrupts replay and shifts every
+offset after it. So `Append` carries the caller's expected current
+offset: an append whose `at` is less than the stream's current length is
+treated as a retry of an already-durable chunk, returns the current
+length, and writes nothing. Both sinks implement this cheaply — Hub
+compares the file's size, S3 compares the sequence's high-water key.
 
 The two implementations differ entirely below that line:
 
@@ -274,26 +314,55 @@ summarized, reshaped, or interpreted on the write path — that is what
 makes replay faithful and what keeps the recorder from needing to
 understand ACP beyond "this is a notification on the run's session."
 
-`meta.json` is written atomically and is the bucket's self-describing
-copy of what `status.recording` reports. The two deliberately carry the
-same facts: the bucket must be interpretable without the cluster, and the
-cluster must be queryable without the bucket. Because recordings outlive
-their CRs (§8), `meta.json` is the authority once the CR is gone.
+Two event classes do not reach the recorder through notification
+fan-out, and the contract names a capture path for each. The user's
+prompt is a `session/prompt` *request* on the run connection, not a
+notification; the tee emits a synthetic frame for every prompt it issues
+or relays onto the run session, and the recorder captures that.
+Permission asks and their outcomes are likewise JSON-RPC requests, so
+they are recorded as a synthetic pair — an ask frame (id, method,
+params) and an outcome frame (id, decision) — rather than forced into
+the notification shape. On recorded runs these are rare, because
+`approve` and `askUser` runs are gated (§3), but viewer steering and
+cancellation still produce them; an audit record that silently omits the
+human's turns and decisions is not an audit record, and a replay built
+on notifications alone would drop them.
+
+`meta.json` is written atomically at each flush, not only at finalize,
+and carries `ttlSeconds` alongside the recording state and the timestamp
+of the last durable flush. It is the bucket's self-describing copy of
+what `status.recording` reports — the two deliberately carry the same
+facts, because the bucket must be interpretable without the cluster and
+the cluster queryable without the bucket. Two rules then hold with no
+component's cooperation, surviving both a dead harness and a deleted CR
+(§8): a recording whose `meta.json` never reached a terminal state is
+`incomplete` **by inspection** — the absence is the signal, no one needs
+to write the final state — and its expiry is the last durable flush plus
+the TTL, so a reaper never needs the CR to know when it is due.
 
 ### 7. Who may touch the sink, and who serves reads
 
 The controller publishes one normative read contract:
 
 ```
-GET /agentruns/{namespace}/{name}/transcript?offset=<line>&follow=
-GET /agentruns/{namespace}/{name}/logs?container=<name>&offset=<byte>&follow=
-GET /agentruns/{namespace}/{name}/recording
+GET /agentruns/{namespace}/{name}/{uid}/transcript?offset=<line>&follow=
+GET /agentruns/{namespace}/{name}/{uid}/logs?container=<name>&offset=<byte>&follow=
+GET /agentruns/{namespace}/{name}/{uid}/recording
 ```
+
+The UID is in the path because names recycle (§6): while the CR exists a
+client resolves name and UID together from status; after the CR is gone,
+the pairing comes from Hub's durable record of the run.
 
 Responses carry `X-Log-Source: live|saved`, `X-Transcript-Status`, and
 `X-Transcript-Skip-Reason`. The UI always talks to Hub, which
 authenticates the user and makes the application-scoped authorization
 decision it already makes for every other route under `/hub/agentic/`.
+That decision needs an input that survives CR deletion: Hub persists, at
+run creation, an application association keyed by the run's UID (it
+already stamps `konveyor.io/application` on the CR — ADR 0006; for
+retained recordings it keeps the UID-keyed mapping). Where that
+association lives is Hub's to decide; the contract names the input.
 
 **Who implements that contract depends on the sink**, because the
 controller cannot reach the Hub bucket. The harness's Hub token is
@@ -337,9 +406,17 @@ deployment change, not a redesign.
 and the saved copy is tailed once it is gone. The two are *not* byte-
 identical — redaction (§9) applies to the recorded copy, and the
 Kubernetes log API has no byte-offset parameter — so the offset space is
-per-source and `X-Log-Source` tells a client which one it is reading. A
-client crossing that boundary re-arms at the new source's offset, which
-the prototype's stream client already does on every reconnect.
+per-source and `X-Log-Source` tells a client which one it is reading.
+The position rule for crossing that boundary is defined, not left to
+the client to improvise: the redactor is required to be
+**line-preserving** — it may replace content within a line but never
+add, remove, or split lines — every log response carries `X-Log-Lines`,
+the line count at the end of the chunk, and a client moving from live
+to saved resumes at `?line=<count>`, which the server resolves to the
+saved stream's byte offset. No line is omitted and none is repeated;
+the guarantee rests on line-preserving redaction. A reconnect within
+the same source keeps byte offsets, which is the case the prototype's
+stream client already handles.
 
 A live transcript follow is served by polling the sink as the harness
 appends, since the controller may not open ACP (ADR 0002). Follow latency
@@ -370,8 +447,10 @@ from the run being active with recording enabled; `skipped` from the gate
 or the opt-out; `complete`, along with the harness's gap list, arrives on
 the channel the harness already uses — the termination message the
 controller copies to `status.terminationData` (CONTEXT.md). A terminal run
-whose termination message never arrived, or does not report `complete`, is
-`incomplete` by §2. The harness needs no Kubernetes client.
+in state `recording` whose termination message never arrived, or does not
+report `complete`, is `incomplete` by §2; a `skipped` run stays `skipped`
+— there is no recording to complete, and it is never salvaged. The
+harness needs no Kubernetes client.
 
 **Recordings outlive their AgentRun.** The CR is an index, not the record.
 Run GC already exists (`spec.ttlSecondsAfterFinished`, `--agentrun-ttl`),
@@ -431,9 +510,15 @@ Sink credentials follow the rule push credentials already follow
 (principle 3): they live in the harness's environment, never the agent's.
 Where the backend supports prefix-scoped credentials they should be scoped
 to the run, so that a compromised run cannot reach another run's
-artifacts. The Hub sink gets this for free — the harness's Hub token is
-already scoped and already minted per run — which is a further reason it
-is the primary integration.
+artifacts. The Hub sink is closest to this: the harness's Hub token is
+already minted per run. But API scopes are not prefix bindings — a token
+permitted to call the bucket API is not thereby restricted to one run's
+prefixes — and workflow stages share a single token today (ADR 0006),
+which would let any stage reach its siblings' artifacts. The Hub bucket
+API must therefore bind each token to the run UIDs whose prefixes it may
+touch (for stage runs: the workflow's stage set, or per-stage bucket
+tokens). That binding is explicit Hub-side work, not something the
+existing scopes provide.
 
 ## Approaches considered
 
@@ -470,6 +555,35 @@ principle 1 untouched. Rejected because it requires an RWX volume mounted
 into every agent pod — a shared writable surface across runs and a
 significant deployment constraint — to avoid a coupling that §7 avoids
 more cheaply.
+
+**Recording as a harness/platform capability, controller entirely out.**
+Raised in review: the harness is already Hub-aware and already holds a
+per-run Hub token; with bucket permissions it could upload its logs and
+the runtime's persisted session history to Hub before exit, with
+periodic exports to bound the crash gap. Hub would own the durable
+association (run UID, application, workflow stage), the authorization,
+the retention and the serving; the controller would need no sink
+configuration, no storage credentials, no read listener and no reaper,
+and recording would be an optional benefit of platform integration —
+standalone runs would simply go on without it. This is close to the
+prototype's serving architecture with the capture moved inside the pod,
+so most of it is proven ground, and it dissolves §7's per-sink division
+entirely. It was not taken as the decision because it drops the parts of
+issue #341 that put storage in the controller: artifacts would land only
+where the platform supplies a store (an S3 sink becomes platform work
+rather than an in-repo default), and deletion would belong to whichever
+platform stores the data rather than to the controller — a criterion
+§7 already concedes for the Hub sink, so the question is whether it
+should be conceded everywhere. It is also weaker on the transcript
+artifact itself: the runtime's persisted history is runtime-specific —
+goose persists sessions in SQLite, and nothing guarantees another ACP
+runtime persists anything — and it lacks the harness-synthetic frames,
+permission outcomes and gap semantics, which is why ADR 0008 built the
+tee. The tee capture ends up being built either way; under this model
+the runtime export is better cast as a completeness backstop than as the
+primary record. Recorded here, and first in open question 1, because if
+the issue's storage requirements are negotiable this is the simpler
+boundary.
 
 **A separate artifact-server deployment.** Deferred, not rejected — §7.
 
@@ -521,9 +635,15 @@ the read contract in §7.
    codebases, and leaves the salvage pass working only on the
    non-primary sink. The two rejected alternatives — a standing Hub
    credential, or a shared bucket PVC — are written up under Approaches
-   with what each costs. If reviewers judge uniform controller ownership
-   worth amending principle 1 for, that is a coherent position and this
-   section is where it should be argued.
+   with what each costs. A fourth position, raised in review and also
+   written up under Approaches, goes further: recording as a
+   harness/platform capability with the controller holding no storage
+   role at all. It is the simplest boundary in this repository and the
+   closest to the proven prototype, and what it costs is exactly the
+   issue's requirements — an in-repo S3 path and controller-owned
+   deletion. Whether those requirements are load-bearing is the question
+   this ADR cannot answer for itself; it is the first thing reviewers
+   should settle.
 2. **Flush cadence and chunk size.** The prototype fsyncs roughly once a
    second. For the S3 sink that cadence sets the object count, and an hour
    of a chatty run is 3,600 keys before compaction. Time-or-size,
