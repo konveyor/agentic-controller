@@ -1,0 +1,5 @@
+kind: bugfix
+description: >
+  A user-supplied env var that shares a name with one the controller sets now
+  replaces it instead of producing a duplicate, which the Sandbox CRD rejected
+  and left the AgentRun stuck at SandboxCreationFailed.

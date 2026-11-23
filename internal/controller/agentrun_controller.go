@@ -1138,10 +1138,23 @@ func (r *AgentRunReconciler) buildEnvVars(
 	// in run.Spec.Env would otherwise win by last-key-wins and bypass
 	// GitConfig's validation, forging authorship or leaving a half-set
 	// identity (one field user-supplied, the other the harness default).
+	//
+	// The Sandbox CRD rejects duplicate env names, so a user entry that
+	// shares a name with one set above replaces it in place, and a later
+	// user entry replaces an earlier one.
+	index := make(map[string]int, len(env))
+	for i, e := range env {
+		index[e.Name] = i
+	}
 	for _, e := range run.Spec.Env {
 		if e.Name == gitAuthorNameEnv || e.Name == gitAuthorEmailEnv {
 			continue
 		}
+		if i, ok := index[e.Name]; ok {
+			env[i] = e
+			continue
+		}
+		index[e.Name] = len(env)
 		env = append(env, e)
 	}
 
