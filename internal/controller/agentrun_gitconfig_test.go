@@ -197,3 +197,38 @@ func TestBuildEnvVarsGitIdentity(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildEnvVarsUserEnvCollision(t *testing.T) {
+	r := &AgentRunReconciler{}
+	agent := &konveyoriov1alpha1.Agent{}
+	agent.Spec.Prompt = "do the thing"
+	run := &konveyoriov1alpha1.AgentRun{}
+	run.Spec.Env = []corev1.EnvVar{
+		{Name: "KONVEYOR_ACP_SECRET_KEY", Value: "user-key"},
+		{Name: "KONVEYOR_PROMPT", Value: "user prompt"},
+		{Name: "EXTRA", Value: "one"},
+		{Name: "EXTRA", Value: "two"},
+	}
+
+	env, _, err := r.buildEnvVars(context.Background(), run, agent, "acp-secret", nil)
+	if err != nil {
+		t.Fatalf("buildEnvVars: %v", err)
+	}
+
+	got := map[string]corev1.EnvVar{}
+	for _, e := range env {
+		if _, dup := got[e.Name]; dup {
+			t.Errorf("env %q appears more than once; the Sandbox CRD rejects duplicates", e.Name)
+		}
+		got[e.Name] = e
+	}
+	if e := got["KONVEYOR_ACP_SECRET_KEY"]; e.Value != "user-key" || e.ValueFrom != nil {
+		t.Errorf("KONVEYOR_ACP_SECRET_KEY = %+v, want the user's plain value", e)
+	}
+	if e := got["KONVEYOR_PROMPT"]; e.Value != "user prompt" {
+		t.Errorf("KONVEYOR_PROMPT = %q, want the user's value", e.Value)
+	}
+	if e := got["EXTRA"]; e.Value != "two" {
+		t.Errorf("EXTRA = %q, want the later user entry", e.Value)
+	}
+}
