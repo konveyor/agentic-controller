@@ -1,0 +1,5 @@
+kind: bugfix
+description: >
+  A run whose skill loader init container fails now says so on its Succeeded
+  condition, naming the container, its exit code and its termination message,
+  instead of only "Sandbox finished with reason: PodFailed".

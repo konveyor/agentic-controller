@@ -1533,7 +1533,7 @@ func (r *AgentRunReconciler) terminalPod(
 	cached *corev1.Pod,
 	sandbox *sandboxv1beta1.Sandbox,
 ) *corev1.Pod {
-	if agentContainerTermination(cached) != nil || r.apiReader == nil {
+	if recordsTermination(cached) || r.apiReader == nil {
 		return cached
 	}
 	// Agent Sandbox names the pod after the Sandbox.
@@ -1546,7 +1546,7 @@ func (r *AgentRunReconciler) terminalPod(
 		}
 		return cached
 	}
-	if agentContainerTermination(&fresh) == nil && cached != nil {
+	if !recordsTermination(&fresh) && cached != nil {
 		// Neither records a termination; keep the pod the caller already
 		// has rather than swapping in one that says no more.
 		return cached
@@ -1607,7 +1607,7 @@ func (r *AgentRunReconciler) updatePhaseFromSandbox(
 			// The harness may also write a human-readable failure message to
 			// the termination log (e.g. a non-git source, #143); surface it
 			// on the failure outcome, preferring it over the generic reason.
-			r.setTerminalOutcome(run, pod, cond.Reason, agentTerminationMessage(pod))
+			r.setTerminalOutcome(run, pod, cond.Reason, terminalFailureMessage(pod))
 			return 0
 		}
 	}
@@ -1901,6 +1901,63 @@ func agentContainerTermination(pod *corev1.Pod) *corev1.ContainerStateTerminated
 		}
 	}
 	return nil
+}
+
+// failedInitContainer returns the first init container that terminated with
+// a non-zero exit code, or nil. The skill loader runs as an init container,
+// so when it fails the pod fails with the agent container never started and
+// agentContainerTermination has nothing to report.
+func failedInitContainer(pod *corev1.Pod) *corev1.ContainerStatus {
+	if pod == nil {
+		return nil
+	}
+	for i := range pod.Status.InitContainerStatuses {
+		cs := &pod.Status.InitContainerStatuses[i]
+		if cs.State.Terminated != nil && cs.State.Terminated.ExitCode != 0 {
+			return cs
+		}
+	}
+	return nil
+}
+
+// recordsTermination reports whether the pod already says why it ended: the
+// agent container terminated, or an init container failed before it could
+// start.
+func recordsTermination(pod *corev1.Pod) bool {
+	return agentContainerTermination(pod) != nil || failedInitContainer(pod) != nil
+}
+
+// initFailureMessage describes a failed init container for the run's
+// Succeeded condition: the container, its exit code, and the last line it
+// left in its termination message (or the kubelet's reason when it left
+// none, as for an OOM kill). It returns "" when no init container failed.
+func initFailureMessage(pod *corev1.Pod) string {
+	cs := failedInitContainer(pod)
+	if cs == nil {
+		return ""
+	}
+	term := cs.State.Terminated
+	message := fmt.Sprintf("init container %q failed with exit code %d", cs.Name, term.ExitCode)
+	detail := strings.TrimSpace(term.Message)
+	if detail == "" {
+		detail = term.Reason
+	}
+	if detail != "" {
+		message = fmt.Sprintf("%s: %s", message, detail)
+	}
+	return message
+}
+
+// terminalFailureMessage is the human-readable failure detail for a finished
+// run: the agent container's termination message once it has terminated,
+// else the failed init container's. The agent only runs after every init
+// container has passed, so once it has terminated the init failure is not
+// the cause.
+func terminalFailureMessage(pod *corev1.Pod) string {
+	if agentContainerTermination(pod) != nil {
+		return agentTerminationMessage(pod)
+	}
+	return initFailureMessage(pod)
 }
 
 // agentExitCode returns the agent container's exit code and whether it
