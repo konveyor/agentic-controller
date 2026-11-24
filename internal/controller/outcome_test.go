@@ -81,11 +81,11 @@ func TestSetTerminalOutcome(t *testing.T) {
 		{
 			name:           "failure prefers the harness termination message (#143)",
 			pod:            podWithExit(1, ""),
-			failureMessage: "source is not a git repository",
+			failureMessage: testNotAGitRepoMessage,
 			wantPhase:      konveyoriov1alpha1.AgentRunPhaseFailed,
 			wantStatus:     metav1.ConditionFalse,
 			wantReason:     konveyoriov1alpha1.AgentRunReasonFailed,
-			wantMessage:    "source is not a git repository",
+			wantMessage:    testNotAGitRepoMessage,
 		},
 		{
 			name:       "exit 2 is limit reached (remapped from failed pod)",
@@ -213,6 +213,9 @@ const (
 	// a pod that did not succeed, the counterpart to the production
 	// sandboxFinishedReasonSucceeded.
 	testSandboxFinishedReasonFailed = "PodFailed"
+	// testNotAGitRepoMessage is the harness termination message used by
+	// the failure-message tests.
+	testNotAGitRepoMessage = "source is not a git repository"
 )
 
 // podNamed builds a pod whose agent container has terminated with the
@@ -495,4 +498,121 @@ func TestTerminalPodPrefersTheRecordThatHasATermination(t *testing.T) {
 			t.Errorf("terminalPod should return the cached pod with no reader configured")
 		}
 	})
+}
+
+// initFailedPod builds a pod whose skill loader init container terminated
+// with the given exit code and message while the agent container never
+// started.
+func initFailedPod(name string, code int32, reason, message string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testPodNamespace},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodFailed,
+			InitContainerStatuses: []corev1.ContainerStatus{{
+				Name: skillLoaderContainerName,
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					ExitCode: code,
+					Reason:   reason,
+					Message:  message,
+				}},
+			}},
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:  agentContainerName,
+				State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "PodInitializing"}},
+			}},
+		},
+	}
+}
+
+// A skill loader that exits non-zero fails the pod before the agent
+// container starts, so there is no agent termination to read. The run must
+// still say why it failed, using the loader's own last line.
+func TestFinishedRunNamesTheFailedInitContainer(t *testing.T) {
+	const name = "ar-init-failed"
+	sandbox := finishedSandbox(name, testSandboxFinishedReasonFailed)
+	stale := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testPodNamespace}}
+
+	cases := []struct {
+		name        string
+		cached      *corev1.Pod
+		served      *corev1.Pod
+		wantMessage string
+	}{
+		{
+			name:        "the loader's termination message is surfaced",
+			cached:      initFailedPod(name, 1, "Error", `duplicate skill name "plan"`),
+			wantMessage: `init container "skill-loader" failed with exit code 1: duplicate skill name "plan"`,
+		},
+		{
+			name:        "a container killed without a message falls back to its reason",
+			cached:      initFailedPod(name, 137, "OOMKilled", ""),
+			wantMessage: `init container "skill-loader" failed with exit code 137: OOMKilled`,
+		},
+		{
+			name:        "no message and no reason still names the container",
+			cached:      initFailedPod(name, 2, "", "  \n"),
+			wantMessage: `init container "skill-loader" failed with exit code 2`,
+		},
+		{
+			name:        "a stale cached pod yields to the served pod",
+			cached:      stale,
+			served:      initFailedPod(name, 1, "Error", "subPath not found"),
+			wantMessage: `init container "skill-loader" failed with exit code 1: subPath not found`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &AgentRunReconciler{}
+			if tc.served != nil {
+				r.apiReader = podReader(t, tc.served)
+			} else {
+				r.apiReader = podReader(t)
+			}
+			run := &konveyoriov1alpha1.AgentRun{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testPodNamespace},
+				Status:     konveyoriov1alpha1.AgentRunStatus{SandboxName: name},
+			}
+
+			r.updatePhaseFromSandbox(context.Background(), run, sandbox, tc.cached)
+
+			if run.Status.Phase != konveyoriov1alpha1.AgentRunPhaseFailed {
+				t.Errorf("phase = %q, want Failed", run.Status.Phase)
+			}
+			succeeded := meta.FindStatusCondition(run.Status.Conditions,
+				konveyoriov1alpha1.AgentRunConditionSucceeded)
+			if succeeded == nil {
+				t.Fatalf("Succeeded condition not set")
+			}
+			if succeeded.Reason != konveyoriov1alpha1.AgentRunReasonFailed {
+				t.Errorf("Succeeded.Reason = %q, want %q", succeeded.Reason, konveyoriov1alpha1.AgentRunReasonFailed)
+			}
+			if succeeded.Message != tc.wantMessage {
+				t.Errorf("Succeeded.Message = %q, want %q", succeeded.Message, tc.wantMessage)
+			}
+		})
+	}
+}
+
+// The agent's own termination message still wins when both an init
+// container and the agent container report a termination, and an init
+// container that exited 0 is ignored.
+func TestInitFailureMessageIgnoresCleanAndAgentOutcomes(t *testing.T) {
+	pod := initFailedPod("p", 0, "Completed", "all good")
+	if got := initFailureMessage(pod); got != "" {
+		t.Errorf("initFailureMessage() = %q for an init container that exited 0, want empty", got)
+	}
+	if got := initFailureMessage(nil); got != "" {
+		t.Errorf("initFailureMessage(nil) = %q, want empty", got)
+	}
+
+	r := &AgentRunReconciler{}
+	run := &konveyoriov1alpha1.AgentRun{Status: konveyoriov1alpha1.AgentRunStatus{SandboxName: "p"}}
+	both := initFailedPod("p", 1, "Error", "loader noise")
+	both.Status.ContainerStatuses = podWithExit(1, testNotAGitRepoMessage).Status.ContainerStatuses
+	r.updatePhaseFromSandbox(context.Background(), run, finishedSandbox("p", testSandboxFinishedReasonFailed), both)
+	succeeded := meta.FindStatusCondition(run.Status.Conditions, konveyoriov1alpha1.AgentRunConditionSucceeded)
+	if succeeded == nil || succeeded.Message != testNotAGitRepoMessage {
+		t.Errorf("Succeeded = %+v, want the agent's own message", succeeded)
+	}
 }
