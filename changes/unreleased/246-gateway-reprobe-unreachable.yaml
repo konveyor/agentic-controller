@@ -1,0 +1,6 @@
+kind: bugfix
+description: >
+  A Gateway that lands on EndpointUnreachable is probed again every minute
+  instead of staying failed until its spec or credential changes, so a Gateway
+  applied before the service it points at has finished rolling out recovers on
+  its own.
