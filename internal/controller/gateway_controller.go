@@ -25,6 +25,7 @@ import (
 	"hash"
 	"slices"
 	"strings"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -97,6 +98,10 @@ const (
 	reasonConnectionFailed     = "ConnectionFailed"
 	reasonAuthenticationFailed = "AuthenticationFailed"
 	reasonEndpointUnreachable  = "EndpointUnreachable"
+
+	// reasonVerifying is the Ready-condition reason while a verification Job
+	// is outstanding.
+	reasonVerifying = "Verifying"
 
 	// reasonVerificationSkipped marks a Gateway the controller deliberately
 	// did not probe because its provider exposes no OpenAI-compatible surface
@@ -245,9 +250,19 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// Step 2b: If already verified (or failed) for the current generation and
-	// the credential it was verified against, skip re-verification.
+	// the credential it was verified against, skip re-verification. An
+	// unreachable endpoint is the exception: it says nothing about the
+	// Gateway itself, only that the service was not answering when probed
+	// (typically because it was applied alongside the Gateway and had not
+	// rolled out yet), so it is probed again once the retry interval has
+	// passed (#246).
 	if settled && isTerminalReadyReason(readyCond.Reason) {
-		return ctrl.Result{}, nil
+		if readyCond.Reason != reasonEndpointUnreachable {
+			return ctrl.Result{}, nil
+		}
+		if wait := gatewayReverifyInterval - time.Since(readyCond.LastTransitionTime.Time); wait > 0 {
+			return ctrl.Result{RequeueAfter: wait}, nil
+		}
 	}
 
 	// Clean up verification Jobs from prior generations and prior credentials.
@@ -276,7 +291,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				Type:               ConditionTypeReady,
 				Status:             metav1.ConditionFalse,
 				ObservedGeneration: gateway.Generation,
-				Reason:             "Verifying",
+				Reason:             reasonVerifying,
 				Message:            "Connectivity verification in progress",
 			})
 			return r.patchStatus(ctx, &gateway, original)
@@ -310,6 +325,16 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Reason:             reason,
 			Message:            message,
 		})
+		if reason == reasonEndpointUnreachable {
+			// SetStatusCondition only moves the transition time when Status
+			// flips, and a retried probe stays False. The reprobe wait in
+			// step 2b is measured from this time, so stamp it here or an
+			// old value would send the Gateway straight back to a new probe,
+			// again and again.
+			if cond := meta.FindStatusCondition(gateway.Status.Conditions, ConditionTypeReady); cond != nil {
+				cond.LastTransitionTime = metav1.Now()
+			}
+		}
 
 		// Clean up the completed Job.
 		if err := r.Delete(ctx, &job, client.PropagationPolicy(metav1.DeletePropagationBackground)); client.IgnoreNotFound(err) != nil {
@@ -322,13 +347,20 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Type:               ConditionTypeReady,
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: gateway.Generation,
-			Reason:             "Verifying",
+			Reason:             reasonVerifying,
 			Message:            "Connectivity verification in progress",
 		})
 	}
 
 	return r.patchStatus(ctx, &gateway, original)
 }
+
+// gatewayReverifyInterval is how long a Gateway stays at EndpointUnreachable
+// before the controller probes it again. Long enough that a Gateway whose
+// endpoint is really gone costs one short-lived Job a minute rather than a
+// busy loop, short enough that a service which was still rolling out when
+// the Gateway was applied is picked up without anyone touching the Gateway.
+const gatewayReverifyInterval = time.Minute
 
 // knownProviders is the set of provider identifiers (normalized form) the
 // controller and harness recognize. Providers outside this set still verify
