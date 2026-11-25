@@ -22,7 +22,7 @@
 ARG GOOSE_IMAGE=goose-dist
 
 # --- Goose build stage ---
-FROM golang:1.26 AS goose-builder
+FROM docker.io/library/golang:1.26 AS goose-builder
 
 # Goose CLI build deps
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
